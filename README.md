@@ -12,7 +12,9 @@ The repository is extensible: anyone can write a driver, inside or outside it, a
 
 sluis hosts the drivers as building-block actors; session and ritueel link them in-process.
 
-Status: being set up. The extraction plan is written, the scaffolding (build, tests, CI, release flow) is in place, and the first library has moved: [common](common/README.md), the types every port speaks (`Refusal`, `IndexEntry`). No port or driver has moved yet.
+Status: being set up. The extraction plan is written, the scaffolding (build, tests, CI, release flow) is in place, and the first library has moved: [common](common/README.md), the types every port speaks (`Refusal`, `IndexEntry`).
+
+The key port has moved: [key](key/README.md), its [conformance kit](key/conformance/README.md), the drivers [key/software](key/software/README.md) and [key/yubikeypiv](key/yubikeypiv/README.md), and the small libraries [key/slotplan](key/slotplan/README.md) and [key/pinrelease](key/pinrelease/README.md).
 
 ## Documents
 
@@ -27,7 +29,9 @@ The environment is [devbox](https://www.jetify.com/devbox) (`devbox shell`, or d
 | Recipe | What it does |
 | --- | --- |
 | `just check` | everything CI runs |
+| `just go-card` | the card driver built, vetted, linted and tested with its build tag `atoom_card` (cgo, libpcsclite or the PC/SC framework) |
 | `just build`, `just test` | every Go module (from `go.work`) and the Cargo workspace |
+| `just conformance` | builds each conformance kit and runs it against every driver that serves its thin main on a socket |
 | `just lint` | golangci-lint, rustfmt and Clippy, `buf lint`, shellcheck, actionlint |
 | `just gen`, `just gen-check` | generate the code of every port from its proto files; fail when it is not current |
 | `just check-isolation` | the dependency rules: no driver requires another driver, a port requires only the runtimes |
