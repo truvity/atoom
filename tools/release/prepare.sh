@@ -54,6 +54,19 @@ for dir in $libs; do
     done < <(jq -r '.Replace[]? | select(.Old.Path | startswith("github.com/truvity/atoom/")) | .Old.Path' <<<"$json")
 done
 
+# 2b. go.work resolves the siblings at the new version to their directories: the release PR requires a version whose tag does not exist
+# yet, and a workspace does not look a module up that one of its replace lines names. Before the first release the siblings are required at
+# v0.0.0 and go.work replaces that version the same way. These are replace lines of go.work, never of a go.mod.
+if [ -f go.work ]; then
+    while IFS= read -r old; do
+        [ -n "$old" ] || continue
+        go work edit -dropreplace="$old"
+    done < <(go work edit -json | jq -r '.Replace[]? | select(.Old.Path | startswith("github.com/truvity/atoom/")) | select(.Old.Version != "") | .Old.Path + "@" + .Old.Version')
+    for dir in $libs; do
+        go work edit -replace="$(module_path "$dir")@v$version=./$dir"
+    done
+fi
+
 # 3. The changelog: which libraries changed since the last release. A library's own files are those below its directory that no
 # nested library owns.
 libdirs=$( { echo "$libs"; git ls-files -- '*/Cargo.toml' | sed 's#/Cargo.toml$##' | grep -v -E '^tools(/|$)'; } | sort -u | sed '/^$/d')
