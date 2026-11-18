@@ -15,6 +15,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -29,6 +30,16 @@ import (
 	"github.com/truvity/atoom/key/yubikeypiv/internal/card"
 	"github.com/truvity/atoom/key/yubikeypiv/internal/card/cardtest"
 )
+
+// skipUnlessLinux skips a test that serves the unlock service. The driver can be unlocked only on Linux: it holds the PIN in locked
+// memory (mlock, MADV_DONTDUMP) and reads the peer's uid off the admin socket (SO_PEERCRED), and elsewhere it starts and stays locked
+// (pinmem_other.go, peercred_other.go). The tests that need no unlock run everywhere.
+func skipUnlessLinux(t *testing.T) {
+	t.Helper()
+	if runtime.GOOS != "linux" {
+		t.Skip("SKIP: the driver can be unlocked only on Linux (locked memory, SO_PEERCRED); on " + runtime.GOOS + " it stays locked")
+	}
+}
 
 // shortDir returns a short directory: a Unix socket path holds about 108 bytes.
 func shortDir(t *testing.T) string {
@@ -94,6 +105,7 @@ type runResult struct {
 // a test that expects the driver to exit passes false and reads the result itself.
 func startRun(t *testing.T, c *cardtest.Card, environment string, allowAdmin func(uint32) bool, opts yubikeypiv.Options, strict bool) (running, *runResult) {
 	t.Helper()
+	skipUnlessLinux(t)
 	opts.Environment, opts.Serial, opts.Open = environment, c.SerialNo, c.Opener()
 	if opts.Boundary == "" {
 		opts.Boundary = "test"
@@ -644,6 +656,7 @@ func TestAnImportedKeyIsRefusedAndNeverReplaced(t *testing.T) {
 }
 
 func TestAnUnpluggedCardWipesThePINAndEndsTheDriver(t *testing.T) {
+	skipUnlessLinux(t)
 	c := cardtest.New()
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
