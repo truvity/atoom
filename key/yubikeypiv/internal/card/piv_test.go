@@ -25,7 +25,7 @@ func TestTheVerifiedAnswerIsTheTextOfPivGo(t *testing.T) {
 			t.Fatalf("%v is not a verified card", e)
 		}
 	}
-	out, err := exec.Command("go", "list", "-m", "-f", "{{.Dir}}", "github.com/go-piv/piv-go/v2").Output() //nolint:gosec // fixed arguments
+	out, err := exec.Command("go", "list", "-m", "-f", "{{.Dir}}", "github.com/go-piv/piv-go/v2").Output()
 	if err != nil || len(out) == 0 {
 		t.Skip("piv-go's source is not at hand")
 	}
