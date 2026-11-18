@@ -12,12 +12,29 @@ The repository is extensible: anyone can write a driver, inside or outside it, a
 
 sluis hosts the drivers as building-block actors; session and ritueel link them in-process.
 
-Status: being set up. The extraction plan is written; no code has moved yet.
+Status: being set up. The extraction plan is written and the scaffolding (build, tests, CI, release flow) is in place; no port or driver has moved yet.
 
 ## Documents
 
 - [The extraction plan](docs/plan.md): the design principle, what moves out of sluis and in which order, languages, versioning and releases, how session and ritueel adopt it, the research that moves here, and the open questions.
+- [Releasing](docs/release.md): how a release is made, step by step, and what the repository owner sets before the first tag.
 - [Decision records](docs/decisions/README.md): purpose and name; ports and drivers over ConnectRPC; libraries with thin dependencies; multi-architecture; one version; research lives here; release management.
+
+## Development
+
+The environment is [devbox](https://www.jetify.com/devbox) (`devbox shell`, or direnv through `.envrc`); every command below is a [Justfile](Justfile) recipe, run as `devbox run -- just <recipe>`.
+
+| Recipe | What it does |
+| --- | --- |
+| `just check` | everything CI runs |
+| `just build`, `just test` | every Go module (from `go.work`) and the Cargo workspace |
+| `just lint` | golangci-lint, rustfmt and Clippy, `buf lint`, shellcheck, actionlint |
+| `just gen`, `just gen-check` | generate the code of every port from its proto files; fail when it is not current |
+| `just check-isolation` | the dependency rules: no driver requires another driver, a port requires only the runtimes |
+| `just check-versions` | every pinned runtime agrees with [versions.yaml](versions.yaml) |
+| `just release-prepare X.Y.Z`, `just release-tag X.Y.Z --dry-run`, `just release-rehearsal` | the release flow, see [docs/release.md](docs/release.md) |
+
+CI runs on GitHub-hosted runners for linux/amd64, linux/arm64 and macOS (arm64); the one required check is `check`.
 
 ## Licence
 

@@ -1,0 +1,10 @@
+go 1.27.0
+
+toolchain go1.27.4
+
+// Every Go module of the repository, listed explicitly (docs/plan.md, section 5). Development only: a consumer resolves the
+// modules through their own go.mod files and the tags of one release.
+use (
+	./common
+	./tools
+)

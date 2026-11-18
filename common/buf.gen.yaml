@@ -1,0 +1,12 @@
+version: v2
+clean: true
+managed:
+  enabled: true
+  override:
+    - file_option: go_package_prefix
+      value: github.com/truvity/atoom/common/gen
+plugins:
+  # protoc-gen-go comes from devbox.
+  - local: protoc-gen-go
+    out: common/gen
+    opt: paths=source_relative

@@ -1,0 +1,116 @@
+# The continuous integration of atoom (decision 0004, docs/plan.md step 0). It judges pull requests and master, and never publishes.
+#
+# `check` is the one aggregate job and the required status check of the repository: it fails when any other job fails, is cancelled or
+# is skipped, so that adding a job here (or a library to the matrix) needs no change in the branch rules.
+#
+# The libraries are found, not listed: the Go modules come from go.work and the Rust crates from the Cargo workspace (`just go-modules`,
+# `cargo ... --workspace`), so a new library is built and tested on every architecture without editing this file.
+name: CI
+
+on:
+  pull_request:
+  merge_group:
+  push:
+    branches: [master]
+
+permissions:
+  contents: read
+
+# A pull request run cancels the run it supersedes. A push to master never cancels, and never shares a group with the commit before
+# it: the release gate needs a finished, green run on the commit it publishes.
+concurrency:
+  group: ci-${{ github.event_name == 'pull_request' && github.ref || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  # Every library builds and passes its tests on linux/amd64, linux/arm64 and darwin (arm64), each on a runner of its own: nothing is
+  # cross-compiled and nothing runs under QEMU (decision 0004). The runners are GitHub-hosted, free for a public repository.
+  build-test:
+    name: build and test (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, ubuntu-24.04-arm, macos-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: truvity/ci-actions/setup-devbox@82e404675ef3f826755e2939d1072cddcd07ed26 # v3.9.0
+      - name: Show the machine
+        run: uname -sm
+      - run: devbox run -- just build test conformance
+
+  # Format and lint: Go, Rust, the proto files, the shell scripts and the workflows. The result does not depend on the architecture.
+  lint:
+    name: lint (Go, Rust, proto, shell, workflows)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: truvity/ci-actions/setup-devbox@82e404675ef3f826755e2939d1072cddcd07ed26 # v3.9.0
+      - run: devbox run -- just lint
+
+  # The contracts and the rules about them: the generated code is current, no breaking change since the last release goes unnoticed,
+  # no library requires another driver, and every pinned runtime agrees with versions.yaml.
+  contracts:
+    name: contracts and dependency rules
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # `buf breaking` compares with the last release tag.
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: truvity/ci-actions/setup-devbox@82e404675ef3f826755e2939d1072cddcd07ed26 # v3.9.0
+      - run: devbox run -- just gen-check proto-breaking check-isolation check-versions
+
+  # Licences of the Rust dependencies, and known advisories in the Go and Rust dependencies.
+  supply:
+    name: supply chain (licences, advisories)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: truvity/ci-actions/setup-devbox@82e404675ef3f826755e2939d1072cddcd07ed26 # v3.9.0
+      - run: devbox run -- just check-licenses check-advisories
+
+  # The rehearsal of the release flow on a throw-away copy with fixture libraries: release-prepare, release-tag (a dry run, and a real
+  # run with an unsigned tag in the copy), the tag verification, and the isolation check on a deliberately wrong dependency. It makes
+  # no tag in this repository.
+  release-rehearsal:
+    name: release rehearsal
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: truvity/ci-actions/setup-devbox@82e404675ef3f826755e2939d1072cddcd07ed26 # v3.9.0
+      - run: devbox run -- just release-rehearsal
+
+  # The one required check. It passes only when every job above succeeded: a failed, cancelled or skipped job fails it.
+  check:
+    name: check
+    if: ${{ always() }}
+    needs: [build-test, lint, contracts, supply, release-rehearsal]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Every job succeeded
+        env:
+          RESULTS: ${{ toJSON(needs) }}
+        run: |
+          set -euo pipefail
+          echo "$RESULTS" | jq -r 'to_entries[] | "\(.key): \(.value.result)"'
+          bad=$(echo "$RESULTS" | jq -r '[to_entries[] | select(.value.result != "success") | .key] | join(", ")')
+          if [ -n "$bad" ]; then
+            echo "::error::not successful: $bad"
+            exit 1
+          fi
