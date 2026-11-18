@@ -1,0 +1,30 @@
+[package]
+name = "atoom-store-conformance"
+description = "The conformance kit of the item port: the suite every item driver must pass, run through the driver's ConnectRPC endpoint (library and the binary store-conformance), and the rules the Rust engines share."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+[lib]
+name = "atoom_store_conformance"
+
+[[bin]]
+name = "store-conformance"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = "1"
+atoom-common = { path = "../../common" }
+atoom-socket = { path = "../../socket" }
+atoom-store = { path = ".." }
+buffa-types = { version = "=0.9.2", features = ["json"] }
+clap = { version = "4", features = ["derive"] }
+connectrpc = { version = "=0.9.1", default-features = false, features = ["json", "gzip", "client", "server"] }
+futures = "0.3"
+tokio = { version = "1", features = ["rt-multi-thread", "time", "sync", "macros"] }

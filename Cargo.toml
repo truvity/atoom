@@ -4,6 +4,11 @@
 resolver = "3"
 members = [
   "common",
+  "socket",
+  "store",
+  "store/conformance",
+  "store/memory",
+  "store/rqlite",
 ]
 
 [workspace.package]

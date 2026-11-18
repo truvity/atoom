@@ -1,0 +1,49 @@
+[package]
+name = "atoom-store-rqlite"
+description = "The rqlite driver of the item port: the item contract over rqlite's HTTP API. A library (the ConnectRPC handler, the sweeper) and the thin main store-rqlite."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+[features]
+# The command-line flags of the driver (clap): what the thin main reads, and what a host adds to its own command line. A consumer
+# that links the library and builds its own settings turns the default features off.
+default = ["cli"]
+cli = ["dep:clap"]
+
+[lib]
+name = "atoom_store_rqlite"
+
+[[bin]]
+name = "store-rqlite"
+path = "src/main.rs"
+required-features = ["cli"]
+
+[dependencies]
+anyhow = "1"
+atoom-common = { path = "../../common" }
+atoom-socket = { path = "../../socket" }
+atoom-store = { path = ".." }
+# The rules every Rust engine shares (keys, page sizes, timestamps, the checks of a Transact). The suite itself is a test of this crate.
+atoom-store-conformance = { path = "../conformance" }
+base64 = "0.22"
+bytes = "1"
+clap = { version = "4", features = ["derive", "string"], optional = true }
+connectrpc = { version = "=0.9.1", default-features = false, features = ["json", "gzip", "client", "server"] }
+futures = "0.3"
+http = "1"
+http-body-util = "0.1"
+hyper-util = { version = "0.1", features = ["client-legacy", "http1", "tokio"] }
+serde_json = "1"
+tokio = { version = "1", features = ["rt-multi-thread", "net", "signal", "time", "macros", "sync"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+[dev-dependencies]
+tempfile = "3"

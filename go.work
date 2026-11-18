@@ -6,5 +6,10 @@ toolchain go1.27.4
 // modules through their own go.mod files and the tags of one release.
 use (
 	./common
+	./store
 	./tools
 )
+
+// A sibling is required at v0.0.0 until the first release, and a workspace does not resolve that requirement by itself (the module
+// graph still asks for the version). One line per library that another requires; `just release-prepare` sets the real version.
+replace github.com/truvity/atoom/common v0.0.0 => ./common

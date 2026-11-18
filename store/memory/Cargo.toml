@@ -1,0 +1,35 @@
+[package]
+name = "atoom-store-memory"
+description = "The memory driver of the item port: the item contract over a map under a mutex, for tests and for a consumer that needs no backend. A library (the handler) and the thin main store-memory."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+[lib]
+name = "atoom_store_memory"
+
+[[bin]]
+name = "store-memory"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = "1"
+atoom-common = { path = "../../common" }
+atoom-socket = { path = "../../socket" }
+atoom-store = { path = ".." }
+# The rules every Rust engine shares (keys, page sizes, timestamps, the checks of a Transact). The suite itself is a test of this crate.
+atoom-store-conformance = { path = "../conformance" }
+clap = { version = "4", features = ["derive"] }
+connectrpc = { version = "=0.9.1", default-features = false, features = ["json", "gzip", "client", "server"] }
+futures = "0.3"
+tokio = { version = "1", features = ["rt-multi-thread", "time", "sync", "macros", "signal"] }
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+[dev-dependencies]
+tempfile = "3"

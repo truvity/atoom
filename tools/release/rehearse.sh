@@ -124,7 +124,9 @@ tag_for_real() {
 expect_ok "tag on master" tag_for_real 0.1.0
 contains "it names the library pushes first" "$out" "git push origin refs/tags/common/v0.1.0"
 contains "it names the root push last" "$out" "git push origin refs/tags/v0.1.0"
-if [ "$(git_ tag --list 'v0.1.0' '*/v0.1.0' | wc -l)" -eq 5 ]; then ok "five tags were made"; else no "the set is not five tags"; fi
+# The root tag and one per Go library of the tree (the fixtures and the libraries that have really moved; the tooling is not one).
+want=$(( 1 + $(cd "$repo" && go work edit -json | jq '[.Use[].DiskPath | select(. != "./tools")] | length') ))
+if [ "$(git_ tag --list 'v0.1.0' '*/v0.1.0' | wc -l)" -eq "$want" ]; then ok "$want tags were made"; else no "the set is not $want tags"; fi
 expect_ok "verify-tags on the set" run_in_repo tools/release/verify-tags.sh v0.1.0
 git_ tag -d key/awskms/v0.1.0 >/dev/null
 expect_fail "verify-tags with a missing tag" run_in_repo tools/release/verify-tags.sh v0.1.0
@@ -148,8 +150,7 @@ printf 'require github.com/aws/aws-sdk-go-v2 v1.0.0\n' >>"$repo/key/go.mod"
 expect_fail "isolation on a port that requires a backend SDK" "$tmp/isolation" -root "$repo"
 contains "names the SDK" "$out" "it requires github.com/aws/aws-sdk-go-v2"
 git_ checkout -q -- key/go.mod
-printf 'module github.com/truvity/atoom/store\n\ngo 1.27.0\n' >"$repo/store.go.mod.tmp"
-mkdir "$repo/store" && mv "$repo/store.go.mod.tmp" "$repo/store/go.mod"
+mkdir "$repo/orphan" && printf 'module github.com/truvity/atoom/orphan\n\ngo 1.27.0\n' >"$repo/orphan/go.mod"
 expect_fail "isolation on a module that go.work does not list" "$tmp/isolation" -root "$repo"
 contains "names the missing go.work line" "$out" "go.work does not list"
 
