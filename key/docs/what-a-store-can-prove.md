@@ -1,0 +1,47 @@
+# What a key store can prove
+
+*Copied from [truvity/ritueel](https://github.com/truvity/ritueel) `main` at commit `a569f9366c0bef69e376db2ae25db8808336a875`, file `docs/learn/what-a-store-can-prove.md`, with the site markup removed (the front matter became the title, the figures are left out). ritueel keeps its copy until it is restarted. Links that start with a slash point to ritueel's own site and are not part of this repository.*
+
+*Design phase: this page teaches the model. The checks it describes are planned: the cloud store's for M2 ([issue #12](https://github.com/truvity/ritueel/issues/12)) and the card checks that gate a ceremony for M6 (the read-only check and the card files come with M2; [issue #11](https://github.com/truvity/ritueel/issues/11)); the rule they follow is in [record 0002](../decisions/0002-where-a-key-lives.md).*
+
+Someone tells you a root key is "safe on a hardware token", or "in the cloud, locked down". How would you know? A claim is not evidence, and a root is the one key where being wrong is expensive. This page is about what each kind of key store can show, so you can tell a claim from a proof.
+
+It sits in the middle of [the custody chain](/learn/custody-chain/): the question "where does this key live?" is answered here, and the ceremony that asks it is in [What a ceremony is](/learn/ceremonies/).
+
+## Three kinds of evidence
+
+| Kind | Example | What it shows | What it does not show |
+|---|---|---|---|
+| **Attested** | A YubiKey's PIV or OpenPGP applet | A certificate chain, ending at the maker's published root, says: this key was made inside this device, with this firmware. For a PIV key it also gives the PIN and touch policy; for an OpenPGP card key the encoding is not yet measured, so ritueel enforces neither from it. | That the maker is honest, or that the computer in front of you is. |
+| **Read from the service** | AWS KMS | You ask the service for the key's description and its policy, and read who is allowed to sign. The audit trail records every use. | That the key was made in a hardware module: the service gives no such statement. |
+| **None** | A key file, a password manager, the system keyring, a token that cannot attest | Nothing. The key could have been made anywhere, and copied anywhere. | Everything. |
+
+## Why a key made elsewhere can be told apart
+
+A key that was *imported* into a token can be copied before it went in. A key *generated* on the token cannot, because it never existed outside. The token signs a statement about the second kind only: an imported key has no attestation, which is how you tell them apart. That is why ritueel imports no key ([principle 1](/principles/)), apart from the two exceptions of [record 0002](../decisions/0002-where-a-key-lives.md), rule 2, and why a root whose key cannot be attested is refused.
+
+The chain is checked against the maker's root, which ritueel carries and refreshes ([the attestation bundle](/reference/cards/#the-attestation-bundle)), and never against a certificate the token or the requester hands over by itself: a root inside the evidence is not trusted ([principle 4](/principles/)). If the chain cannot be checked, ritueel reports that the check did not run. It never reports it as passed.
+
+## What the cloud gives instead
+
+A cloud key service cannot attest where its key was made, but it can tell you, truthfully and every time you ask, who may use the key. For a root, ritueel reads three things from the service and compares them with what it expects: the key's description (its type, its Region, that it is enabled), its policy (that one role may sign anything new, and only digests), and its replica. If the policy changed since the last ceremony, you are shown the change before you confirm anything ([The cloud root](/reference/kms-root/)).
+
+## What the kind allows a key store to hold
+
+| Kind | May hold |
+|---|---|
+| Attested | Roots, intermediates and subkeys. An OpenPGP-card key is refused for an X.509 intermediate and for an SSH CA key, because its attestation shows no PIN or touch rule ([record 0002](../decisions/0002-where-a-key-lives.md), rule 7). |
+| Read from the service | Roots, intermediates and subkeys. |
+| None | Test roots, drills and development; a person's own key; never a root that other people rely on. |
+
+A new device or service is judged the same way before it joins: what does it prove? A token that cannot attest has no evidence, and so holds no root, whatever else it does well ([Which keys to buy](/learn/which-keys-to-buy/#the-evidence-gap-in-plain-words) gives the example, read 2026-11-01).
+
+## What evidence cannot fix
+
+- **A lying workstation.** Evidence says where a key lives, not what you are about to sign. The plan and its digest fix what is signed, but a compromised workstation can show the right digest and still ask for one more signature. On the workstation a touch for every signature on a root card (a cloud key has no touch, and its audit trail records every signature), the count stated in the plan and no retry bound that; the result checked on a second device shows afterwards what was signed ([record 0005](../decisions/0005-a-ceremony-and-where-it-runs.md), rules 23 to 25).
+- **A stolen card and its PIN.** The key is where it should be, and in the wrong hands. Revocation answers that ([Revoke](/learn/revoke/)).
+- **The maker.** You trust the maker's root, as you trust any root. Compare it, pin it, and refresh it by reviewed change.
+
+## Drill
+
+On two rehearsal cards, make a key on one and import a key into a slot of the other with the maker's tool. Ask each for its attestation certificate. Result: the first answers, the second refuses. Then run the same ceremony with ritueel on each (when `apply` exists) and read the refusal.

@@ -14,6 +14,8 @@ sluis hosts the drivers as building-block actors; session and ritueel link them 
 
 Status: being set up. The extraction plan is written, the scaffolding (build, tests, CI, release flow) is in place, and the first libraries have moved: [common](common/README.md), the types every port speaks (`Refusal`, `IndexEntry`), and the item port [store](store/README.md) with its conformance kit and two drivers, [rqlite](store/rqlite/README.md) and [memory](store/memory/README.md), over a small plain host, [socket](socket/README.md), and the source port [source](source/README.md) (config and secret sources) with its conformance kit and two drivers, [file](source/file/README.md) and [credential](source/credential/README.md).
 
+The key port has moved: [key](key/README.md), its [conformance kit](key/conformance/README.md), the drivers [key/software](key/software/README.md) and [key/yubikeypiv](key/yubikeypiv/README.md), and the small libraries [key/slotplan](key/slotplan/README.md) and [key/pinrelease](key/pinrelease/README.md).
+
 ## Documents
 
 - [The extraction plan](docs/plan.md): the design principle, what moves out of sluis and in which order, languages, versioning and releases, how session and ritueel adopt it, the research that moves here, and the open questions.
@@ -27,7 +29,9 @@ The environment is [devbox](https://www.jetify.com/devbox) (`devbox shell`, or d
 | Recipe | What it does |
 | --- | --- |
 | `just check` | everything CI runs |
+| `just go-card` | the card driver built, vetted, linted and tested with its build tag `atoom_card` (cgo, libpcsclite or the PC/SC framework) |
 | `just build`, `just test` | every Go module (from `go.work`) and the Cargo workspace |
+| `just conformance` | builds each conformance kit and runs it against every driver that serves its thin main on a socket |
 | `just lint` | golangci-lint, rustfmt and Clippy, `buf lint`, shellcheck, actionlint |
 | `just conformance` | build each conformance kit once and run it against every driver built on this machine, through the driver's socket |
 | `just gen`, `just gen-check` | generate the code of every port from its proto files; fail when it is not current |
