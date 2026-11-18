@@ -56,6 +56,7 @@ jobs:
         run: devbox run -- just go-card
         env:
           ATOOM_CARD_REQUIRED: "1"
+          ATOOM_CARD_DEBUG: "1"
           ATOOM_CARD_CC: /usr/bin/gcc
           ATOOM_CARD_PKG_CONFIG: /usr/bin/pkg-config
       - name: The card driver with the tag atoom_card (macOS)
