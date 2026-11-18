@@ -119,7 +119,7 @@ conformance:
 # The dependency rules (docs/plan.md, section 5; decision 0003): no driver requires another driver, a port requires only the ConnectRPC
 # and Protobuf runtimes, every go.mod is in go.work and every crate in the workspace. It fails on a deliberately wrong dependency
 # (the rehearsal proves it).
-check-isolation:
+check-isolation: rust-toolchain
     go run ./tools/isolation
 
 # Every file that spells a pinned runtime agrees with versions.yaml.
