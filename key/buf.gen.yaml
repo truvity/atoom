@@ -10,7 +10,7 @@ plugins:
   - local: protoc-gen-go
     out: key/gen
     opt: paths=source_relative
-  # protoc-gen-connect-go runs as a Go tool (tools/go.mod), so its version is the one that go.mod pins: the ConnectRPC runtime's.
-  - local: [go, tool, protoc-gen-connect-go]
+  # protoc-gen-connect-go runs as a Go tool of tools/go.mod, so its version is the one that file pins.
+  - local: [sh, -c, "cd tools && GOWORK=off exec go tool protoc-gen-connect-go"]
     out: key/gen
     opt: paths=source_relative
