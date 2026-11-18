@@ -5,6 +5,7 @@ modules:
   - path: common/proto
   - path: source/proto
   - path: store/proto
+  - path: key/proto
 lint:
   use:
     - STANDARD
