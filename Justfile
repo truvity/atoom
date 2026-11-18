@@ -69,17 +69,11 @@ go-card:
     go build -tags atoom_card -o /dev/null ./...
     go vet -tags atoom_card ./...
     golangci-lint run --config "$root/.golangci.yaml" --build-tags atoom_card ./...
-    # With the host's compiler the test binaries link the host's libc, and devbox's library path would load its own libc under them (symbol
-    # lookup error), so they run without the library path.
-    if [ -n "${ATOOM_CARD_DEBUG:-}" ]; then
-        go test -c -tags atoom_card -o "${TMPDIR:-/tmp}/card-debug.test" .
-        env | grep -E '^(LD_|LIBRARY_PATH|CGO_|CC=|PKG_CONFIG)' || true
-        readelf -d "${TMPDIR:-/tmp}/card-debug.test" | grep -E 'NEEDED|RPATH|RUNPATH' || true
-        readelf -l "${TMPDIR:-/tmp}/card-debug.test" | grep -i interpreter || true
-    fi
-    exec_flag=()
-    if [ -n "${ATOOM_CARD_CC:-}" ]; then exec_flag=(-exec "env -u LD_LIBRARY_PATH -u LD_PRELOAD"); fi
-    go test -tags atoom_card -race -count=1 -v "${exec_flag[@]}" ./... 2>&1 \
+    # With the host's compiler the linker must be the host's too: gcc finds `ld` on the PATH, and devbox's wrapper would put its own glibc in
+    # the RUNPATH of the test binaries, which the host's loader cannot use (symbol lookup error at run time). So the host's directory comes first.
+    test_path=$PATH
+    if [ -n "${ATOOM_CARD_CC:-}" ]; then test_path="$(dirname "$ATOOM_CARD_CC"):$PATH"; fi
+    PATH=$test_path go test -tags atoom_card -race -count=1 -v ./... 2>&1 \
       | awk '!/^=== (RUN|PAUSE|CONT|NAME)/ && !/^[[:space:]]*--- PASS/ && !/^PASS$/ && !/^no test files$/' ; test "${PIPESTATUS[0]}" -eq 0
 
 # Build the Cargo workspace. A crate that builds only on Linux (the manifest says so: `[package.metadata.atoom] os`) is left out on any
