@@ -1,0 +1,32 @@
+[package]
+name = "atoom-index-conformance"
+description = "The conformance kit of the index port: the suite every index driver must pass, run through the driver's ConnectRPC endpoints (library and the binary index-conformance)."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+[lib]
+name = "atoom_index_conformance"
+
+[[bin]]
+name = "index-conformance"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = "1"
+atoom-index = { path = ".." }
+atoom-common = { path = "../../common" }
+atoom-socket = { path = "../../socket" }
+buffa = { version = "=0.9.2", features = ["json"] }
+clap = { version = "4", features = ["derive"] }
+connectrpc = { version = "=0.9.1", default-features = false, features = ["json", "gzip", "client", "server"] }
+tokio = { version = "1", features = ["rt-multi-thread", "time", "macros"] }
+
+[dev-dependencies]
+tempfile = "3"

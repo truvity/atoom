@@ -1,0 +1,48 @@
+[package]
+name = "atoom-index-sqlite"
+description = "The sqlite driver of the index port: the write side (cursor, rows) and the read side (search) over one SQLite file with FTS5. A library (the two ConnectRPC handlers, Write and Read) and the thin main index-sqlite."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+[features]
+# The command-line flags and the sockets of the thin main (clap, atoom-socket): what index-sqlite needs and a library consumer does not.
+# A consumer that mounts the routers in a host of its own turns the default features off.
+default = ["cli"]
+cli = ["dep:clap", "dep:atoom-socket", "dep:tracing-subscriber", "tokio/rt-multi-thread", "tokio/macros", "tokio/signal"]
+
+[lib]
+name = "atoom_index_sqlite"
+
+[[bin]]
+name = "index-sqlite"
+path = "src/main.rs"
+required-features = ["cli"]
+
+[dependencies]
+anyhow = "1"
+atoom-common = { path = "../../common" }
+atoom-index = { path = ".." }
+atoom-socket = { path = "../../socket", optional = true }
+buffa = { version = "=0.9.2", features = ["json"] }
+clap = { version = "4", features = ["derive", "string"], optional = true }
+connectrpc = { version = "=0.9.1", default-features = false, features = ["json", "gzip", "server"] }
+# SQLite is built in (the `bundled` feature), with FTS5; the database engine is not a cryptographic library or a parser of a protocol.
+rusqlite = { version = "0.41", default-features = false, features = ["bundled"] }
+rustix = { version = "1", features = ["process"] }
+# The backend suite (`suite::run_temp`) makes a temporary directory.
+tempfile = "3"
+tokio = { version = "1", features = ["rt", "sync", "time"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"], optional = true }
+
+[dev-dependencies]
+atoom-index-conformance = { path = "../conformance" }
+atoom-socket = { path = "../../socket" }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "time"] }

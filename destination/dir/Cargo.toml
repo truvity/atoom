@@ -1,0 +1,47 @@
+[package]
+name = "atoom-destination-dir"
+description = "The dir driver of the destination port: the destination contract over a local directory that a forwarder serves as static files (Linux and macOS). A library (Directory, and the ConnectRPC handler through the kit's Service) and the thin main destination-dir."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+[features]
+# The command-line flags and the socket of the thin main (clap, atoom-socket): what destination-dir needs and a library consumer does
+# not. A consumer that mounts the router in a host of its own turns the default features off.
+default = ["cli"]
+cli = ["dep:clap", "dep:atoom-socket", "dep:tracing-subscriber", "tokio/rt-multi-thread", "tokio/macros", "tokio/signal"]
+
+[lib]
+name = "atoom_destination_dir"
+
+[[bin]]
+name = "destination-dir"
+path = "src/main.rs"
+required-features = ["cli"]
+
+[dependencies]
+anyhow = "1"
+# The Destination trait, the service that serves any driver of it, and the suite.
+atoom-destination-conformance = { path = "../conformance" }
+atoom-socket = { path = "../../socket", optional = true }
+clap = { version = "4", features = ["derive", "string"], optional = true }
+rustix = { version = "1", features = ["process", "fs"] }
+serde_json = "1"
+# The backend suite (`suite::run_temp`) makes temporary directories.
+tempfile = "3"
+tokio = { version = "1", features = ["rt", "time"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"], optional = true }
+
+[dev-dependencies]
+atoom-common = { path = "../../common" }
+atoom-destination = { path = ".." }
+atoom-socket = { path = "../../socket" }
+connectrpc = { version = "=0.9.1", default-features = false, features = ["json", "gzip", "client", "server"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "time"] }
