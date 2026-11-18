@@ -140,7 +140,12 @@ impl Index {
                 m.mode() & 0o7777
             );
         }
-        let path = dir.join(FILE);
+        // SQLite refuses a path with a symlink in any component when it is told not to follow one, and a system directory can be one (on
+        // macOS /var is a link to /private/var, where a temporary directory is). The directory itself was just looked at with
+        // `symlink_metadata` and is no link, so its resolved path is what SQLite is given; the file in it is still opened with NOFOLLOW.
+        let path = std::fs::canonicalize(dir)
+            .context("resolve the state directory")?
+            .join(FILE);
         let w = Connection::open_with_flags(
             &path,
             OpenFlags::SQLITE_OPEN_READ_WRITE
