@@ -348,6 +348,7 @@ func TestTheResetAtUnlockAndAtStatusAreInTheJournal(t *testing.T) {
 // information line that says the driver held the PIN; a card found logged in with no PIN held is a warning.
 func TestTheResetAtExitIsInTheJournal(t *testing.T) {
 	t.Run("held PIN", func(t *testing.T) {
+		skipUnlessLinux(t) // before the cleanup that expects the unlock
 		j := captureJournal(t)
 		c := cardtest.New()
 		// The cleanups run last in, first out: the driver ends first (startWith), then this check, then the logger is put back.

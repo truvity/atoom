@@ -254,7 +254,7 @@ func (c *pivCard) ResetSession() error {
 	}
 	yk, err := piv.Open(c.reader)
 	if err != nil {
-		return fmt.Errorf("%w: open again after the reset: %v", ErrCardGone, err)
+		return fmt.Errorf("%w: open again after the reset: %v", ErrCardGone, err) //nolint:errorlint // as above
 	}
 	c.yk, c.shut = yk, false
 	return nil
