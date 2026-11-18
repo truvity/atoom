@@ -1,0 +1,33 @@
+[package]
+name = "atoom-blob-fsdir"
+description = "The directory behind the fs blob drivers: the blob port over a local directory, with the write-once create, the pointer put and openat2 for every path (Linux only). A library shared by blob/fs and blob/fsreadonly, which do not require each other."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+[package.metadata.atoom]
+# The operating systems this library builds and runs on. The recipes that build and test the whole workspace leave a library out on
+# any other system (`just rust-skip`), and its README says so.
+os = ["linux"]
+
+[lib]
+name = "atoom_blob_fsdir"
+
+[dependencies]
+anyhow = "1"
+atoom-blob = { path = ".." }
+atoom-common = { path = "../../common" }
+aws-lc-rs = "1"
+connectrpc = { version = "=0.9.1", default-features = false, features = ["json", "gzip", "server"] }
+rustix = { version = "1", features = ["fs", "process"] }
+tokio = { version = "1", features = ["rt"] }
+tracing = "0.1"
+
+[dev-dependencies]
+tempfile = "3"

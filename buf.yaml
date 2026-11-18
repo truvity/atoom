@@ -2,10 +2,12 @@ version: v2
 # One module per port, listed explicitly (docs/plan.md, section 5): a port's contract is <port>/proto/atoom/<port>/v1alpha1/*.proto.
 # The generated code of a port is committed next to it (<port>/gen), made by <port>/buf.gen.yaml (`just gen`).
 modules:
+  - path: blob/proto
   - path: common/proto
   - path: source/proto
   - path: store/proto
   - path: key/proto
+  - path: transport/proto
 lint:
   use:
     - STANDARD
@@ -13,10 +15,13 @@ lint:
     # The item contract names its messages after the contract (ItemGetRequest, ItemGetResponse), as it did in sluis; a rename would
     # change every consumer's spelling for no change on the wire.
     RPC_REQUEST_STANDARD_NAME:
+      # The blob contract's reads are BlobGetRequest and BlobListRequest, as they were in sluis (Create and Put are plain).
+      - blob/proto/atoom/blob/v1alpha1/blob.proto
       - store/proto/atoom/store/v1alpha1/item.proto
       # The source contract's watch request and response are SourceWatchRequest and SourceWatchResponse, as they were in sluis.
       - source/proto/atoom/source/v1alpha1/source.proto
     RPC_RESPONSE_STANDARD_NAME:
+      - blob/proto/atoom/blob/v1alpha1/blob.proto
       - store/proto/atoom/store/v1alpha1/item.proto
       - source/proto/atoom/source/v1alpha1/source.proto
     # The values of the source contract's Watch enum are NONE, NOTIFY and POLL, as they were in sluis; a prefix would rename them in

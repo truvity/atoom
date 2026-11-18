@@ -1,0 +1,14 @@
+# How the spool works
+
+What it does and does not do, for a consumer that links it.
+
+- **Layout.** The directory holds segments `<first seq, 20 digits>.seg`, each a run of frames, and for a segment with acknowledgements a file `<same>.ack` of frames that each hold one acknowledged sequence number. A frame is `len u32 BE | sum [u8; 16] | payload`; the sum is the first 16 bytes of the SHA-384 of the payload. A segment frame holds `seq u64 BE | emitter len u16 BE | emitter | AuditMessage`. The sequence number is the delivery id.
+- **Durable.** `Spool::append` writes one frame and `fdatasync`s the segment before it returns; a segment is `fsync`ed in its directory when it is created or removed. A blocking emit and a non-blocking one take the same path: the spool has no cheaper way to accept a message.
+- **Ordered, at least once.** `Spool::read_from` returns the unacknowledged messages in sequence order. `Spool::ack` records acknowledgements durably, and a segment whose messages are all acknowledged is removed. After a restart the unacknowledged messages come again, under the same ids.
+- **Bounded.** The files of the directory never exceed `Config::limit` (default 256 MiB). A message that does not fit is refused with `unavailable`/`engine` (`Error::Full`); the spool never drops a fact. A segment is closed at `Config::segment` bytes (default 8 MiB). A message is at most 1 MiB encoded and an emitter name at most 255 bytes (`bound`).
+- **Torn tail.** A crash can leave half a frame at the end of the newest segment (or of an `.ack` file). On start the tail is cut at the last frame whose length and sum hold. A bad frame anywhere else is not a torn write: the start is refused.
+- **Poisoned.** A disk failure that leaves the files uncertain makes every call fail with `unavailable` until a restart recovers the directory, and nothing is acknowledged on a basis the spool cannot vouch for.
+- **One spool per directory.** The directory is locked (`flock`) while a spool has it open, so a second spool on it is refused. The directory must be owned by the process and closed to others (mode 0700): it holds records in the clear until the consumer seals them.
+- **One consumer.** `Consume` serves one `Receive` stream at a time (`already_exists`/`taken` for a second); a fresh stream starts from the oldest unacknowledged message, which is how a restart replays. A response carries at most 1024 deliveries (64 when the consumer names none) and about 4 MiB.
+- **Two servers.** `Emit` serves `Emit`, `Consume` serves `Receive` and `Ack`; each answers the others with `unimplemented`/`unsupported`. The thin main serves them on two sockets so that the file mode of each is its own wall.
+- **A consumer that went away** frees its slot when its stream is dropped, and the next `Receive` is served.

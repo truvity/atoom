@@ -1,0 +1,31 @@
+[package]
+name = "atoom-blob-conformance"
+description = "The conformance kit of the blob port: the suite every blob driver must pass, run through the driver's ConnectRPC endpoint (library and the binary blob-conformance)."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+[lib]
+name = "atoom_blob_conformance"
+
+[[bin]]
+name = "blob-conformance"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = "1"
+atoom-blob = { path = ".." }
+atoom-common = { path = "../../common" }
+atoom-socket = { path = "../../socket" }
+clap = { version = "4", features = ["derive"] }
+connectrpc = { version = "=0.9.1", default-features = false, features = ["json", "gzip", "client", "server"] }
+tokio = { version = "1", features = ["rt-multi-thread", "time", "macros"] }
+
+[dev-dependencies]
+tempfile = "3"
