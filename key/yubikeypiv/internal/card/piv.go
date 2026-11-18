@@ -47,7 +47,7 @@ func Open(serial uint32) (Card, error) {
 		yk, err := piv.Open(r)
 		if err != nil {
 			if strings.Contains(err.Error(), "other connections outstanding") {
-				shared = fmt.Errorf("%w: open %q: %v", ErrSharing, r, err)
+				shared = fmt.Errorf("%w: open %q: %v", ErrSharing, r, err) //nolint:errorlint // the cause is for the journal; the sentinel is what callers test
 			}
 			if serial == 0 {
 				if shared != nil {
@@ -84,7 +84,7 @@ type pivCard struct {
 func (c *pivCard) Serial() (uint32, error) {
 	n, err := c.yk.Serial()
 	if err != nil {
-		return 0, fmt.Errorf("%w: %v", ErrCardGone, err)
+		return 0, fmt.Errorf("%w: %v", ErrCardGone, err) //nolint:errorlint // as above
 	}
 	return n, nil
 }
@@ -131,7 +131,7 @@ func (c *pivCard) gone(err error) error {
 		return err
 	}
 	if _, serr := c.yk.Serial(); serr != nil {
-		return fmt.Errorf("%w: %v", ErrCardGone, err)
+		return fmt.Errorf("%w: %v", ErrCardGone, err) //nolint:errorlint // as above
 	}
 	return err
 }
