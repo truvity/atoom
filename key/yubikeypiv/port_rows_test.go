@@ -47,8 +47,8 @@ func bytesFieldsOf(md protoreflect.MessageDescriptor, seen map[protoreflect.Full
 func TestNoAnswerOfTheCardDriverHoldsAPrivateKey(t *testing.T) {
 	allowed := map[string]string{
 		"EnsureResponse.spki_der":                       "a public key",
-		"SignResponse.signature_der":            "a signature",
-		"PublicKeyResponse.spki_der":            "a public key",
+		"SignResponse.signature_der":                    "a signature",
+		"PublicKeyResponse.spki_der":                    "a public key",
 		"EcdhResponse.shared_secret":                    "the agreed secret with a peer's public key, not the key",
 		"AttestResponse.attestation":                    "a certificate",
 		"AttestResponse.attestation_signer":             "a certificate",
