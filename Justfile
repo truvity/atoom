@@ -54,9 +54,10 @@ go-lint:
         (cd "$d" && golangci-lint run --config "$root/.golangci.yaml" ./...)
     done
 
-# Build the Cargo workspace.
+# Build the Cargo workspace. A crate that builds only on Linux (the manifest says so: `[package.metadata.atoom] os`) is left out on any
+# other system, and the run says which (tools/scripts/rust-skip.sh).
 rust-build: rust-toolchain
-    cargo build --workspace --locked
+    cargo build --workspace --locked $(tools/scripts/rust-skip.sh)
 
 # Test the Cargo workspace. The tests of the rqlite driver start a real rqlited (`rqlite-fetch`); on Linux they must run, so a missing
 # binary fails them. rqlite publishes no macOS build, so on macOS they skip, and say so.
@@ -64,12 +65,12 @@ rust-test: rust-toolchain rqlite-fetch
     #!/usr/bin/env bash
     set -euo pipefail
     if [ "$(uname -s)" = Linux ]; then export ATOOM_REQUIRE_RQLITED=1; fi
-    cargo test --workspace --locked
+    cargo test --workspace --locked $(tools/scripts/rust-skip.sh)
 
 # Format check and Clippy over the Cargo workspace.
 rust-lint: rust-toolchain
     cargo fmt --all --check
-    cargo clippy --workspace --all-targets --locked -- -D warnings
+    cargo clippy --workspace --all-targets --locked $(tools/scripts/rust-skip.sh) -- -D warnings
 
 # Lint the proto files of every port.
 proto-lint:
@@ -107,8 +108,8 @@ gen-check: gen
 
 # The conformance kits (a directory <port>/conformance each; a Go module or, for the Rust ports, a crate with the binary
 # <port>-conformance). Each kit is built once and run against every driver built on this architecture, through the driver's socket:
-# `conformance-store` for the item port; the Go kits are step 2's.
-conformance: conformance-store
+# `conformance-store` for the item port, `conformance-source` for the source port; the Go kits are step 2's.
+conformance: conformance-store conformance-source
     #!/usr/bin/env bash
     set -euo pipefail
     kits=$(git ls-files -- '*/conformance/go.mod' | sed 's#/go.mod$##')
@@ -129,6 +130,12 @@ conformance-store: rust-toolchain rqlite-fetch
     set -euo pipefail
     if [ "$(uname -s)" = Linux ]; then export ATOOM_REQUIRE_RQLITED=1; fi
     tools/scripts/conformance-store.sh
+
+# The source-port kit against the file driver and the credential driver, each through the socket of its thin main
+# (tools/scripts/conformance-source.sh). Both drivers are Linux only, so elsewhere it says so and does nothing.
+[private]
+conformance-source: rust-toolchain
+    tools/scripts/conformance-source.sh
 
 # The pinned rqlite release (v10.6.6) for the tests and the conformance run of the rqlite driver: the archive of this machine from the
 # GitHub release, verified against the SHA-256 written here, unpacked to .cache/rqlite/linux-<arch>/ (rqlited and rqlite). Only

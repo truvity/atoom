@@ -1,0 +1,52 @@
+[package]
+name = "atoom-source-file"
+description = "The file driver of the source port: the config source contract over a directory of signed config documents, read with openat2 (Linux only). A library (the ConnectRPC handler) and the thin main source-file."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+[package.metadata.atoom]
+# The operating systems this library builds and runs on. The recipes that build and test the whole workspace leave a library out on
+# any other system (`just rust-skip`), and its README says so.
+os = ["linux"]
+
+[features]
+# The command-line flags and the socket of the thin main (clap, atoom-socket): what source-file needs and a library consumer does not.
+# A consumer that mounts the router in a host of its own turns the default features off.
+default = ["cli"]
+cli = ["dep:clap", "dep:atoom-socket", "dep:tracing-subscriber", "tokio/rt-multi-thread", "tokio/macros", "tokio/signal"]
+
+[lib]
+name = "atoom_source_file"
+
+[[bin]]
+name = "source-file"
+path = "src/main.rs"
+required-features = ["cli"]
+
+[dependencies]
+anyhow = "1"
+atoom-common = { path = "../../common" }
+atoom-socket = { path = "../../socket", optional = true }
+atoom-source = { path = ".." }
+aws-lc-rs = "1"
+clap = { version = "4", features = ["derive", "string"], optional = true }
+connectrpc = { version = "=0.9.1", default-features = false, features = ["json", "gzip", "server"] }
+futures = "0.3"
+rustix = { version = "1", features = ["fs", "process"] }
+# The backend suite (`suite::run_temp`) makes a temporary directory.
+tempfile = "3"
+tokio = { version = "1", features = ["rt", "time"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"], optional = true }
+
+[dev-dependencies]
+atoom-socket = { path = "../../socket" }
+atoom-source-conformance = { path = "../conformance" }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "time"] }

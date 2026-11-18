@@ -1,0 +1,31 @@
+[package]
+name = "atoom-source-conformance"
+description = "The conformance kit of the source port: the suite every source driver must pass, run through the driver's ConnectRPC endpoint (library and the binary source-conformance)."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+[lib]
+name = "atoom_source_conformance"
+
+[[bin]]
+name = "source-conformance"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = "1"
+atoom-common = { path = "../../common" }
+atoom-socket = { path = "../../socket" }
+atoom-source = { path = ".." }
+clap = { version = "4", features = ["derive"] }
+connectrpc = { version = "=0.9.1", default-features = false, features = ["json", "gzip", "client", "server"] }
+tokio = { version = "1", features = ["rt-multi-thread", "time", "macros"] }
+
+[dev-dependencies]
+tempfile = "3"

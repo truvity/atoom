@@ -5,6 +5,10 @@ resolver = "3"
 members = [
   "common",
   "socket",
+  "source",
+  "source/conformance",
+  "source/credential",
+  "source/file",
   "store",
   "store/conformance",
   "store/memory",
