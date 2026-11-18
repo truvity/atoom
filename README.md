@@ -12,7 +12,7 @@ The repository is extensible: anyone can write a driver, inside or outside it, a
 
 sluis hosts the drivers as building-block actors; session and ritueel link them in-process.
 
-Status: being set up. The extraction plan is written, the scaffolding (build, tests, CI, release flow) is in place, and the first libraries have moved: [common](common/README.md), the types every port speaks (`Refusal`, `IndexEntry`), and the item port [store](store/README.md) with its conformance kit and two drivers, [rqlite](store/rqlite/README.md) and [memory](store/memory/README.md), over a small plain host, [socket](socket/README.md).
+Status: being set up. The extraction plan is written, the scaffolding (build, tests, CI, release flow) is in place, and the first libraries have moved: [common](common/README.md), the types every port speaks (`Refusal`, `IndexEntry`), and the item port [store](store/README.md) with its conformance kit and two drivers, [rqlite](store/rqlite/README.md) and [memory](store/memory/README.md), over a small plain host, [socket](socket/README.md), and the source port [source](source/README.md) (config and secret sources) with its conformance kit and two drivers, [file](source/file/README.md) and [credential](source/credential/README.md).
 
 ## Documents
 

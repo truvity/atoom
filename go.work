@@ -6,6 +6,7 @@ toolchain go1.27.4
 // modules through their own go.mod files and the tags of one release.
 use (
 	./common
+	./source
 	./store
 	./tools
 )
