@@ -10,7 +10,7 @@ cd "$(dirname "$0")/../.."
 cargo build --locked -p atoom-transport-conformance -p atoom-transport-spool
 bin=${CARGO_TARGET_DIR:-$PWD/target}/debug
 
-tmp=$(mktemp -d "${TMPDIR:-/tmp}/atoom-conf-transport.XXXXXX")
+tmp=$(mktemp -d "${TMPDIR:-/tmp}/atoom-ct.XXXXXX")
 pids=()
 cleanup() {
     for p in "${pids[@]}"; do kill "$p" 2>/dev/null || true; done
