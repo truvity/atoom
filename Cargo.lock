@@ -85,6 +85,83 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1505bd5d3d116872e7271a6d4e16d81d0c8570876c8de68093a09ac269d8aac0"
 
 [[package]]
+name = "atoom-blob"
+version = "0.0.0"
+dependencies = [
+ "buffa",
+ "buffa-types",
+ "connectrpc",
+ "connectrpc-build",
+ "serde",
+]
+
+[[package]]
+name = "atoom-blob-conformance"
+version = "0.0.0"
+dependencies = [
+ "anyhow",
+ "atoom-blob",
+ "atoom-common",
+ "atoom-socket",
+ "clap",
+ "connectrpc",
+ "tempfile",
+ "tokio",
+]
+
+[[package]]
+name = "atoom-blob-fs"
+version = "0.0.0"
+dependencies = [
+ "anyhow",
+ "atoom-blob",
+ "atoom-blob-conformance",
+ "atoom-blob-fsdir",
+ "atoom-common",
+ "atoom-socket",
+ "clap",
+ "connectrpc",
+ "tempfile",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
+name = "atoom-blob-fsdir"
+version = "0.0.0"
+dependencies = [
+ "anyhow",
+ "atoom-blob",
+ "atoom-common",
+ "aws-lc-rs",
+ "connectrpc",
+ "rustix",
+ "tempfile",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "atoom-blob-fsreadonly"
+version = "0.0.0"
+dependencies = [
+ "anyhow",
+ "atoom-blob",
+ "atoom-blob-conformance",
+ "atoom-blob-fsdir",
+ "atoom-common",
+ "atoom-socket",
+ "clap",
+ "connectrpc",
+ "rustix",
+ "tempfile",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "atoom-common"
 version = "0.0.0"
 dependencies = [
@@ -235,6 +312,53 @@ dependencies = [
  "http-body-util",
  "hyper-util",
  "serde_json",
+ "tempfile",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
+name = "atoom-transport"
+version = "0.0.0"
+dependencies = [
+ "buffa",
+ "buffa-types",
+ "connectrpc",
+ "connectrpc-build",
+ "serde",
+]
+
+[[package]]
+name = "atoom-transport-conformance"
+version = "0.0.0"
+dependencies = [
+ "anyhow",
+ "atoom-common",
+ "atoom-socket",
+ "atoom-transport",
+ "clap",
+ "connectrpc",
+ "futures",
+ "tempfile",
+ "tokio",
+]
+
+[[package]]
+name = "atoom-transport-spool"
+version = "0.0.0"
+dependencies = [
+ "anyhow",
+ "atoom-common",
+ "atoom-socket",
+ "atoom-transport",
+ "atoom-transport-conformance",
+ "aws-lc-rs",
+ "buffa",
+ "clap",
+ "connectrpc",
+ "futures",
+ "rustix",
  "tempfile",
  "tokio",
  "tracing",

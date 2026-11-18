@@ -126,7 +126,9 @@ tag_for_real() {
     (cd "$repo" && GIT_COMMITTER_NAME=rehearsal GIT_COMMITTER_EMAIL=rehearsal@example.invalid ATOOM_TAG_SIGN=-a tools/release/tag.sh "$@")
 }
 expect_ok "tag on master" tag_for_real 0.1.0
-contains "it names the library pushes first" "$out" "git push origin refs/tags/common/v0.1.0"
+# The library tags are in path order, so common is not always the first of them (blob comes before it): the assertion is that it is
+# named in the library push, which lists every library tag followed by a space.
+contains "it names the library pushes first" "$out" "refs/tags/common/v0.1.0 "
 contains "it names the root push last" "$out" "git push origin refs/tags/v0.1.0"
 # The root tag and one per Go library of the tree (the fixtures and the libraries that have really moved; the tooling is not one).
 want=$(( 1 + $(cd "$repo" && go work edit -json | jq '[.Use[].DiskPath | select(. != "./tools")] | length') ))
