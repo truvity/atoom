@@ -37,10 +37,32 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      # The card driver (key/yubikeypiv) is built a second time with its tag atoom_card, after the build and test without it (which need no
+      # C library): cgo over libpcsclite on Linux, the PC/SC framework on macOS. Every runner does it natively, so each architecture has
+      # its own build (decision 0004). devbox sets CC to a compiler that does not search /usr/include, where libpcsclite-dev puts
+      # winscard.h, so the Linux job names the host's compiler and pkg-config.
+      - name: The C dependencies of the card driver (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq --no-install-recommends pkg-config libpcsclite-dev
       - uses: truvity/ci-actions/setup-devbox@82e404675ef3f826755e2939d1072cddcd07ed26 # v3.9.0
       - name: Show the machine
         run: uname -sm
       - run: devbox run -- just build test conformance
+      - name: The card driver with the tag atoom_card (Linux)
+        if: runner.os == 'Linux'
+        run: devbox run -- just go-card
+        env:
+          ATOOM_CARD_REQUIRED: "1"
+          ATOOM_CARD_CC: /usr/bin/gcc
+          ATOOM_CARD_PKG_CONFIG: /usr/bin/pkg-config
+      - name: The card driver with the tag atoom_card (macOS)
+        if: runner.os == 'macOS'
+        run: devbox run -- just go-card
+        env:
+          ATOOM_CARD_REQUIRED: "1"
 
   # Format and lint: Go, Rust, the proto files, the shell scripts and the workflows. The result does not depend on the architecture.
   lint:
@@ -78,8 +100,18 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      # The card driver is scanned a second time with its tag, which is cgo: it needs pkg-config and libpcsclite-dev, and the host's compiler.
+      - name: The C dependencies of the card driver
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq --no-install-recommends pkg-config libpcsclite-dev
       - uses: truvity/ci-actions/setup-devbox@82e404675ef3f826755e2939d1072cddcd07ed26 # v3.9.0
       - run: devbox run -- just check-licenses check-advisories
+        env:
+          ATOOM_CARD_REQUIRED: "1"
+          ATOOM_CARD_CC: /usr/bin/gcc
+          ATOOM_CARD_PKG_CONFIG: /usr/bin/pkg-config
 
   # The rehearsal of the release flow on a throw-away copy with fixture libraries: release-prepare, release-tag (a dry run, and a real
   # run with an unsigned tag in the copy), the tag verification, and the isolation check on a deliberately wrong dependency. It makes
