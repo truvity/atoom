@@ -31,7 +31,6 @@ The environment is [devbox](https://www.jetify.com/devbox) (`devbox shell`, or d
 | `just check` | everything CI runs |
 | `just go-card` | the card driver built, vetted, linted and tested with its build tag `atoom_card` (cgo, libpcsclite or the PC/SC framework) |
 | `just build`, `just test` | every Go module (from `go.work`) and the Cargo workspace |
-| `just conformance` | builds each conformance kit and runs it against every driver that serves its thin main on a socket |
 | `just lint` | golangci-lint, rustfmt and Clippy, `buf lint`, shellcheck, actionlint |
 | `just conformance` | build each conformance kit once and run it against every driver built on this machine, through the driver's socket |
 | `just gen`, `just gen-check` | generate the code of every port from its proto files; fail when it is not current |
