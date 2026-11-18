@@ -1,0 +1,26 @@
+[package]
+name = "atoom-socket"
+description = "Connect over a UNIX socket, plain: dial a socket and serve a router on one. The host plumbing of atoom's own thin mains, kits and tests; a host with a guard of its own serves a driver's router itself."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+anyhow = "1"
+connectrpc = { version = "=0.9.1", default-features = false, features = ["json", "gzip", "client", "server"] }
+futures = "0.3"
+http = "1"
+hyper = { version = "1", features = ["server", "http1", "http2"] }
+hyper-util = { version = "0.1", features = ["server-auto", "server-graceful", "tokio", "http1", "http2"] }
+tokio = { version = "1", features = ["rt-multi-thread", "net", "signal", "time", "macros", "sync"] }
+tower = { version = "0.5", features = ["util"] }
+tracing = "0.1"
+
+[dev-dependencies]
+tempfile = "3"

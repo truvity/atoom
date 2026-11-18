@@ -1,0 +1,20 @@
+version: v2
+clean: true
+managed:
+  enabled: true
+  override:
+    - file_option: go_package_prefix
+      value: github.com/truvity/atoom/store/gen
+    # The imported common types keep the Go package of the common library, not this port's.
+    - file_option: go_package_prefix
+      path: atoom/common
+      value: github.com/truvity/atoom/common/gen
+plugins:
+  # protoc-gen-go comes from devbox.
+  - local: protoc-gen-go
+    out: store/gen
+    opt: paths=source_relative
+  # protoc-gen-connect-go runs as a Go tool of tools/go.mod, so its version is the one that file pins.
+  - local: [sh, -c, "cd tools && GOWORK=off exec go tool protoc-gen-connect-go"]
+    out: store/gen
+    opt: paths=source_relative

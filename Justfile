@@ -58,8 +58,12 @@ go-lint:
 rust-build: rust-toolchain
     cargo build --workspace --locked
 
-# Test the Cargo workspace.
-rust-test: rust-toolchain
+# Test the Cargo workspace. The tests of the rqlite driver start a real rqlited (`rqlite-fetch`); on Linux they must run, so a missing
+# binary fails them. rqlite publishes no macOS build, so on macOS they skip, and say so.
+rust-test: rust-toolchain rqlite-fetch
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if [ "$(uname -s)" = Linux ]; then export ATOOM_REQUIRE_RQLITED=1; fi
     cargo test --workspace --locked
 
 # Format check and Clippy over the Cargo workspace.
@@ -101,20 +105,75 @@ gen-check: gen
     git diff --exit-code -- ':(glob)*/gen/**' ':(glob)*/proto/**' || { echo "gen-check: the generated code is not current: run just gen" >&2; exit 1; }
     test -z "$(git ls-files --others --exclude-standard -- ':(glob)*/gen/**')" || { echo "gen-check: untracked generated files: run just gen and add them" >&2; exit 1; }
 
-# The conformance kits (a Go module <port>/conformance each). Step 2 adds the first; from then on this builds each kit once and runs it
-# against every driver built on this architecture, through the driver's socket. Until then it checks that there is nothing to run.
-conformance:
+# The conformance kits (a directory <port>/conformance each; a Go module or, for the Rust ports, a crate with the binary
+# <port>-conformance). Each kit is built once and run against every driver built on this architecture, through the driver's socket:
+# `conformance-store` for the item port; the Go kits are step 2's.
+conformance: conformance-store
     #!/usr/bin/env bash
     set -euo pipefail
     kits=$(git ls-files -- '*/conformance/go.mod' | sed 's#/go.mod$##')
     if [ -z "$kits" ]; then
-        echo "conformance: no conformance kit yet; the first comes with the key port (step 2)"
+        echo "conformance: no Go conformance kit yet; the first comes with the key port (step 2)"
         exit 0
     fi
     for k in $kits; do
         echo "conformance: build the kit $k"
         (cd "$k" && go build ./...)
     done
+
+# The item-port kit against the memory driver and the rqlite driver (both namespaces), each through the socket of its thin main
+# (tools/scripts/conformance-store.sh).
+[private]
+conformance-store: rust-toolchain rqlite-fetch
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if [ "$(uname -s)" = Linux ]; then export ATOOM_REQUIRE_RQLITED=1; fi
+    tools/scripts/conformance-store.sh
+
+# The pinned rqlite release (v10.6.6) for the tests and the conformance run of the rqlite driver: the archive of this machine from the
+# GitHub release, verified against the SHA-256 written here, unpacked to .cache/rqlite/linux-<arch>/ (rqlited and rqlite). Only
+# linux-amd64 and linux-arm64: rqlite publishes no macOS build, so there it fetches nothing and says so. Idempotent: an archive that is
+# there and verifies is not downloaded again. rqlite runs as a plain process, never in a container.
+#
+# The digests are the ones GitHub publishes for the release assets (`gh release view v10.6.6 -R rqlite/rqlite --json assets`, measured
+# 2026-11-18). The release has no checksum file of its own.
+[private]
+rqlite-fetch:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    version=v10.6.6
+    if [ "$(uname -s)" != Linux ]; then
+        echo "rqlite-fetch: SKIP: rqlite publishes no build for $(uname -s); its driver's integration tests and conformance run skip here"
+        exit 0
+    fi
+    declare -A sums=(
+        [amd64]=b0fdc2d526b03c0d933e27bf84f53d447791d1a6e331e74fa2013750bf621aba
+        [arm64]=8da274ea338e156522c00ec63650c1a3cdd1db1c3dd127b43fe955f221009c21
+    )
+    case "$(uname -m)" in
+        x86_64) arch=amd64 ;;
+        aarch64 | arm64) arch=arm64 ;;
+        *) echo "rqlite-fetch: SKIP: no rqlite release for $(uname -m)"; exit 0 ;;
+    esac
+    dir=.cache/rqlite
+    mkdir -p "$dir"
+    name="rqlite-$version-linux-$arch"
+    archive="$dir/$name.tar.gz"
+    if [ -x "$dir/linux-$arch/rqlited" ] && [ -f "$archive" ] \
+        && echo "${sums[$arch]}  $archive" | sha256sum --check --status; then
+        echo "rqlite-fetch: $arch is there"
+        exit 0
+    fi
+    curl --fail --silent --show-error --location --retry 3 --output "$archive.part" \
+        "https://github.com/rqlite/rqlite/releases/download/$version/$name.tar.gz"
+    echo "${sums[$arch]}  $archive.part" | sha256sum --check --status \
+        || { echo "::error::$name.tar.gz does not match its SHA-256" >&2; rm -f "$archive.part"; exit 1; }
+    mv "$archive.part" "$archive"
+    rm -rf "$dir/linux-$arch" "$dir/$name"
+    tar -xzf "$archive" -C "$dir"
+    mv "$dir/$name" "$dir/linux-$arch"
+    [ -x "$dir/linux-$arch/rqlited" ] || { echo "::error::$name.tar.gz holds no rqlited" >&2; exit 1; }
+    echo "rqlite-fetch: $arch fetched"
 
 # The dependency rules (docs/plan.md, section 5; decision 0003): no driver requires another driver, a port requires only the ConnectRPC
 # and Protobuf runtimes, every go.mod is in go.work and every crate in the workspace. It fails on a deliberately wrong dependency

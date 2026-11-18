@@ -12,7 +12,7 @@ The repository is extensible: anyone can write a driver, inside or outside it, a
 
 sluis hosts the drivers as building-block actors; session and ritueel link them in-process.
 
-Status: being set up. The extraction plan is written, the scaffolding (build, tests, CI, release flow) is in place, and the first library has moved: [common](common/README.md), the types every port speaks (`Refusal`, `IndexEntry`). No port or driver has moved yet.
+Status: being set up. The extraction plan is written, the scaffolding (build, tests, CI, release flow) is in place, and the first libraries have moved: [common](common/README.md), the types every port speaks (`Refusal`, `IndexEntry`), and the item port [store](store/README.md) with its conformance kit and two drivers, [rqlite](store/rqlite/README.md) and [memory](store/memory/README.md), over a small plain host, [socket](socket/README.md).
 
 ## Documents
 
@@ -29,6 +29,7 @@ The environment is [devbox](https://www.jetify.com/devbox) (`devbox shell`, or d
 | `just check` | everything CI runs |
 | `just build`, `just test` | every Go module (from `go.work`) and the Cargo workspace |
 | `just lint` | golangci-lint, rustfmt and Clippy, `buf lint`, shellcheck, actionlint |
+| `just conformance` | build each conformance kit once and run it against every driver built on this machine, through the driver's socket |
 | `just gen`, `just gen-check` | generate the code of every port from its proto files; fail when it is not current |
 | `just check-isolation` | the dependency rules: no driver requires another driver, a port requires only the runtimes |
 | `just check-versions` | every pinned runtime agrees with [versions.yaml](versions.yaml) |

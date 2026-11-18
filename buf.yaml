@@ -3,9 +3,17 @@ version: v2
 # The generated code of a port is committed next to it (<port>/gen), made by <port>/buf.gen.yaml (`just gen`).
 modules:
   - path: common/proto
+  - path: store/proto
 lint:
   use:
     - STANDARD
+  ignore_only:
+    # The item contract names its messages after the contract (ItemGetRequest, ItemGetResponse), as it did in sluis; a rename would
+    # change every consumer's spelling for no change on the wire.
+    RPC_REQUEST_STANDARD_NAME:
+      - store/proto/atoom/store/v1alpha1/item.proto
+    RPC_RESPONSE_STANDARD_NAME:
+      - store/proto/atoom/store/v1alpha1/item.proto
 # `just proto-breaking` compares with the last release; while the contracts are v1alpha1 they may break, and the PR carries the
 # `breaking:<library>` label (docs/plan.md, section 8).
 breaking:

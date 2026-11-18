@@ -10,8 +10,12 @@ func goLib(dir string, atoom, external []string) lib {
 }
 
 func TestAllowedDependencies(t *testing.T) {
-	s := shared{"key/slotplan": true}
+	s := shared{"key/slotplan": true, "socket": true}
 	libs := []lib{
+		// A shared library at the first level is plumbing, not a port: it may require what it needs, and any driver or kit may require it.
+		{Dir: "socket", Lang: "rust", Name: "atoom-socket", External: []string{"hyper", "tokio", "anything"}},
+		{Dir: "store", Lang: "rust", Name: "atoom-store", Atoom: []string{"common"}, External: []string{"connectrpc"}},
+		{Dir: "store/memory", Lang: "rust", Name: "atoom-store-memory", Atoom: []string{"store", "socket", "common"}, External: []string{"tokio"}},
 		goLib("common", nil, []string{"google.golang.org/protobuf"}),
 		goLib("key", []string{"common"}, []string{"connectrpc.com/connect", "google.golang.org/protobuf"}),
 		goLib("key/conformance", []string{"key", "common"}, []string{"github.com/anything/goes"}),
@@ -29,7 +33,7 @@ func TestAllowedDependencies(t *testing.T) {
 }
 
 func TestWrongDependenciesFail(t *testing.T) {
-	s := shared{}
+	s := shared{"socket": true}
 	cases := []struct {
 		name string
 		libs []lib
@@ -57,6 +61,11 @@ func TestWrongDependenciesFail(t *testing.T) {
 			name: "a port requires a backend SDK",
 			libs: []lib{goLib("key", nil, []string{"github.com/aws/aws-sdk-go-v2"})},
 			want: "a port requires only the ConnectRPC and Protobuf runtimes; it requires github.com/aws/aws-sdk-go-v2",
+		},
+		{
+			name: "a Rust port that is not shared requires tokio",
+			libs: []lib{{Dir: "store", Lang: "rust", Name: "atoom-store", External: []string{"connectrpc", "tokio"}}},
+			want: "a port requires only the ConnectRPC and Protobuf runtimes; it requires tokio",
 		},
 		{
 			name: "a port requires a driver of itself",

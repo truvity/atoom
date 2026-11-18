@@ -106,8 +106,9 @@ func check(l lib, s shared) []string {
 			add("requires %s: a library may require only common, its own port, its port's conformance kit and the shared libraries, never another driver or port", dep)
 		}
 	}
-	if depth == 1 {
-		// A port, or common: only the runtimes beside atoom's own.
+	if depth == 1 && !s[l.Dir] {
+		// A port, or common: only the runtimes beside atoom's own. A library at the first level that the shared file lists (socket: the
+		// plain UNIX-socket host of the Rust mains) is plumbing and not a port, so it may require what it needs.
 		for _, dep := range l.External {
 			if !portExternal[l.Lang][dep] {
 				add("a port requires only the ConnectRPC and Protobuf runtimes; it requires %s", dep)
