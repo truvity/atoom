@@ -12,7 +12,7 @@ The repository is extensible: anyone can write a driver, inside or outside it, a
 
 sluis hosts the drivers as building-block actors; session and ritueel link them in-process.
 
-Status: being set up. The extraction plan is written and the scaffolding (build, tests, CI, release flow) is in place; no port or driver has moved yet.
+Status: being set up. The extraction plan is written, the scaffolding (build, tests, CI, release flow) is in place, and the first library has moved: [common](common/README.md), the types every port speaks (`Refusal`, `IndexEntry`). No port or driver has moved yet.
 
 ## Documents
 

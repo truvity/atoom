@@ -15,7 +15,8 @@ const modulePrefix = "github.com/truvity/atoom/"
 const cratePrefix = "atoom-"
 
 // portExternal lists what a port (a library one level below the root) may require besides atoom libraries: the ConnectRPC and
-// Protobuf runtimes and nothing else (docs/plan.md, section 5). A driver may require its own backend SDK, so it is not listed.
+// Protobuf runtimes and what their generated code needs, and nothing else (docs/plan.md, section 5). A driver may require its own backend
+// SDK, so it is not listed.
 var portExternal = map[string]map[string]bool{
 	"go": {
 		"connectrpc.com/connect":                                     true,
@@ -28,6 +29,10 @@ var portExternal = map[string]map[string]bool{
 		"connectrpc-build": true,
 		"buffa":            true,
 		"buffa-types":      true,
+		// The two crates the generated messages and the Connect error-detail value need (the `json` feature derives serde; the detail
+		// is base64). Both are in connectrpc's own graph, so a port that uses them adds nothing to a consumer's build.
+		"serde":  true,
+		"base64": true,
 	},
 }
 

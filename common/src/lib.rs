@@ -1,17 +1,9 @@
 //! Types every atoom port and driver speaks.
 //!
-//! This crate is a placeholder: step 0 of docs/plan.md sets up the build and the release flow on an empty library, and step 1
-//! moves the common types (`Refusal`, `IndexEntry`) here.
+//! The contract is the proto package `atoom.common.v1alpha1` (`Refusal`, `IndexEntry`); the generated messages are in
+//! [`atoom::common::v1alpha1`]. The module [`refusal`] builds a Connect error that carries the `Refusal` detail and reads the reason
+//! back. The Go twin is the module `github.com/truvity/atoom/common`.
+#![allow(clippy::all, missing_docs, unreachable_pub, unused_qualifications)]
+connectrpc::include_generated!();
 
-/// The name of the library, so that the matrix has something to build and test on every architecture.
-pub const NAME: &str = "atoom-common";
-
-#[cfg(test)]
-mod tests {
-    use super::NAME;
-
-    #[test]
-    fn the_library_has_its_name() {
-        assert_eq!(NAME, "atoom-common");
-    }
-}
+pub mod refusal;
