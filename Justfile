@@ -8,7 +8,7 @@ default:
 
 # Everything CI runs, in one go: format and lint, build and test every library, the generated code, the dependency rules, the pinned
 # versions, licences, advisories, the breaking-change check, the conformance kits and the release rehearsal.
-check: lint test gen-check check-isolation check-versions check-licenses check-advisories proto-breaking conformance release-rehearsal
+check: lint test go-card gen-check check-isolation check-versions check-licenses check-advisories proto-breaking conformance release-rehearsal
 
 # Build every library, Go and Rust.
 build: go-build rust-build
@@ -53,6 +53,24 @@ go-lint:
         echo "golangci-lint: $d"
         (cd "$d" && golangci-lint run --config "$root/.golangci.yaml" ./...)
     done
+
+# The card driver with its build tag atoom_card (key/yubikeypiv; docs/plan.md, section 5): cgo over libpcsclite on Linux (pkg-config and
+# libpcsclite-dev) or the PC/SC framework on macOS. The default recipes above build it without the tag, with no C code; this one builds,
+# vets, lints and tests it with the tag, on the architecture it runs on (nothing is cross-compiled). The tests use the fake card; the ones
+# that need a real card are run by hand on a bench. tools/scripts/card-env.sh says what a machine without the C library does.
+go-card:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    . tools/scripts/card-env.sh
+    card_ready || exit 0
+    root=$PWD
+    cd key/yubikeypiv
+    echo "go build, vet, lint and test with the tag atoom_card: key/yubikeypiv"
+    go build -tags atoom_card -o /dev/null ./...
+    go vet -tags atoom_card ./...
+    golangci-lint run --config "$root/.golangci.yaml" --build-tags atoom_card ./...
+    go test -tags atoom_card -race -count=1 -v ./... 2>&1 \
+      | awk '!/^=== (RUN|PAUSE|CONT|NAME)/ && !/^[[:space:]]*--- PASS/ && !/^PASS$/ && !/^no test files$/' ; test "${PIPESTATUS[0]}" -eq 0
 
 # Build the Cargo workspace.
 rust-build: rust-toolchain
@@ -101,19 +119,32 @@ gen-check: gen
     git diff --exit-code -- ':(glob)*/gen/**' ':(glob)*/proto/**' || { echo "gen-check: the generated code is not current: run just gen" >&2; exit 1; }
     test -z "$(git ls-files --others --exclude-standard -- ':(glob)*/gen/**')" || { echo "gen-check: untracked generated files: run just gen and add them" >&2; exit 1; }
 
-# The conformance kits (a Go module <port>/conformance each). Step 2 adds the first; from then on this builds each kit once and runs it
-# against every driver built on this architecture, through the driver's socket. Until then it checks that there is nothing to run.
+# The conformance kits (a Go module <port>/conformance each, with a command <port>-conformance). Each kit is built once, and every driver
+# that can be served without special hardware runs it through its socket: a driver directory that has a conformance.sh gets the path of the
+# kit binary as its argument, serves its own thin main and runs the kit against it. A driver that needs hardware (key/yubikeypiv, a real
+# card) runs the same kit in-process over a fake card in its own tests instead.
 conformance:
     #!/usr/bin/env bash
     set -euo pipefail
     kits=$(git ls-files -- '*/conformance/go.mod' | sed 's#/go.mod$##')
     if [ -z "$kits" ]; then
-        echo "conformance: no conformance kit yet; the first comes with the key port (step 2)"
+        echo "conformance: no conformance kit yet"
         exit 0
     fi
+    bin=$(mktemp -d)
+    trap 'rm -rf "$bin"' EXIT
+    root=$PWD
     for k in $kits; do
+        port=${k%/conformance}
         echo "conformance: build the kit $k"
-        (cd "$k" && go build ./...)
+        (cd "$k" && go build -o "$bin/$port-conformance" "./cmd/$port-conformance")
+        ran=0
+        for s in $(git ls-files -- "$port/*/conformance.sh" | sort); do
+            echo "conformance: the kit $port-conformance against ${s%/conformance.sh}"
+            "$root/$s" "$bin/$port-conformance"
+            ran=$((ran + 1))
+        done
+        [ "$ran" -gt 0 ] || { echo "conformance: no driver of $port runs the kit through a socket" >&2; exit 1; }
     done
 
 # The dependency rules (docs/plan.md, section 5; decision 0003): no driver requires another driver, a port requires only the ConnectRPC
@@ -130,14 +161,23 @@ check-versions:
 check-licenses: rust-toolchain
     cargo deny --locked check licenses
 
-# The advisory gate: govulncheck over every Go module and cargo audit over Cargo.lock. Needs the network (vuln.go.dev, the RustSec
-# database).
+# The advisory gate: govulncheck over every Go module (and again with the tag atoom_card over the card driver) and cargo audit over
+# Cargo.lock. Needs the network (vuln.go.dev, the RustSec database).
 check-advisories: rust-toolchain
     #!/usr/bin/env bash
     set -euo pipefail
     for d in $(just go-modules); do
         echo "govulncheck: $d"
         (cd "$d" && govulncheck ./...)
+    done
+    # A module with files behind the build tag atoom_card is scanned a second time with the tag (the card driver is cgo; a scan without the
+    # tag does not see its code).
+    . tools/scripts/card-env.sh
+    for d in $(git grep -l -E '^//go:build .*atoom_card' -- '*.go' | xargs -n1 dirname | sed -E 's#(/internal.*|/cmd.*)$##' | sort -u); do
+        if card_ready; then
+            echo "govulncheck (tag atoom_card): $d"
+            (cd "$d" && govulncheck -tags atoom_card ./...)
+        fi
     done
     cargo audit --deny warnings
 

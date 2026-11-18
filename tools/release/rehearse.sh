@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # The rehearsal of the release flow (docs/plan.md, step 0 acceptance): `just release-prepare`, `just release-tag --dry-run`, its
 # refusals, the consumption check as a listing, and the isolation check on a deliberately wrong dependency, on a throw-away copy of
-# the working tree with fixture libraries (key, key/software, key/awskms) added. It makes no tag in this repository, pushes nothing
-# and needs no network.
+# the working tree with fixture libraries (fixture, fixture/software, fixture/awskms: a port and two drivers, named so as not to meet a real library) added. It makes
+# no tag in this repository, pushes nothing and needs no network.
 #
 #   tools/release/rehearse.sh
 set -euo pipefail
@@ -43,8 +43,8 @@ git_ add -A
 git_ commit -q -m "base"
 git_ tag v0.0.1
 
-# The fixture libraries, as step 2 will make them: siblings require each other at the last release and carry replace lines.
-mkdir -p "$repo/key/software" "$repo/key/awskms"
+# The fixture libraries, as the real ones are: siblings require each other at the last release and carry replace lines.
+mkdir -p "$repo/fixture/software" "$repo/fixture/awskms"
 gomod() { # dir requires... (replace lines for every sibling)
     local dir=$1 mod=github.com/truvity/atoom/$1
     shift
@@ -60,16 +60,16 @@ gomod() { # dir requires... (replace lines for every sibling)
         done
     } >"$repo/$dir/go.mod"
 }
-gomod key common
-gomod key/software key common
-gomod key/awskms key common
-(cd "$repo" && go work edit -use ./key -use ./key/software -use ./key/awskms)
+gomod fixture common
+gomod fixture/software fixture common
+gomod fixture/awskms fixture common
+(cd "$repo" && go work edit -use ./fixture -use ./fixture/software -use ./fixture/awskms)
 git_ add -A
 git_ commit -q -m "fixture libraries"
-# key/software changes after the last release; common does not.
-echo "// changed" >"$repo/key/software/doc.go"
+# fixture/software changes after the last release; common does not.
+echo "// changed" >"$repo/fixture/software/doc.go"
 git_ add -A
-git_ commit -q -m "change key/software"
+git_ commit -q -m "change fixture/software"
 
 run_in_repo() { (cd "$repo" && "$@"); }
 
@@ -86,14 +86,18 @@ expect_fail "prepare refuses a malformed version" run_in_repo tools/release/prep
 expect_ok "prepare 0.1.0" run_in_repo tools/release/prepare.sh 0.1.0
 contains "the workspace version" "$(cat "$repo/Cargo.toml")" 'version = "0.1.0"'
 contains "the lock file follows" "$(grep -A1 'name = "atoom-common"' "$repo/Cargo.lock")" 'version = "0.1.0"'
-sw=$(cat "$repo/key/software/go.mod")
-contains "key/software requires key at the new version" "$sw" "github.com/truvity/atoom/key v0.1.0"
-contains "key/software requires common at the new version" "$sw" "github.com/truvity/atoom/common v0.1.0"
-lacks "key/software has no replace" "$sw" "replace"
-lacks "key has no replace" "$(cat "$repo/key/go.mod")" "replace"
+sw=$(cat "$repo/fixture/software/go.mod")
+contains "fixture/software requires fixture at the new version" "$sw" "github.com/truvity/atoom/fixture v0.1.0"
+contains "fixture/software requires common at the new version" "$sw" "github.com/truvity/atoom/common v0.1.0"
+lacks "fixture/software has no replace" "$sw" "replace"
+lacks "fixture has no replace" "$(cat "$repo/fixture/go.mod")" "replace"
+gw=$(cat "$repo/go.work")
+contains "go.work replaces fixture at the new version" "$gw" "github.com/truvity/atoom/fixture v0.1.0 => ./fixture"
+contains "go.work replaces fixture/software at the new version" "$gw" "github.com/truvity/atoom/fixture/software v0.1.0 => ./fixture/software"
+lacks "go.work keeps no replace at the placeholder version" "$gw" "v0.0.0 =>"
 cl=$(cat "$repo/CHANGELOG.md")
 contains "the changelog has the section" "$cl" "## 0.1.0 - "
-contains "the changelog names the changed library" "$cl" "- \`key/software\`"
+contains "the changelog names the changed library" "$cl" "- \`fixture/software\`"
 lacks "the changelog leaves the unchanged library out" "$cl" "- \`common\`"
 
 # 3. release-tag as a dry run: a dirty tree is refused, a committed one passes and lists every tag.
@@ -102,13 +106,13 @@ contains "names the dirty tree" "$out" "the working tree is not clean"
 git_ add -A
 git_ commit -q -m "release 0.1.0"
 expect_ok "tag dry run on the prepared tree" run_in_repo tools/release/tag.sh --dry-run --allow-off-master 0.1.0
-for t in v0.1.0 common/v0.1.0 key/v0.1.0 key/software/v0.1.0 key/awskms/v0.1.0; do contains "the set has $t" "$out" "  $t"; done
+for t in v0.1.0 common/v0.1.0 fixture/v0.1.0 fixture/software/v0.1.0 fixture/awskms/v0.1.0; do contains "the set has $t" "$out" "  $t"; done
 lacks "the tooling is not tagged" "$out" "tools/v0.1.0"
 expect_fail "tag dry run off master without the flag" run_in_repo tools/release/tag.sh --dry-run 0.1.0
-git_ tag key/v0.1.0
+git_ tag fixture/v0.1.0
 expect_fail "tag dry run with an existing tag" run_in_repo tools/release/tag.sh --dry-run --allow-off-master 0.1.0
-contains "names the existing tag" "$out" "the tag key/v0.1.0 exists"
-git_ tag -d key/v0.1.0 >/dev/null
+contains "names the existing tag" "$out" "the tag fixture/v0.1.0 exists"
+git_ tag -d fixture/v0.1.0 >/dev/null
 expect_fail "a real run off master" run_in_repo tools/release/tag.sh 0.1.0
 if [ -z "$(git_ tag --list 'v0.1.0' '*/v0.1.0')" ]; then ok "no tag was made"; else no "a tag was made"; fi
 
@@ -124,30 +128,32 @@ tag_for_real() {
 expect_ok "tag on master" tag_for_real 0.1.0
 contains "it names the library pushes first" "$out" "git push origin refs/tags/common/v0.1.0"
 contains "it names the root push last" "$out" "git push origin refs/tags/v0.1.0"
-if [ "$(git_ tag --list 'v0.1.0' '*/v0.1.0' | wc -l)" -eq 5 ]; then ok "five tags were made"; else no "the set is not five tags"; fi
+# One tag for every Go library of the copy (the real ones and the fixtures) and the root tag.
+want_tags=$(( $(git_ ls-files -- '*/go.mod' | grep -c -v -E '^tools(/|$)' || true) + 1 ))
+if [ "$(git_ tag --list 'v0.1.0' '*/v0.1.0' | wc -l)" -eq "$want_tags" ]; then ok "$want_tags tags were made"; else no "the set is not $want_tags tags"; fi
 expect_ok "verify-tags on the set" run_in_repo tools/release/verify-tags.sh v0.1.0
-git_ tag -d key/awskms/v0.1.0 >/dev/null
+git_ tag -d fixture/awskms/v0.1.0 >/dev/null
 expect_fail "verify-tags with a missing tag" run_in_repo tools/release/verify-tags.sh v0.1.0
-contains "names the missing tag" "$out" "the tag key/awskms/v0.1.0 is missing"
+contains "names the missing tag" "$out" "the tag fixture/awskms/v0.1.0 is missing"
 expect_fail "tag again once a tag exists" run_in_repo tools/release/tag.sh --dry-run 0.1.0
-for t in v0.1.0 common/v0.1.0 key/v0.1.0 key/software/v0.1.0; do git_ tag -d "$t" >/dev/null; done
+git_ tag --list 'v0.1.0' '*/v0.1.0' | while read -r t; do git_ tag -d "$t" >/dev/null; done
 
 # 4. The consumption check, as a listing.
 expect_ok "consume lists what it fetches" run_in_repo tools/release/consume.sh --list 0.1.0
-contains "the listing has a Go library" "$out" "go get github.com/truvity/atoom/key/software@v0.1.0"
+contains "the listing has a Go library" "$out" "go get github.com/truvity/atoom/fixture/software@v0.1.0"
 contains "the listing has the Rust crate" "$out" "atoom-common"
 
 # 5. The isolation check: the prepared fixture passes; a driver that requires another driver, and a port that requires a backend SDK, fail.
 (cd "$root" && go build -o "$tmp/isolation" ./tools/isolation)
 expect_ok "isolation on the prepared fixture" "$tmp/isolation" -root "$repo"
-printf 'require github.com/truvity/atoom/key/awskms v0.1.0\n' >>"$repo/key/software/go.mod"
+printf 'require github.com/truvity/atoom/fixture/awskms v0.1.0\n' >>"$repo/fixture/software/go.mod"
 expect_fail "isolation on a driver that requires another driver" "$tmp/isolation" -root "$repo"
-contains "names the wrong dependency" "$out" "requires key/awskms"
-git_ checkout -q -- key/software/go.mod
-printf 'require github.com/aws/aws-sdk-go-v2 v1.0.0\n' >>"$repo/key/go.mod"
+contains "names the wrong dependency" "$out" "requires fixture/awskms"
+git_ checkout -q -- fixture/software/go.mod
+printf 'require github.com/aws/aws-sdk-go-v2 v1.0.0\n' >>"$repo/fixture/go.mod"
 expect_fail "isolation on a port that requires a backend SDK" "$tmp/isolation" -root "$repo"
 contains "names the SDK" "$out" "it requires github.com/aws/aws-sdk-go-v2"
-git_ checkout -q -- key/go.mod
+git_ checkout -q -- fixture/go.mod
 printf 'module github.com/truvity/atoom/store\n\ngo 1.27.0\n' >"$repo/store.go.mod.tmp"
 mkdir "$repo/store" && mv "$repo/store.go.mod.tmp" "$repo/store/go.mod"
 expect_fail "isolation on a module that go.work does not list" "$tmp/isolation" -root "$repo"

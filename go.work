@@ -6,5 +6,24 @@ toolchain go1.27.4
 // modules through their own go.mod files and the tags of one release.
 use (
 	./common
+	./key
+	./key/conformance
+	./key/pinrelease
+	./key/slotplan
+	./key/software
+	./key/yubikeypiv
 	./tools
+)
+
+// A library requires its siblings at v0.0.0 until the first release, and `just release-prepare` sets the real version. A workspace does not
+// look a version up that one of its replace lines names, so the lines below resolve the siblings at the version the go.mod files
+// require to their directories (release-prepare moves them too). They are here and never in a go.mod (just check-isolation).
+replace (
+	github.com/truvity/atoom/common v0.0.0 => ./common
+	github.com/truvity/atoom/key v0.0.0 => ./key
+	github.com/truvity/atoom/key/conformance v0.0.0 => ./key/conformance
+	github.com/truvity/atoom/key/pinrelease v0.0.0 => ./key/pinrelease
+	github.com/truvity/atoom/key/slotplan v0.0.0 => ./key/slotplan
+	github.com/truvity/atoom/key/software v0.0.0 => ./key/software
+	github.com/truvity/atoom/key/yubikeypiv v0.0.0 => ./key/yubikeypiv
 )
