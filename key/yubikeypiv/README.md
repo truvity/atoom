@@ -38,6 +38,8 @@ The driver runs unchanged inside a larger system, which keeps what is its own an
 | linux/amd64, linux/arm64, darwin/arm64 | builds and tests with the fake card | native build on each (nothing is cross-compiled) |
 | Opens a card | no: `card.ErrNoCardSupport` | yes |
 
+**The driver can be unlocked only on Linux.** It holds the PIN in locked memory (`mlock`, `MADV_DONTDUMP`) and reads the peer's uid off the admin socket (`SO_PEERCRED`); on another system it builds, starts and stays locked, and the tests that serve the unlock service skip there with that reason.
+
 The tests use the fake card of `internal/card/cardtest` (a test PKI of its own, factory state, PIN `123456`). The tests that need a real card run by hand on a bench; no real card or PIN is used in CI. `just go-card` builds, vets, lints and tests with the tag.
 
 ## Documentation
