@@ -69,7 +69,11 @@ go-card:
     go build -tags atoom_card -o /dev/null ./...
     go vet -tags atoom_card ./...
     golangci-lint run --config "$root/.golangci.yaml" --build-tags atoom_card ./...
-    go test -tags atoom_card -race -count=1 -v ./... 2>&1 \
+    # With the host's compiler the test binaries link the host's libc, and devbox's library path would load its own libc under them (symbol
+    # lookup error), so they run without the library path.
+    exec_flag=()
+    if [ -n "${ATOOM_CARD_CC:-}" ]; then exec_flag=(-exec "env -u LD_LIBRARY_PATH -u LD_PRELOAD"); fi
+    go test -tags atoom_card -race -count=1 -v "${exec_flag[@]}" ./... 2>&1 \
       | awk '!/^=== (RUN|PAUSE|CONT|NAME)/ && !/^[[:space:]]*--- PASS/ && !/^PASS$/ && !/^no test files$/' ; test "${PIPESTATUS[0]}" -eq 0
 
 # Build the Cargo workspace. A crate that builds only on Linux (the manifest says so: `[package.metadata.atoom] os`) is left out on any
