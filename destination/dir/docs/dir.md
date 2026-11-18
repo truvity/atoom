@@ -1,0 +1,11 @@
+# How the dir driver works
+
+What it does and does not do, for a consumer that links it.
+
+- **Two directories.** `root` holds the documents, one file per address, and is what the forwarder serves. It belongs to the driver's user and is closed to writes by anyone else. Files are 0644 and directories 0755: the material is public, and the server that reads it runs as another user. `state` is the driver's own; it may be open to traverse, and what it holds is in `meta` and `tmp`, which are 0700. Both must be real directories (not symlinks), owned by this process's user and not writable by anyone else; they are checked at every start.
+- **A record for each document.** `state/meta/<address>.json` records what the driver wrote at an address: its content type, its `Cache-Control`, a version. A document is the driver's, and is listed and removed, only while it has such a record, so a file someone else put in `root` is never listed and never removed.
+- **A write is whole.** `Put` writes the body to a temporary file in the target's directory (`.tmp-<pid>-<n>`), fsyncs it, renames it over the target and fsyncs the directory. A reader opens the old file or the new one; a crash leaves either, and a stray temporary file that `serve` removes at its start. The record is written after the document, the same way, so a crash between the two leaves a new document with an old record: `List` reports the digest of the file itself, so the reconcile still sees what is there.
+- **Links.** Every path is checked as an address (no `..`, no empty segment) and every existing component under `root` is looked at with `lstat`: a symlink is refused. Only the driver's user can write under `root`, so the check is a second line, not the first.
+- **A document and a directory cannot share an address**: a `Put` over a directory, or below a document, is refused. The last `Delete` in a directory removes the directory when it is empty.
+- **No public address.** A directory declares none to this driver, so `ReadBack` is `unsupported` and `Purge` answers `None`: what a verifier sees is the forwarder's.
+- **No guard on the socket** beyond its mode, in the thin main. A host that guards its sockets registers the router on a server of its own.

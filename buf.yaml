@@ -4,6 +4,8 @@ version: v2
 modules:
   - path: blob/proto
   - path: common/proto
+  - path: destination/proto
+  - path: index/proto
   - path: source/proto
   - path: store/proto
   - path: key/proto

@@ -1,0 +1,37 @@
+[package]
+name = "atoom-destination-conformance"
+description = "The conformance kit of the destination port and the Rust helpers for writing a driver of it: the Destination trait, its ConnectRPC service and client, the in-memory reference driver, and the suite every driver must pass (library and the binaries destination-conformance and destination-memory)."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+[lib]
+name = "atoom_destination_conformance"
+
+[[bin]]
+name = "destination-conformance"
+path = "src/main.rs"
+
+[[bin]]
+name = "destination-memory"
+path = "src/bin/memory.rs"
+
+[dependencies]
+anyhow = "1"
+atoom-common = { path = "../../common" }
+atoom-destination = { path = ".." }
+atoom-socket = { path = "../../socket" }
+aws-lc-rs = "1"
+clap = { version = "4", features = ["derive"] }
+connectrpc = { version = "=0.9.1", default-features = false, features = ["json", "gzip", "client", "server"] }
+tokio = { version = "1", features = ["rt-multi-thread", "time", "sync", "macros", "signal"] }
+tracing = "0.1"
+
+[dev-dependencies]
+tempfile = "3"
