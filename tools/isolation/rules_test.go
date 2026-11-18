@@ -21,6 +21,7 @@ func TestAllowedDependencies(t *testing.T) {
 		goLib("store", []string{"common"}, []string{"connectrpc.com/connect"}),
 		goLib("store/rqlite", []string{"store"}, nil),
 		goLib("tools", nil, []string{"anything"}),
+		{Dir: "common", Lang: "rust", Name: "atoom-common", External: []string{"base64", "buffa", "connectrpc", "connectrpc-build", "serde"}},
 	}
 	if got := checkAll(libs, s); len(got) != 0 {
 		t.Fatalf("a valid tree has problems:\n%s", strings.Join(got, "\n"))

@@ -1,8 +1,5 @@
-// Package common holds the types every atoom port and driver speaks.
+// Package common is the root of the common library: the types every atoom port and driver speaks.
 //
-// It is a placeholder: step 0 of docs/plan.md sets up the build and the release flow on an empty library, and step 1 moves the
-// common types (Refusal, IndexEntry) here.
+// The contract is the proto package atoom.common.v1alpha1 (Refusal, IndexEntry), generated into gen/atoom/common/v1alpha1. The
+// subpackage refusal makes and reads the Connect errors that carry the Refusal detail. The Rust twin is the crate atoom-common.
 package common
-
-// Name is the name of the library, so that the matrix has something to build and test on every architecture.
-const Name = "atoom/common"
