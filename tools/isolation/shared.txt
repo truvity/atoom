@@ -1,0 +1,2 @@
+# Libraries that several drivers of one port may require: they are libraries, not drivers (docs/plan.md, section 5). One directory per
+# line. Step 2 adds key/slotplan and key/pinrelease here.

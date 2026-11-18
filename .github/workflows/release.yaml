@@ -1,0 +1,126 @@
+# The release of atoom (decision 0007, docs/plan.md "Release management" and "Library release flow"). It starts on the root tag vX.Y.Z only,
+# which the maintainer makes and signs by hand (`just release-tag X.Y.Z`); this workflow never makes a tag. The tags of the Go libraries
+# (key/vX.Y.Z, ...) have a slash and do not match the trigger: they are pushed first, the root tag alone last.
+#
+# THIS WORKFLOW HAS NEVER RUN: no tag exists. It is built and checked with actionlint and by the rehearsal of the scripts it calls
+# (`just release-rehearsal`), nothing more. The first tag is the first real test; expect to repair it then.
+#
+# Three jobs. `gate` refuses a tag that is not a release tag, a commit that is not on master or whose CI run on master is not green,
+# and a tag set that is not the whole release (tools/release/verify-tags.sh). `consume` proves that the libraries can be consumed:
+# `go get` of every Go module through the public proxy and a smoke Rust crate against the git tag. `release` has the only write
+# permission, builds nothing, and publishes the GitHub release as a draft first and makes it public only when its checks pass.
+#
+# Not here yet: driver binaries, .deb and .rpm packages, OCI images, SBOMs and checksums. The candidate build and the promotion of
+# its bytes (docs/plan.md, "Release management of the driver binaries") need a driver to build, and the first one arrives with step 2.
+# Until then a release is the tag set, the changelog and the proof of consumption.
+#
+# Prerequisites that the maintainer sets once (plan R9): a tag ruleset on `v*` and `*/v*` that lets only the owner create a tag and
+# nobody update or delete one, immutable releases, and public package visibility. The gate is in this file and GitHub runs the file of
+# the tagged commit, so only that ruleset stops a tag on a branch whose copy of the workflow has no gate.
+name: Release
+
+on:
+  push:
+    tags: ['v[0-9]*.[0-9]*.[0-9]*']
+
+# No permission at workflow level: each job asks for its own.
+permissions: {}
+
+# One release at a time, and a release is never cancelled by another.
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  gate:
+    name: gate (a release tag, on master, green, the whole set)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # The commit the tag names, whatever the ref is when the run starts, and the history of master to know it is an ancestor.
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: The tag
+        env:
+          REF_TYPE: ${{ github.ref_type }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          [ "$REF_TYPE" = tag ] || { echo "gate: refused: the ref is a $REF_TYPE, not a tag" >&2; exit 1; }
+          [[ "$TAG" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]] ||
+            { echo "gate: refused: $TAG is not a release tag (vX.Y.Z)" >&2; exit 1; }
+      - name: The gate
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: tools/release/gate.sh "$GITHUB_SHA"
+      - uses: truvity/ci-actions/setup-devbox@82e404675ef3f826755e2939d1072cddcd07ed26 # v3.9.0
+      - name: The tag set
+        env:
+          TAG: ${{ github.ref_name }}
+        run: devbox run -- tools/release/verify-tags.sh "$TAG"
+
+  consume:
+    name: consume (go get through the proxy, a Rust crate against the tag)
+    needs: gate
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: truvity/ci-actions/setup-devbox@82e404675ef3f826755e2939d1072cddcd07ed26 # v3.9.0
+      - name: Consume the release
+        env:
+          TAG: ${{ github.ref_name }}
+        run: devbox run -- just rust-toolchain && devbox run -- tools/release/consume.sh "${TAG#v}"
+
+  # The one job that can change what users see: it holds the only write permission of this workflow. It builds nothing.
+  release:
+    name: release (draft, checks, publish)
+    needs: [gate, consume]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Immutable releases must be on (fails closed)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          enabled=$(gh api "repos/$GITHUB_REPOSITORY/immutable-releases" --jq .enabled) ||
+            { echo "release: refused: cannot establish whether immutable releases are on" >&2; exit 1; }
+          [ "$enabled" = true ] || { echo "release: refused: immutable releases are not on for this repository (plan R9)" >&2; exit 1; }
+      - name: The release notes
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          version=${TAG#v}
+          # The changelog section of this version, up to the next section.
+          awk -v h="## $version " 'index($0, h) == 1 { on = 1; next } /^## / { on = 0 } on' CHANGELOG.md >notes.md
+          [ -s notes.md ] || { echo "release: refused: CHANGELOG.md has no section for $version" >&2; exit 1; }
+      - name: Draft, check, publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          # A draft first: a release that is public cannot be changed once immutable.
+          gh release create "$TAG" --draft --verify-tag --title "atoom ${TAG#v}" --notes-file notes.md
+          state=$(gh release view "$TAG" --json isDraft,tagName --jq '"\(.isDraft) \(.tagName)"')
+          [ "$state" = "true $TAG" ] || { echo "release: refused: the draft is '$state'" >&2; exit 1; }
+          gh release edit "$TAG" --draft=false --latest

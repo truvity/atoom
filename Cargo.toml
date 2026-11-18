@@ -1,0 +1,21 @@
+# One Cargo workspace for every Rust library. The member list is explicit, with no globs (docs/plan.md, section 5): a directory
+# that holds only a Go library is not a member, and a new crate is added here by the change that adds it.
+[workspace]
+resolver = "3"
+members = [
+  "common",
+]
+
+[workspace.package]
+# The one version of the whole repository (decision 0005). `just release-prepare X.Y.Z` sets it.
+version = "0.0.0"
+edition = "2024"
+license = "MIT"
+repository = "https://github.com/truvity/atoom"
+rust-version = "1.99.1"
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+
+[workspace.lints.clippy]
+all = { level = "deny", priority = -1 }

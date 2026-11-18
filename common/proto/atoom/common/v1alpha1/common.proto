@@ -1,0 +1,5 @@
+// The types every atoom port and driver speaks. A placeholder: step 0 of docs/plan.md sets up the generator and its checks on this
+// empty file, and step 1 moves Refusal and IndexEntry into it.
+syntax = "proto3";
+
+package atoom.common.v1alpha1;

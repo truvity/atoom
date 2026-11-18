@@ -1,0 +1,7 @@
+# Normalise line endings: text files are stored with LF.
+* text=auto eol=lf
+*.sh text eol=lf
+
+# Generated files: collapsed in GitHub diffs.
+**/*.pb.go linguist-generated=true
+**/gen/**  linguist-generated=true
