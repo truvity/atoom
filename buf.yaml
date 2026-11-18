@@ -4,6 +4,7 @@ version: v2
 modules:
   - path: common/proto
   - path: store/proto
+  - path: key/proto
 lint:
   use:
     - STANDARD
