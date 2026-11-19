@@ -61,7 +61,11 @@ pub async fn item_suite(client: Client) -> Vec<Case> {
         run_case("delete_at_version", s.delete_at_version()).await,
         run_case("transact_all_or_none", s.transact_all_or_none()).await,
         run_case("one_put_one_condition", s.one_put_one_condition()).await,
-        run_case("expiry", s.expiry()).await,
+        run_case(
+            "expiry",
+            retried_once_on_dynamodb_local("expiry", |n| s.expiry(n)),
+        )
+        .await,
         run_case(
             "version_never_decreases",
             retried_once_on_dynamodb_local("version_never_decreases", |n| {
@@ -562,13 +566,20 @@ impl Suite {
         Ok(())
     }
 
-    async fn expiry(&self) -> anyhow::Result<()> {
+    /// `attempt` is 0, or 1 on the one retry on DynamoDB Local ([`retried_once_on_dynamodb_local`], D13, refs #14); the retry has a key
+    /// prefix of its own, so the listing below sees only its own items and not what the first attempt left.
+    async fn expiry(&self, attempt: u32) -> anyhow::Result<()> {
+        let case = if attempt == 0 {
+            "expiry".to_string()
+        } else {
+            format!("expiry-retry{attempt}")
+        };
         let past = ms_to_ts(now_ms() - 10_000);
         let future = ms_to_ts((now_ms() / 1000 + 3600) * 1000);
         let (gone, live, plain) = (
-            self.key("expiry", "a-gone"),
-            self.key("expiry", "b-live"),
-            self.key("expiry", "c-plain"),
+            self.key(&case, "a-gone"),
+            self.key(&case, "b-live"),
+            self.key(&case, "c-plain"),
         );
         let expiring = |k: &[u8], t: &buffa_types::google::protobuf::Timestamp| Put {
             expires_at: t.clone().into(),
@@ -594,7 +605,7 @@ impl Suite {
             self.get(&live, true).await?.version == 1,
             "an item before its expiry is not readable"
         );
-        let listed = self.query_all(&self.key("expiry", ""), 0).await?;
+        let listed = self.query_all(&self.key(&case, ""), 0).await?;
         let keys: Vec<_> = listed.iter().map(|i| i.key.clone()).collect();
         ensure!(
             keys == vec![live.clone(), plain.clone()],
@@ -1408,13 +1419,23 @@ fn is_absent(res: Result<DriverItem, ConnectError>) -> bool {
 /// sets it for that one run and for no other.
 pub(crate) const DYNAMODB_LOCAL_ENV: &str = "ATOOM_CONFORMANCE_DYNAMODB_LOCAL";
 
+/// The cases the kit retries on DynamoDB Local: a short allow-list, and the only one. Both read a row that DynamoDB Local's background
+/// sweep of expired items can free between two steps (issue #14; D9 C added `version_never_decreases`, D13 A added `expiry`).
+pub(crate) const RETRIED_ON_DYNAMODB_LOCAL: [&str; 2] = ["version_never_decreases", "expiry"];
+
+/// Whether the case `name` is retried once, given the value of [`DYNAMODB_LOCAL_ENV`]: it is on the allow-list and the value is `1`.
+fn retries_on_dynamodb_local(env: Option<&str>, name: &str) -> bool {
+    env == Some("1") && RETRIED_ON_DYNAMODB_LOCAL.contains(&name)
+}
+
 /// Runs a case, and on DynamoDB Local runs it once more when the first run fails, printing `RETRIED <name>: <first failure>`.
 ///
-/// This is the one retry of the kit and it is narrow on purpose: only `version_never_decreases`, only when
-/// [`DYNAMODB_LOCAL_ENV`] is `1`, only once. DynamoDB Local deletes expired items in the background, and a sweep that lands between
-/// the steps of the case frees the row, so the version starts again at 1 (versions `[1, 2, 3, 1]` on the arm64 runner, issue #14).
+/// This is the one retry of the kit and it is narrow on purpose: only the cases of [`RETRIED_ON_DYNAMODB_LOCAL`]
+/// (`version_never_decreases` and `expiry`), only when [`DYNAMODB_LOCAL_ENV`] is `1`, only once. DynamoDB Local deletes expired items
+/// in the background, and a sweep that lands between the steps of a case frees the row: the version starts again at 1 (versions
+/// `[1, 2, 3, 1]` on the arm64 runner), or an item is not where the case just put it. Refs #14.
 /// The cause stays; the retry makes the case tell a real regression (it fails twice) from that race. Any other driver, and a real
-/// DynamoDB, run the case once. The second attempt writes under another key (`attempt` is passed to the case).
+/// DynamoDB, run the case once. The second attempt writes under other keys (`attempt` is passed to the case).
 pub(crate) async fn retried_once_on_dynamodb_local<F, Fut>(
     name: &str,
     attempt: F,
@@ -1424,7 +1445,7 @@ where
     Fut: Future<Output = anyhow::Result<()>>,
 {
     retried_once(
-        std::env::var(DYNAMODB_LOCAL_ENV).is_ok_and(|v| v == "1"),
+        retries_on_dynamodb_local(std::env::var(DYNAMODB_LOCAL_ENV).ok().as_deref(), name),
         name,
         attempt,
     )
@@ -1456,7 +1477,25 @@ pub(crate) async fn bounded(fut: impl Future<Output = anyhow::Result<()>>) -> an
 mod tests {
     use std::cell::Cell;
 
-    use super::retried_once;
+    use super::{retried_once, retries_on_dynamodb_local};
+
+    #[test]
+    fn only_the_two_cases_on_dynamodb_local_are_retried() {
+        for name in ["version_never_decreases", "expiry"] {
+            assert!(retries_on_dynamodb_local(Some("1"), name), "{name}");
+            assert!(!retries_on_dynamodb_local(None, name), "{name} unset");
+            assert!(!retries_on_dynamodb_local(Some("0"), name), "{name} 0");
+            assert!(!retries_on_dynamodb_local(Some(""), name), "{name} empty");
+        }
+        for name in [
+            "item_round_trip",
+            "expiry_other",
+            "expired_delete_is_logged",
+            "cleanup",
+        ] {
+            assert!(!retries_on_dynamodb_local(Some("1"), name), "{name}");
+        }
+    }
 
     #[tokio::test]
     async fn a_failure_is_retried_once_when_enabled() {
