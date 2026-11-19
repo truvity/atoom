@@ -4,9 +4,9 @@
 // (sluis does). This main takes no key plan, so it releases no PIN to a peer: the PIN is delivered on the admin socket alone.
 //
 //	yubikeypiv serve --socket PATH --admin-socket PATH --node NAME --environment development|staging|production
-//	                 [--boundary NAME] [--serial N] [--state-dir DIR] [--admin-uid N]
+//	                 [--boundary NAME] [--reader NAME] [--serial N] [--state-dir DIR] [--admin-uid N]
 //	                 [--allow-uid UID]... [--allow-any-uid] [--socket-gid GID] [--socket-mode MODE]
-//	yubikeypiv check [--serial N] [--environment E]
+//	yubikeypiv check [--reader NAME] [--serial N] [--environment E]
 //	yubikeypiv version
 //
 // The key socket is guarded (github.com/truvity/atoom/socket, docs/socket-guard.md): mode 0600 and the uid of the process by default;
@@ -30,6 +30,9 @@ import (
 	"github.com/truvity/atoom/key/yubikeypiv"
 	atoomsocket "github.com/truvity/atoom/socket"
 )
+
+// readerHelp is the text of --reader: the driver connects to this reader only, and refuses to choose among several.
+const readerHelp = "the exact PC/SC reader name of the card; required when there is more than one reader (the refusal lists them), and the only reader the driver connects to"
 
 // version is stamped at build time (-ldflags "-X main.version=..."); a build without it reports the module version.
 var version = ""
@@ -87,6 +90,7 @@ func serve(args []string, stderr io.Writer) int {
 	env := fs.String("environment", "", "development, staging or production (required); only development makes a key with the factory management key")
 	boundary := fs.String("boundary", "", "the boundary of the node, which a PIN release names")
 	serial := fs.Uint("serial", 0, "the serial number of the card the driver is bound to; required outside development (in development, none means the only card)")
+	reader := fs.String("reader", "", readerHelp)
 	state := fs.String("state-dir", "", "the driver's own state directory, mode 0700: it holds the stop that a refused released PIN leaves")
 	adminUID := fs.Uint("admin-uid", 0, "the uid that may use the admin socket (the socket is mode 0600 as well)")
 	if err := fs.Parse(args); err != nil {
@@ -116,7 +120,7 @@ func serve(args []string, stderr io.Writer) int {
 	}}
 	uid := uint32(*adminUID) //nolint:gosec // a uid fits 32 bits
 	admin := yubikeypiv.AdminConfig{Socket: *adminSocket, Allow: func(peer uint32) bool { return peer == uid }}
-	opts := yubikeypiv.Options{Environment: *env, Node: *node, Boundary: *boundary, Serial: uint32(*serial), StateDir: *state}
+	opts := yubikeypiv.Options{Environment: *env, Node: *node, Boundary: *boundary, Reader: *reader, Serial: uint32(*serial), StateDir: *state}
 	if err := yubikeypiv.Run(ctx, opts, host, admin); err != nil {
 		return fail(stderr, err)
 	}
@@ -129,6 +133,7 @@ func check(args []string, stderr io.Writer) int {
 	fs := flag.NewFlagSet("yubikeypiv check", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	env := fs.String("environment", yubikeypiv.Staging, "development, staging or production; check makes no key, so it only has to be a real one")
+	reader := fs.String("reader", "", readerHelp)
 	serial := fs.Uint("serial", 0, "the serial number of the card; required outside development")
 	if err := fs.Parse(args); err != nil {
 		return 2
@@ -137,7 +142,7 @@ func check(args []string, stderr io.Writer) int {
 		_, _ = fmt.Fprintln(stderr, "yubikeypiv check: unexpected arguments")
 		return 2
 	}
-	if err := yubikeypiv.Check(yubikeypiv.Options{Environment: *env, Serial: uint32(*serial)}); err != nil {
+	if err := yubikeypiv.Check(yubikeypiv.Options{Environment: *env, Reader: *reader, Serial: uint32(*serial)}); err != nil {
 		return fail(stderr, err)
 	}
 	return 0

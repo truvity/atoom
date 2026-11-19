@@ -7,4 +7,7 @@ package card
 const HasCardSupport = false
 
 // Open always fails in a build without card support.
-func Open(uint32) (Card, error) { return nil, ErrNoCardSupport }
+func Open(Selector) (Card, error) { return nil, ErrNoCardSupport }
+
+// ListReaders always fails in a build without card support.
+func ListReaders() ([]string, error) { return nil, ErrNoCardSupport }

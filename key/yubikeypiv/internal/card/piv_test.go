@@ -37,3 +37,26 @@ func TestTheVerifiedAnswerIsTheTextOfPivGo(t *testing.T) {
 		t.Fatal("piv-go no longer says " + verifiedAnswer + ": the driver would read a verified card as a failure")
 	}
 }
+
+// A reader that another process holds is told from piv-go's error text, as the verified answer is. The text is read from piv-go's
+// error table at the version in go.mod, so that a bump that changes it fails here and not on a board (a busy reader would then be
+// reported as a plain failure to open).
+func TestTheSharingViolationIsTheTextOfPivGo(t *testing.T) {
+	if !isSharingViolation(fmt.Errorf("connecting to smart card: %w", errors.New("the smart card cannot be accessed because of other connections outstanding"))) {
+		t.Fatal("the text of piv-go is not recognised")
+	}
+	if isSharingViolation(errors.New("the specified reader name is not recognized")) {
+		t.Fatal("another error is not a busy reader")
+	}
+	out, err := exec.Command("go", "list", "-m", "-f", "{{.Dir}}", "github.com/go-piv/piv-go/v2").Output()
+	if err != nil || len(out) == 0 {
+		t.Skip("piv-go's source is not at hand")
+	}
+	src, err := os.ReadFile(filepath.Join(strings.TrimSpace(string(out)), "piv", "pcsc_errors.go"))
+	if err != nil {
+		t.Skip("piv-go's source is not at hand")
+	}
+	if !strings.Contains(string(src), "0x8010000B: \"the smart card cannot be accessed because of other connections outstanding\"") {
+		t.Fatal("piv-go no longer says that for SCARD_E_SHARING_VIOLATION: the driver would report a busy reader as a plain failure")
+	}
+}
