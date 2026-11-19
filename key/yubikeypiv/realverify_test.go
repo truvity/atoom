@@ -39,8 +39,8 @@ func realOpener(t *testing.T, c *cardtest.Card) card.Opener {
 		t.Fatal(err)
 	}
 	open := c.Opener()
-	return func(serial uint32) (card.Card, error) {
-		if _, err := open(serial); err != nil {
+	return func(sel card.Selector) (card.Card, error) {
+		if _, err := open(sel); err != nil {
 			return nil, err
 		}
 		return &realCard{Card: c, verify: verify}, nil
