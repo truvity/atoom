@@ -2,13 +2,17 @@
 # which the maintainer makes and signs by hand (`just release-tag X.Y.Z`); this workflow never makes a tag. The tags of the Go libraries
 # (key/vX.Y.Z, ...) have a slash and do not match the trigger: they are pushed first, the root tag alone last.
 #
-# THIS WORKFLOW HAS NEVER RUN: no tag exists. It is built and checked with actionlint and by the rehearsal of the scripts it calls
-# (`just release-rehearsal`), nothing more. The first tag is the first real test; expect to repair it then.
+# History. The first run, on the tag v0.1.0 (2026-11-19), passed `gate` and `consume` and failed in `release`: its pre-publish check of
+# `GET /repos/{repo}/immutable-releases` answers 403 to the workflow's GITHUB_TOKEN (that endpoint needs the Administration permission,
+# which no GITHUB_TOKEN can have), so it could never pass. The pre-check is gone; the job now checks the published release instead (see
+# `release` below). v0.1.0 itself was published by hand with the same commands the job runs (`gh release create --draft`, then
+# `gh release edit --draft=false --latest`).
 #
 # Three jobs. `gate` refuses a tag that is not a release tag, a commit that is not on master or whose CI run on master is not green,
 # and a tag set that is not the whole release (tools/release/verify-tags.sh). `consume` proves that the libraries can be consumed:
 # `go get` of every Go module through the public proxy and a smoke Rust crate against the git tag. `release` has the only write
-# permission, builds nothing, and publishes the GitHub release as a draft first and makes it public only when its checks pass.
+# permission, builds nothing, publishes the GitHub release as a draft first, makes it public only when its checks pass, and then checks
+# that the published release is immutable (fails the job if it is not).
 #
 # Not here yet: driver binaries, .deb and .rpm packages, OCI images, SBOMs and checksums. The candidate build and the promotion of
 # its bytes (docs/plan.md, "Release management of the driver binaries") need a driver to build, and the first one arrives with step 2.
@@ -96,14 +100,6 @@ jobs:
         with:
           ref: ${{ github.sha }}
           persist-credentials: false
-      - name: Immutable releases must be on (fails closed)
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          enabled=$(gh api "repos/$GITHUB_REPOSITORY/immutable-releases" --jq .enabled) ||
-            { echo "release: refused: cannot establish whether immutable releases are on" >&2; exit 1; }
-          [ "$enabled" = true ] || { echo "release: refused: immutable releases are not on for this repository (plan R9)" >&2; exit 1; }
       - name: The release notes
         env:
           TAG: ${{ github.ref_name }}
@@ -124,3 +120,12 @@ jobs:
           state=$(gh release view "$TAG" --json isDraft,tagName --jq '"\(.isDraft) \(.tagName)"')
           [ "$state" = "true $TAG" ] || { echo "release: refused: the draft is '$state'" >&2; exit 1; }
           gh release edit "$TAG" --draft=false --latest
+          # Immutable releases (plan R9) are a repository setting that a GITHUB_TOKEN cannot read (the settings endpoint needs
+          # Administration read), so it is checked on the result: the release object carries `immutable`. A false here means the setting
+          # is off and this release can still be changed: the job fails so that someone checks it by hand.
+          immutable=$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$TAG" --jq .immutable) ||
+            { echo "release: the release $TAG is published but its immutability cannot be read: check it by hand" >&2; exit 1; }
+          [ "$immutable" = true ] || {
+            echo "release: the release $TAG is published but is NOT immutable ('$immutable'): immutable releases are off for this repository (plan R9); check the published release by hand" >&2
+            exit 1
+          }
