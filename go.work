@@ -24,17 +24,34 @@ use (
 	./transport
 )
 
-// A library requires its siblings at v0.0.0 until the first release, and `just release-prepare` sets the real version. A workspace does not
-// look a version up that one of its replace lines names, so the lines below resolve the siblings at the version the go.mod files
-// require to their directories (release-prepare moves them too). They are here and never in a go.mod (just check-isolation).
-replace (
-	github.com/truvity/atoom/common v0.0.0 => ./common
-	github.com/truvity/atoom/key v0.0.0 => ./key
-	github.com/truvity/atoom/key/conformance v0.0.0 => ./key/conformance
-	github.com/truvity/atoom/key/pinrelease v0.0.0 => ./key/pinrelease
-	github.com/truvity/atoom/key/slotplan v0.0.0 => ./key/slotplan
-	github.com/truvity/atoom/key/software v0.0.0 => ./key/software
-	github.com/truvity/atoom/key/yubikeypiv v0.0.0 => ./key/yubikeypiv
-	github.com/truvity/atoom/socket v0.0.0 => ./socket
-	github.com/truvity/atoom/store v0.0.0 => ./store
-)
+replace github.com/truvity/atoom/blob v0.1.0 => ./blob
+
+replace github.com/truvity/atoom/common v0.1.0 => ./common
+
+replace github.com/truvity/atoom/destination v0.1.0 => ./destination
+
+replace github.com/truvity/atoom/index v0.1.0 => ./index
+
+replace github.com/truvity/atoom/key v0.1.0 => ./key
+
+replace github.com/truvity/atoom/key/awskms v0.1.0 => ./key/awskms
+
+replace github.com/truvity/atoom/key/conformance v0.1.0 => ./key/conformance
+
+replace github.com/truvity/atoom/key/pinrelease v0.1.0 => ./key/pinrelease
+
+replace github.com/truvity/atoom/key/slotplan v0.1.0 => ./key/slotplan
+
+replace github.com/truvity/atoom/key/software v0.1.0 => ./key/software
+
+replace github.com/truvity/atoom/key/yubikeypiv v0.1.0 => ./key/yubikeypiv
+
+replace github.com/truvity/atoom/socket v0.1.0 => ./socket
+
+replace github.com/truvity/atoom/source v0.1.0 => ./source
+
+replace github.com/truvity/atoom/store v0.1.0 => ./store
+
+replace github.com/truvity/atoom/store/dynamodb v0.1.0 => ./store/dynamodb
+
+replace github.com/truvity/atoom/transport v0.1.0 => ./transport
