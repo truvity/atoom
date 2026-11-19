@@ -3,8 +3,12 @@
 //! ```text
 //! destination-dir serve --socket PATH --root DIR --state-dir DIR   # serves the destination contract on the UNIX socket PATH (mode 0600)
 //! destination-dir check --root DIR --state-dir DIR                 # opens both directories by the rules of serve; exit 3 when it cannot
-//! destination-dir --version
+//! destination-dir version                          # and --version
 //! ```
+//!
+//! The socket is guarded (`docs/socket-guard.md`): its mode is 0600 and it admits the callers of this process's uid, unless `serve` is
+//! given the guard flags `--allow-uid UID` (repeatable), `--allow-any-uid`, `--socket-gid GID` and `--socket-mode MODE`. A caller
+//! outside the set is refused with the reason `caller`. `version` prints the version of the build.
 //!
 //! `--root` is the directory a forwarder serves, one file per address; `--state-dir` is the driver's own, where it records what it
 //! wrote. Both must belong to this process's user and be closed to writes by anyone else. `serve` removes the temporary files an
@@ -16,8 +20,8 @@ use std::sync::Arc;
 use anyhow::Context;
 use atoom_destination_conformance::rpc::Service;
 use atoom_destination_dir::Directory;
-use atoom_socket::ServerConfig;
-use clap::{Arg, Command, value_parser};
+use atoom_socket::cli::{self, GuardArgs};
+use clap::{Arg, Args as _, Command, FromArgMatches as _, value_parser};
 
 fn command() -> Command {
     let dir = |name: &'static str, help: &'static str| {
@@ -36,11 +40,12 @@ fn command() -> Command {
         )
     };
     Command::new("destination-dir")
-        .version(env!("CARGO_PKG_VERSION"))
+        .version(atoom_socket::VERSION)
         .about("The dir driver of the destination port")
         .subcommand_required(true)
+        .subcommand(cli::version_command())
         .subcommand(
-            Command::new("serve")
+            GuardArgs::augment_args(Command::new("serve"))
                 .about("Serve the destination contract on a UNIX socket")
                 .arg(
                     Arg::new("socket")
@@ -48,7 +53,7 @@ fn command() -> Command {
                         .value_name("PATH")
                         .required(true)
                         .value_parser(value_parser!(PathBuf))
-                        .help("The UNIX socket to serve on (mode 0600)"),
+                        .help("The UNIX socket to serve on (mode 0600 by default)"),
                 )
                 .arg(root())
                 .arg(state()),
@@ -105,7 +110,7 @@ async fn main() -> anyhow::Result<()> {
                 tracing::warn!(swept, "removed temporary files a crash left behind");
             }
             atoom_socket::serve(
-                ServerConfig::new(socket),
+                GuardArgs::from_arg_matches(m)?.config(socket),
                 Service(Arc::new(d)).router(),
                 shutdown_signal(),
             )
@@ -123,6 +128,10 @@ async fn main() -> anyhow::Result<()> {
                     std::process::exit(3);
                 }
             }
+        }
+        Some(("version", _)) => {
+            cli::print_version("destination-dir");
+            Ok(())
         }
         _ => unreachable!("a subcommand is required"),
     }

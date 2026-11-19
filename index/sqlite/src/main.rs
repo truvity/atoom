@@ -3,8 +3,12 @@
 //! ```text
 //! index-sqlite serve --socket PATH --read-socket PATH --state-dir DIR
 //! index-sqlite check --state-dir DIR
-//! index-sqlite --version
+//! index-sqlite version                          # and --version
 //! ```
+//!
+//! The sockets are guarded (`docs/socket-guard.md`): their mode is 0600 and they admit the callers of this process's uid, unless `serve` is
+//! given the guard flags `--allow-uid UID` (repeatable), `--allow-any-uid`, `--socket-gid GID` and `--socket-mode MODE`; `--read-allow-uid UID` is for the read socket. A caller
+//! outside the set is refused with the reason `caller`. `version` prints the version of the build.
 //!
 //! `serve` opens the index in `--state-dir` (a directory owned by this process and closed to others, mode no wider than 0750; the file
 //! `index.sqlite` is made there if it is not), then serves the write side (`IndexService`) on the UNIX socket `--socket` and the read
@@ -16,8 +20,8 @@ use std::path::PathBuf;
 use anyhow::{Context, bail};
 use atoom_index_sqlite::Index;
 use atoom_index_sqlite::service::{Read, Write};
-use atoom_socket::ServerConfig;
-use clap::{Arg, Command, value_parser};
+use atoom_socket::cli::{self, GuardArgs};
+use clap::{Arg, Args as _, Command, FromArgMatches as _, value_parser};
 
 fn command() -> Command {
     let state = || {
@@ -29,29 +33,34 @@ fn command() -> Command {
             .help("The directory of the index file")
     };
     Command::new("index-sqlite")
-        .version(env!("CARGO_PKG_VERSION"))
+        .version(atoom_socket::VERSION)
         .about("The sqlite driver of the index port")
         .subcommand_required(true)
+        .subcommand(cli::version_command())
         .subcommand(
-            Command::new("serve")
-                .about("Serve the index contract on two UNIX sockets")
-                .arg(
-                    Arg::new("socket")
-                        .long("socket")
-                        .value_name("PATH")
-                        .required(true)
-                        .value_parser(value_parser!(PathBuf))
-                        .help("The UNIX socket of the write side (mode 0600)"),
-                )
-                .arg(
-                    Arg::new("read-socket")
-                        .long("read-socket")
-                        .value_name("PATH")
-                        .required(true)
-                        .value_parser(value_parser!(PathBuf))
-                        .help("The UNIX socket of the read side (mode 0600)"),
-                )
-                .arg(state()),
+            cli::allow_flag(
+                GuardArgs::augment_args(Command::new("serve")),
+                "read",
+                "the read socket",
+            )
+            .about("Serve the index contract on two UNIX sockets")
+            .arg(
+                Arg::new("socket")
+                    .long("socket")
+                    .value_name("PATH")
+                    .required(true)
+                    .value_parser(value_parser!(PathBuf))
+                    .help("The UNIX socket of the write side (mode 0600 by default)"),
+            )
+            .arg(
+                Arg::new("read-socket")
+                    .long("read-socket")
+                    .value_name("PATH")
+                    .required(true)
+                    .value_parser(value_parser!(PathBuf))
+                    .help("The UNIX socket of the read side (mode 0600 by default)"),
+            )
+            .arg(state()),
         )
         .subcommand(
             Command::new("check")
@@ -109,12 +118,15 @@ async fn main() -> anyhow::Result<()> {
                     let _ = stop.send(());
                 }
             });
-            let side = |socket: &PathBuf, router| {
+            // `--allow-uid` is the callers of the write side; the read side has its own `--read-allow-uid`, which defaults to the same.
+            let guard = GuardArgs::from_arg_matches(m)?;
+            let side = |socket: &PathBuf, allow, router| {
                 let mut done = stop.subscribe();
                 let stop = stop.clone();
-                let serve = atoom_socket::serve(ServerConfig::new(socket), router, async move {
-                    let _ = done.recv().await;
-                });
+                let serve =
+                    atoom_socket::serve(guard.config_allowing(socket, allow), router, async move {
+                        let _ = done.recv().await;
+                    });
                 async move {
                     let out = serve.await;
                     let _ = stop.send(());
@@ -122,8 +134,8 @@ async fn main() -> anyhow::Result<()> {
                 }
             };
             let (w, r) = tokio::join!(
-                side(write, Write(index.clone()).router()),
-                side(read, Read(index).router())
+                side(write, guard.allow(), Write(index.clone()).router()),
+                side(read, guard.allow_of(m, "read"), Read(index).router())
             );
             sig.abort();
             w.and(r)
@@ -143,6 +155,10 @@ async fn main() -> anyhow::Result<()> {
                     std::process::exit(3);
                 }
             }
+        }
+        Some(("version", _)) => {
+            cli::print_version("index-sqlite");
+            Ok(())
         }
         _ => unreachable!("a subcommand is required"),
     }

@@ -4,7 +4,8 @@
 # A library at the first level that is listed here is plumbing and not a port, so the rule "a port requires only the runtimes" does not
 # apply to it.
 
-# Connect over a UNIX socket, plain: dial and serve. The host plumbing of the thin mains and kits of every Rust port.
+# Connect over a UNIX socket: dial and serve, behind the caller guard (docs/socket-guard.md). The host plumbing of the thin mains and kits of every
+# port: a Rust crate and, in the same directory, a Go module.
 socket
 key/slotplan
 key/pinrelease

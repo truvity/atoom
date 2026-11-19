@@ -21,7 +21,7 @@ path = "src/main.rs"
 [dependencies]
 anyhow = "1"
 atoom-common = { path = "../../common" }
-atoom-socket = { path = "../../socket" }
+atoom-socket = { path = "../../socket", features = ["cli"] }
 atoom-store = { path = ".." }
 # The rules every Rust engine shares (keys, page sizes, timestamps, the checks of a Transact). The suite itself is a test of this crate.
 atoom-store-conformance = { path = "../conformance" }

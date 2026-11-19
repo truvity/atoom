@@ -80,6 +80,8 @@ How they stay in step:
 | atoom releases the driver binaries, packages and images under the one version, mirroring sluis's release practice; no Helm charts | [0007](decisions/0007-release-management.md) |
 | Code moves as it is, in both languages; no rewrite during the move | this plan, set to go fast |
 | AT1 A: all seven ports move; no Helm charts in atoom; the other calls of section 10 | coordinator's calls 2026-11-18, for the maintainer's review |
+| D11 A: each driver ships as its own package and image, and sluis's own driver hosts are deleted once atoom's thin programs carry the caller guard | the maintainer, 2026-11-19; [steps G1 to G4](#steps-g1-to-g4-each-driver-as-its-own-package-and-image-decision-d11-a) |
+| D4: atoom components are low level; atoom proves the contract of each driver, sluis proves the product | the maintainer, 2026-11-19; [steps G1 to G4](#steps-g1-to-g4-each-driver-as-its-own-package-and-image-decision-d11-a) |
 
 ## 3. What is in sluis today
 
@@ -297,6 +299,37 @@ Not a move. The only engine is the Cedar `policy` actor on sluis's schema, so a 
 - A Go library for Yubico attestation verification (`key/attest`) once ritueel restarts: today the hand-off check lives in `kits/go/handoff/{attest,proof}.go` in sluis and in `internal/handoff/evidence/{attest,piv,kms}` in ritueel.
 - `key/agefile`, from ritueel's age-file software key store.
 - A second-language implementation of a driver, only where a consumer needs it (R2).
+
+### Steps G1 to G4: each driver as its own package and image (decision D11 A)
+
+The maintainer's decision D11 A (2026-11-19): "atoom ships each driver as its own deb/rpm package and OCI image (plus the library for in-process/Lambda use); sluis packages depend on them; sluis's own driver hosts are deleted once atoom's thin programs carry the caller guard."
+
+The reason is the seam. Until now sluis wrapped each atoom driver in a thin host of its own that added what atoom's thin main lacked (the peer credentials of the caller, the owner check, `--socket-gid`, the version), so every driver existed twice: atoom's program, which nothing ran in production, and sluis's host, which did. D11 A makes atoom's program the one that runs. It needs four steps, in this order, each its own PR:
+
+| Step | Where | What | State |
+| --- | --- | --- | --- |
+| **G1** | atoom | **The caller guard in every thin main**, in Rust and in Go: the socket admits only the allowed uids and refuses the others with the refusal reason `caller`; `--socket-gid` and `--socket-mode`; the version stamp; the peer handed to the handler (the spool names its emitters from it). Generic: no sluis names, no registry. | **Built (2026-11-19)**, below |
+| **G2** | atoom | Each driver as its own deb and rpm package and OCI image in atoom's release, under the one version (decision [0007](decisions/0007-release-management.md)), beside the library for in-process and Lambda use. | planned |
+| **G3** | sluis | The sluis packages depend on atoom's driver packages (and the images on atoom's images) instead of building the driver themselves; the unit files run atoom's program with the guard flags of the deployment. | planned |
+| **G4** | sluis | The driver hosts of sluis (`drivers/**`, and the part of `kits/rust/sluis-kit` and `kits/go/rpc` that only they used) are deleted. | planned |
+
+**G1, as built.** What moved from sluis into atoom is the part of its kits that is not about sluis: the peer credentials of a connection, the allowed set of uids, the refusal before the message is decoded, the group and the mode of the socket, and the peer handed to the handler. What stays in sluis is what is: the registry that says which uid is which actor, the call graph, the deadline and correlation id handed down, and the audit of refusals. The page [socket guard](socket-guard.md) is the reference; the calls made while building it:
+
+- **One socket library for both languages.** The Rust crate `atoom-socket` grows the guard (`ServerConfig::allow`, `socket_gid`, `peer`) and, behind a feature `cli`, the flags (`GuardArgs`, the `version` command). The Go thin mains had four private copies of the same socket code, so the Go twin is a new shared module `github.com/truvity/atoom/socket` (listed in `tools/isolation/shared.txt` with the Rust crate, in `go.work`, released with the others); its `Serve` has the signature of the `Host.Serve` of the key and store drivers, so each Go main only passes a closure. The Go module depends on `golang.org/x/sys` for `LOCAL_PEERCRED` on macOS and FreeBSD; on Linux it uses the standard library.
+- **Uids, not names.** The allowed set is `--allow-uid UID` (repeatable) and `--allow-any-uid`; there is no `--allow-user`. A name is resolved by the system differently on each host (files, directory services), the service manager that starts the program knows the uid it gave the user, and sluis's registry already speaks uids.
+- **The default is secure: the uid of the process.** It is what mode 0600 allowed already, so no test and no thin main changes, except that root is refused too. A consumer that used a wider socket now names its callers or passes `--allow-any-uid`. Decided against "the current behaviour" (any uid that can open the socket) as the default, because the point of the guard is that a socket opened to a group does not let in every member.
+- **A list is exact.** `--allow-uid` names the callers and the uid of the process is not implied: sluis's driver socket answers its owner, and the driver's own uid is not the owner. A host that wants both lists both.
+- **A second socket has a second flag.** `index-sqlite` (`--read-allow-uid`) and `transport-spool` (`--receive-allow-uid`) have two sockets with different callers in sluis; the flag defaults to the first socket's callers.
+- **The spool names its emitters from the peer** with `--emitter-name UID=NAME` (repeatable): `NAME@EMITTER` where sluis's host made `<actor>@<boundary>`. The mapping from a uid to a name is the deployment's, so it is a flag.
+- **The version is on the command line, not on the wire.** Every main answers `version`; sluis does not put the version on the wire either, so nothing was added to the calls.
+- **The card driver's admin socket is unchanged**; it has its own rule (`--admin-uid`).
+- **The kits did not change.** They run as the uid of the main and pass against the default guard.
+
+### D4: what atoom proves and what sluis proves
+
+The maintainer's direction (2026-11-19): "atoom components are low level; atoom CI proves each driver follows its contract with the conformance kits and integration tests; product conformance (OpenID and similar) runs in sluis, and moving sluis to a fresh atoom is the trigger to run it again."
+
+So the test of a driver here is its port's conformance kit and the driver's own integration tests, through the socket, and the guard's tests above. Nothing in atoom tests a product behaviour built on top of the drivers (a token's claims, an OpenID flow, the sluis call graph): that is sluis's conformance, and each time sluis takes a new atoom (a new pin, then a new release) it runs it again. The order of a bump stays atoom first, then the consumers.
 
 ## 7. How session switches, and how ritueel adopts later
 

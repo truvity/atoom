@@ -269,11 +269,14 @@ name = "atoom-socket"
 version = "0.0.0"
 dependencies = [
  "anyhow",
+ "atoom-common",
+ "clap",
  "connectrpc",
  "futures",
  "http",
  "hyper",
  "hyper-util",
+ "rustix",
  "tempfile",
  "tokio",
  "tower",

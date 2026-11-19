@@ -156,7 +156,8 @@ impl MemoryEngine {
         Arc::new(self).register(Router::new())
     }
 
-    /// Serves the item contract on `socket` until `shutdown`, plain: the socket's mode (0o600) is the only guard.
+    /// Serves the item contract on `socket` until `shutdown`, with the defaults of [`ServerConfig::new`]: mode 0o600, callers of this
+    /// process's uid only.
     ///
     /// # Errors
     ///
@@ -166,7 +167,20 @@ impl MemoryEngine {
         socket: &Path,
         shutdown: impl Future<Output = ()> + Send,
     ) -> anyhow::Result<()> {
-        atoom_socket::serve(ServerConfig::new(socket), self.router(), shutdown).await
+        self.serve_with(ServerConfig::new(socket), shutdown).await
+    }
+
+    /// [`Self::serve`] with a configuration of the socket's own: its mode, its group and the callers it admits.
+    ///
+    /// # Errors
+    ///
+    /// When the socket cannot be made, as `atoom_socket::serve`.
+    pub async fn serve_with(
+        self,
+        cfg: ServerConfig,
+        shutdown: impl Future<Output = ()> + Send,
+    ) -> anyhow::Result<()> {
+        atoom_socket::serve(cfg, self.router(), shutdown).await
     }
 
     /// One tick of the sweeper: frees the expired items and logs the removal of those that were logged. A real

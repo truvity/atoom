@@ -3,8 +3,12 @@
 //! ```text
 //! source-credential serve --socket P [--dir DIR]   # DIR defaults to $CREDENTIALS_DIRECTORY
 //! source-credential check [--dir DIR]              # opens DIR and reads every credential in it, printing no value
-//! source-credential --version
+//! source-credential version                          # and --version
 //! ```
+//!
+//! The socket is guarded (`docs/socket-guard.md`): its mode is 0600 and it admits the callers of this process's uid, unless `serve` is
+//! given the guard flags `--allow-uid UID` (repeatable), `--allow-any-uid`, `--socket-gid GID` and `--socket-mode MODE`. A caller
+//! outside the set is refused with the reason `caller`. `version` prints the version of the build.
 //!
 //! `serve` opens the directory (no directory, no service), serves the source contract on the UNIX socket P (mode 0600: the owner of
 //! the process is the only caller) until SIGINT or SIGTERM. `check` opens the directory by the rules of `serve` and reads every
@@ -14,10 +18,10 @@
 use std::path::PathBuf;
 
 use anyhow::{Context, bail};
-use atoom_socket::ServerConfig;
+use atoom_socket::cli::{self, GuardArgs};
 use atoom_source_credential::Dir;
 use atoom_source_credential::service::Service;
-use clap::{Arg, Command, value_parser};
+use clap::{Arg, Args as _, Command, FromArgMatches as _, value_parser};
 
 fn command() -> Command {
     let dir = || {
@@ -28,11 +32,12 @@ fn command() -> Command {
             .help("The credentials directory; default $CREDENTIALS_DIRECTORY")
     };
     Command::new("source-credential")
-        .version(env!("CARGO_PKG_VERSION"))
+        .version(atoom_socket::VERSION)
         .about("The credential driver of the source port")
         .subcommand_required(true)
+        .subcommand(cli::version_command())
         .subcommand(
-            Command::new("serve")
+            GuardArgs::augment_args(Command::new("serve"))
                 .about("Serve the source contract on a UNIX socket")
                 .arg(
                     Arg::new("socket")
@@ -40,7 +45,7 @@ fn command() -> Command {
                         .value_name("PATH")
                         .required(true)
                         .value_parser(value_parser!(PathBuf))
-                        .help("The UNIX socket to serve on (mode 0600)"),
+                        .help("The UNIX socket to serve on (mode 0600 by default)"),
                 )
                 .arg(dir()),
         )
@@ -97,7 +102,7 @@ async fn main() -> anyhow::Result<()> {
             // The directory is checked before the socket exists: no directory, no service.
             let dir = Dir::open(&dir(m)?)?;
             atoom_socket::serve(
-                ServerConfig::new(socket),
+                GuardArgs::from_arg_matches(m)?.config(socket),
                 Service(dir).router(),
                 shutdown_signal(),
             )
@@ -115,6 +120,10 @@ async fn main() -> anyhow::Result<()> {
                     std::process::exit(3);
                 }
             }
+        }
+        Some(("version", _)) => {
+            cli::print_version("source-credential");
+            Ok(())
         }
         _ => unreachable!("a subcommand is required"),
     }

@@ -6,7 +6,8 @@ The YubiKey PIV key driver of atoom: the [key port](../README.md) over the keys 
 | --- | --- |
 | Go module | `github.com/truvity/atoom/key/yubikeypiv` (requires the port, the common types, `key/slotplan`, `key/pinrelease`, piv-go, and the kit for its tests; no other driver) |
 | Library | package `yubikeypiv`: `New(Options)` opens the card and returns a `Service` (`Handler()`, `Close()`); `Run(ctx, opts, host, admin)` serves the key socket through the host and the unlock service on the admin socket; `Check(opts)` |
-| Thin main | `cmd/yubikeypiv`: `yubikeypiv serve`, `yubikeypiv check`, `yubikeypiv version` |
+| Thin main | `cmd/yubikeypiv`: `yubikeypiv serve` (the key socket is mode 0600 and admits this process's uid), `yubikeypiv check`, `yubikeypiv version` |
+| Guard flags | `--allow-uid UID` (repeatable; without it only this process's uid may call), `--allow-any-uid`, `--socket-gid GID`, `--socket-mode MODE`: the [socket guard](../../docs/socket-guard.md) |
 | C code | behind the build tag **`atoom_card`** (cgo, libpcsclite). Without the tag the driver builds everywhere with no C code, and refuses to open a card |
 | Documentation | [docs/](docs/) (below) |
 | Where it came from | [PROVENANCE.md](PROVENANCE.md) |
@@ -24,8 +25,8 @@ The driver runs unchanged inside a larger system, which keeps what is its own an
 
 | Place | What the host provides | atoom's thin main |
 | --- | --- | --- |
-| `Host.Serve` (and `Host.HandlerOptions`) | the server of the key socket: its listener, its peer-credential check, its interceptors | a UNIX socket, mode 0600 by default |
-| `AdminConfig.Allow` | which peer uid may use the admin socket | one uid (`--admin-uid`, default root); the socket is mode 0600 as well |
+| `Host.Serve` (and `Host.HandlerOptions`) | the server of the key socket: its listener, its peer-credential check, its interceptors | the [socket guard](../../docs/socket-guard.md): a UNIX socket, mode 0600 by default, callers by uid (`--allow-uid`), `--socket-gid`, `--socket-mode` |
+| `AdminConfig.Allow` | which peer uid may use the admin socket | one uid (`--admin-uid`, default root); the socket is mode 0600 as well; the guard flags do not apply to it |
 | `Options.PeerKeys` | the check of the other side of a PIN release: it verifies the signed key plan that came with the call and returns the pin-release key it lists for the node | none: a main without it releases no PIN to a peer |
 
 `PeerKeys` is an interface (`PeerKey(ctx, keyPlan, node) (*ecdsa.PublicKey, error)`): an error that wraps `ErrUnlisted` is the reason `peer`, any other is `key_plan`; the driver also refuses its own node, an empty one and a key that is not P-384 whatever the host says. What sluis puts behind it (the publisher's signature, the kind, the sequence of documents, the durable mark of the highest one) stays in sluis. The driver keeps what is the card's: the checks of the boundary and of the other side's signature, and the stop that a refused released PIN leaves in its state directory.

@@ -17,3 +17,5 @@ The code of the source libraries was copied as it is from [truvity/sluis](https:
 What stayed in sluis: the wrapper of each driver's `main` (the socket with peer credentials, `registry.DriverOwner`, the command line with `--socket-gid` and the `conformance` and `version` subcommands, which call the `suite::run_temp` of the library), `actors/store` (store@, which links the file driver for `store check --validate`), `actors/exchange` (a client of the source port) and the signed configuration.
 
 Sluis requirement tags in the tests (`verifies: REQ-...`) and references to sluis's decision records and pages were dropped or replaced by pointers into this repository's pages.
+
+Added in step G1 (2026-11-19, [docs/plan.md](../docs/plan.md), decision D11 A): the thin mains `source-file` and `source-credential` carry the guard flags and the `version` command. The guard comes from sluis's kits (`kits/rust/sluis-kit`, `kits/go/rpc`) with the names left out: it decides by uid and knows no registry. What stays in sluis: the registry names, the call graph and the `conformance` subcommand, until the hosts are deleted (step G4).

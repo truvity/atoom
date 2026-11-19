@@ -4,8 +4,12 @@
 //! store-rqlite serve --socket P --rqlite-url URL --namespace durable|temp [--sweep-interval 30s]
 //!                    [--changelog-retention 1h] [--basic-auth-file F]
 //! store-rqlite check --rqlite-url URL --namespace durable|temp [--basic-auth-file F]
-//! store-rqlite --version
+//! store-rqlite version                          # and --version
 //! ```
+//!
+//! The socket is guarded (`docs/socket-guard.md`): its mode is 0600 and it admits the callers of this process's uid, unless `serve` is
+//! given the guard flags `--allow-uid UID` (repeatable), `--allow-any-uid`, `--socket-gid GID` and `--socket-mode MODE`. A caller
+//! outside the set is refused with the reason `caller`. `version` prints the version of the build.
 //!
 //! `serve` waits for rqlite, makes the schema if it is not there, serves the item contract on the UNIX socket P (mode 0600: the owner
 //! of the process is the only caller) and sweeps expired items until SIGINT or SIGTERM. `check` proves that rqlite answers a
@@ -15,22 +19,23 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use anyhow::Context;
-use atoom_socket::ServerConfig;
+use atoom_socket::cli::{self, GuardArgs};
 use atoom_store_rqlite::client::Level;
 use atoom_store_rqlite::config::{self, Settings};
 use atoom_store_rqlite::sweeper;
-use clap::{Arg, Command, value_parser};
+use clap::{Arg, Args as _, Command, FromArgMatches as _, value_parser};
 
 /// How long `serve` waits for rqlite to answer before it gives up.
 const READY: Duration = Duration::from_secs(60);
 
 fn command() -> Command {
     let cmd = Command::new("store-rqlite")
-        .version(env!("CARGO_PKG_VERSION"))
+        .version(atoom_socket::VERSION)
         .about("The rqlite driver of the item port")
         .subcommand_required(true)
+        .subcommand(cli::version_command())
         .subcommand(
-            Command::new("serve")
+            GuardArgs::augment_args(Command::new("serve"))
                 .about("Serve the item contract on a UNIX socket")
                 .arg(
                     Arg::new("socket")
@@ -38,7 +43,7 @@ fn command() -> Command {
                         .value_name("PATH")
                         .required(true)
                         .value_parser(value_parser!(PathBuf))
-                        .help("The UNIX socket to serve on (mode 0600)"),
+                        .help("The UNIX socket to serve on (mode 0600 by default)"),
                 ),
         )
         .subcommand(
@@ -72,6 +77,11 @@ async fn main() -> anyhow::Result<()> {
         .with_writer(std::io::stderr)
         .init();
     let matches = command().get_matches();
+    // `version` needs no rqlite: answer it before the settings are read.
+    if matches.subcommand_name() == Some("version") {
+        cli::print_version("store-rqlite");
+        return Ok(());
+    }
     let settings = Settings::from_matches(&matches)?;
     match matches.subcommand() {
         Some(("serve", m)) => {
@@ -86,7 +96,7 @@ async fn main() -> anyhow::Result<()> {
                 settings.retention,
             ));
             let served = atoom_socket::serve(
-                ServerConfig::new(socket),
+                GuardArgs::from_arg_matches(m)?.config(socket),
                 driver.router(),
                 shutdown_signal(),
             )

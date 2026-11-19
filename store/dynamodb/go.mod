@@ -11,7 +11,9 @@ require (
 	github.com/aws/aws-sdk-go-v2/service/dynamodb v1.74.1
 	github.com/aws/smithy-go v1.28.9
 	github.com/truvity/atoom/common v0.0.0
+	github.com/truvity/atoom/socket v0.0.0
 	github.com/truvity/atoom/store v0.0.0
+	golang.org/x/sys v0.43.0 // indirect
 	google.golang.org/protobuf v1.36.12
 )
 

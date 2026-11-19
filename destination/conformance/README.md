@@ -6,7 +6,8 @@ The conformance kit of the [destination port](../docs/destination-port.md): the 
 | --- | --- |
 | Library | crate `atoom-destination-conformance`: `suite::run(&driver, &caps)` runs the suite in process against any `Destination` (the Rust trait of the five calls), or through a socket with `rpc::Client`; `rpc::Service(Arc::new(driver)).router()` serves any `Destination` as the ConnectRPC `DestinationService`; `memory::Memory` is the in-memory reference driver; `sha256_hex` is the digest; the trait, `Document`, `Error`, `check_address`, `check_prefix`, `check_document` and `page_size` are defined in the port crate `atoom-destination` and re-exported here, so a driver or a consumer may take them from either |
 | Binary `destination-conformance` | `destination-conformance --socket PATH [--public-base URL] [--edge]` runs the suite against the driver that serves on the UNIX socket PATH, whatever its language; `--public-base` says the destination has public addresses `<URL>/<address>`, and `--edge` that a cache sits in front of them; the exit status is 0 only when the suite passed |
-| Binary `destination-memory` | `destination-memory --socket PATH [--public-base URL] [--edge]` serves the in-memory driver on a socket (mode 0600), so that the kit can be tried against every shape of destination |
+| Binary `destination-memory` | `destination-memory --socket PATH [--public-base URL] [--edge]` serves the in-memory driver on a socket (mode 0600, this process's uid; the guard flags below), so that the kit can be tried against every shape of destination |
+| Guard flags | `--allow-uid UID` (repeatable; without it only this process's uid may call), `--allow-any-uid`, `--socket-gid GID`, `--socket-mode MODE`: the [socket guard](../../docs/socket-guard.md) |
 
 ```sh
 cargo build -p atoom-destination-dir -p atoom-destination-conformance

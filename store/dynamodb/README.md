@@ -6,7 +6,8 @@ The DynamoDB item driver of atoom: the [item port](../README.md) over one Dynamo
 | --- | --- |
 | Go module | `github.com/truvity/atoom/store/dynamodb` (requires the port, the common types and the AWS SDK for Go v2; no other driver) |
 | Library | package `dynamodb`: `New(Options)` takes a DynamoDB client (`API`; `*dynamodb.Client` is one) and a table name and returns a `Service`; `Service.Handler()` is the Connect handler to mount in-process or on a server; `Run(ctx, opts, host)` serves it on a server the host provides; `EnsureTable` and `CheckTable` make and check the table |
-| Thin main | `cmd/dynamodb`: `dynamodb serve --socket PATH --table NAME [--create-table]`, `dynamodb create-table`, `dynamodb check`, `dynamodb version` |
+| Thin main | `cmd/dynamodb`: `dynamodb serve --socket PATH --table NAME [--create-table]` (a socket of mode 0600 that admits this process's uid), `dynamodb create-table`, `dynamodb check`, `dynamodb version` |
+| Guard flags | `--allow-uid UID` (repeatable; without it only this process's uid may call), `--allow-any-uid`, `--socket-gid GID`, `--socket-mode MODE`: the [socket guard](../../docs/socket-guard.md) |
 | Documentation | [docs/layout.md](docs/layout.md) (the table, how each call maps, the limits), [docs/research](docs/research) |
 | Where it came from | [PROVENANCE.md](PROVENANCE.md) |
 

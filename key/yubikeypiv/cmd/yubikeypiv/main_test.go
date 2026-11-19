@@ -10,6 +10,8 @@ func TestUsage(t *testing.T) {
 	for _, args := range [][]string{
 		nil, {"nope"}, {"serve"}, {"serve", "--environment", "development"}, {"check", "extra"},
 		{"serve", "--environment", "development", "--socket", "/x", "--admin-socket", "/y", "--node", "n", "--socket-mode", "zz"},
+		{"serve", "--environment", "development", "--socket", "/x", "--admin-socket", "/y", "--node", "n", "--socket-gid", "0"},
+		{"serve", "--environment", "development", "--socket", "/x", "--admin-socket", "/y", "--node", "n", "--allow-any-uid", "--allow-uid", "1"},
 	} {
 		var out, errb bytes.Buffer
 		if code := run(args, &out, &errb); code != 2 {

@@ -1,20 +1,20 @@
-//! `destination-memory --socket P [--public-base URL] [--edge]`: serves the in-memory reference driver of the destination port on the
-//! UNIX socket P, plain, until SIGINT or SIGTERM. What it holds is lost when it stops. With `--public-base` it plays a public address
+//! `destination-memory --socket P [--public-base URL] [--edge] [guard flags]`: serves the in-memory reference driver of the destination
+//! port on the UNIX socket P until SIGINT or SIGTERM. What it holds is lost when it stops. With `--public-base` it plays a public address
 //! (and with `--edge` an edge cache in front of it), so that the kit can be tried against every branch of the port. The socket is made
-//! with mode 0600: the owner of the process is the only caller.
+//! with mode 0600 and admits the callers of the process's own uid, unless the guard flags say otherwise (docs/socket-guard.md).
 
 use std::path::PathBuf;
 use std::sync::Arc;
 
 use atoom_destination_conformance::memory::Memory;
 use atoom_destination_conformance::rpc::Service;
-use atoom_socket::ServerConfig;
+use atoom_socket::cli::GuardArgs;
 use clap::Parser;
 
 #[derive(Parser)]
 #[command(
     name = "destination-memory",
-    version,
+    version = atoom_socket::VERSION,
     about = "The in-memory driver of the destination port, on a UNIX socket"
 )]
 struct Args {
@@ -27,6 +27,8 @@ struct Args {
     /// Play an edge cache in front of the public address.
     #[arg(long, requires = "public_base")]
     edge: bool,
+    #[command(flatten)]
+    guard: GuardArgs,
 }
 
 /// Resolves at SIGINT or SIGTERM.
@@ -54,7 +56,7 @@ async fn main() -> anyhow::Result<()> {
         None => Memory::new(),
     };
     atoom_socket::serve(
-        ServerConfig::new(&args.socket),
+        args.guard.config(&args.socket),
         Service(Arc::new(driver)).router(),
         shutdown_signal(),
     )

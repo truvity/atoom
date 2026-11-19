@@ -5,7 +5,8 @@ The read-only fs driver of the [blob port](../docs/blob-port.md): `Get` and `Lis
 | | |
 | --- | --- |
 | Library | crate `atoom-blob-fsreadonly`: `ReadOnly(Fs::open_read_only(root, owner)?).router()` is the ConnectRPC handler; `suite::run_temp()` is the backend suite (the root checks, that what the writing driver made is read back byte for byte with the same tag, that a later object is seen without a restart). `Fs` is the shared library [`atoom-blob-fsdir`](../fsdir/README.md) |
-| Thin main | `blob-fsreadonly serve --socket PATH --root DIR [--owner-uid UID]` (mode 0600 socket, until SIGINT or SIGTERM); `blob-fsreadonly check --root DIR [--owner-uid UID]` (exit 3 when the root cannot be served); `blob-fsreadonly --version`. `--owner-uid` is the uid of the writing driver, which must own the root; this process's own uid when it is not given |
+| Thin main | `blob-fsreadonly serve --socket PATH --root DIR [--owner-uid UID]` (a socket of mode 0600 that admits this process's uid, until SIGINT or SIGTERM); `blob-fsreadonly check --root DIR [--owner-uid UID]` (exit 3 when the root cannot be served); `blob-fsreadonly version` (and `--version`). `--owner-uid` is the uid of the writing driver, which must own the root; this process's own uid when it is not given |
+| Guard flags | `--allow-uid UID` (repeatable; without it only this process's uid may call), `--allow-any-uid`, `--socket-gid GID`, `--socket-mode MODE` (`--owner-uid` is the owner of the directory, not a caller: it is not the guard): the [socket guard](../../docs/socket-guard.md) |
 | Feature | `cli` (default): the flags and the socket (`clap`, `atoom-socket`, `tracing-subscriber`). A consumer that mounts `router()` in a host of its own turns the default features off |
 
 How the directory works is in [../fsdir/docs/fsdir.md](../fsdir/docs/fsdir.md); what this driver adds is in [docs/fsreadonly.md](docs/fsreadonly.md). Where the code came from is in [../PROVENANCE.md](../PROVENANCE.md).

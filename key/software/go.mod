@@ -9,5 +9,7 @@ require (
 	github.com/truvity/atoom/common v0.0.0
 	github.com/truvity/atoom/key v0.0.0
 	github.com/truvity/atoom/key/conformance v0.0.0
+	github.com/truvity/atoom/socket v0.0.0
+	golang.org/x/sys v0.43.0 // indirect
 	google.golang.org/protobuf v1.36.12
 )
