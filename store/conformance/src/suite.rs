@@ -62,7 +62,13 @@ pub async fn item_suite(client: Client) -> Vec<Case> {
         run_case("transact_all_or_none", s.transact_all_or_none()).await,
         run_case("one_put_one_condition", s.one_put_one_condition()).await,
         run_case("expiry", s.expiry()).await,
-        run_case("version_never_decreases", s.version_never_decreases()).await,
+        run_case(
+            "version_never_decreases",
+            retried_once_on_dynamodb_local("version_never_decreases", |n| {
+                s.version_never_decreases(n)
+            }),
+        )
+        .await,
         run_case("prefix_query_order_and_paging", s.prefix_paging()).await,
         run_case("index_query", s.index_query()).await,
     ];
@@ -616,9 +622,10 @@ impl Suite {
 
     /// A version never goes back while the engine still holds the item: not across an expiry and
     /// a create over it, however often. (A delete, or a sweep that freed the row, starts the key
-    /// again; the suite cannot make an engine sweep.)
-    async fn version_never_decreases(&self) -> anyhow::Result<()> {
-        let k = self.key("aba", "a");
+    /// again; the suite cannot make an engine sweep.) `attempt` is 0, or 1 on the one retry on DynamoDB Local
+    /// ([`retried_once_on_dynamodb_local`]); each attempt has a key of its own.
+    async fn version_never_decreases(&self, attempt: u32) -> anyhow::Result<()> {
+        let k = self.key("aba", &format!("a{attempt}"));
         let past = ms_to_ts(now_ms() - 10_000);
         let future = ms_to_ts((now_ms() / 1000 + 3600) * 1000);
         let expiring = |t: &buffa_types::google::protobuf::Timestamp| Put {
@@ -1397,9 +1404,92 @@ fn is_absent(res: Result<DriverItem, ConnectError>) -> bool {
     })
 }
 
+/// The environment variable that tells the kit the driver under test runs on DynamoDB Local (`1`); `tools/scripts/conformance-store.sh`
+/// sets it for that one run and for no other.
+pub(crate) const DYNAMODB_LOCAL_ENV: &str = "ATOOM_CONFORMANCE_DYNAMODB_LOCAL";
+
+/// Runs a case, and on DynamoDB Local runs it once more when the first run fails, printing `RETRIED <name>: <first failure>`.
+///
+/// This is the one retry of the kit and it is narrow on purpose: only `version_never_decreases`, only when
+/// [`DYNAMODB_LOCAL_ENV`] is `1`, only once. DynamoDB Local deletes expired items in the background, and a sweep that lands between
+/// the steps of the case frees the row, so the version starts again at 1 (versions `[1, 2, 3, 1]` on the arm64 runner, issue #14).
+/// The cause stays; the retry makes the case tell a real regression (it fails twice) from that race. Any other driver, and a real
+/// DynamoDB, run the case once. The second attempt writes under another key (`attempt` is passed to the case).
+pub(crate) async fn retried_once_on_dynamodb_local<F, Fut>(
+    name: &str,
+    attempt: F,
+) -> anyhow::Result<()>
+where
+    F: Fn(u32) -> Fut,
+    Fut: Future<Output = anyhow::Result<()>>,
+{
+    retried_once(
+        std::env::var(DYNAMODB_LOCAL_ENV).is_ok_and(|v| v == "1"),
+        name,
+        attempt,
+    )
+    .await
+}
+
+async fn retried_once<F, Fut>(enabled: bool, name: &str, attempt: F) -> anyhow::Result<()>
+where
+    F: Fn(u32) -> Fut,
+    Fut: Future<Output = anyhow::Result<()>>,
+{
+    match attempt(0).await {
+        Err(first) if enabled => {
+            println!("RETRIED {name}: {first:#}");
+            attempt(1).await
+        }
+        result => result,
+    }
+}
+
 /// Awaits a case under the suite's bound.
 pub(crate) async fn bounded(fut: impl Future<Output = anyhow::Result<()>>) -> anyhow::Result<()> {
     tokio::time::timeout(Duration::from_secs(180), fut)
         .await
         .context("the case ran past its bound")?
+}
+
+#[cfg(test)]
+mod tests {
+    use std::cell::Cell;
+
+    use super::retried_once;
+
+    #[tokio::test]
+    async fn a_failure_is_retried_once_when_enabled() {
+        let calls = Cell::new(0);
+        let r = retried_once(true, "c", |n| {
+            calls.set(calls.get() + 1);
+            async move {
+                anyhow::ensure!(n == 1, "first");
+                Ok(())
+            }
+        })
+        .await;
+        assert!(r.is_ok());
+        assert_eq!(calls.get(), 2);
+        let calls = Cell::new(0);
+        let r = retried_once(true, "c", |_| {
+            calls.set(calls.get() + 1);
+            async { anyhow::bail!("again") }
+        })
+        .await;
+        assert!(r.is_err());
+        assert_eq!(calls.get(), 2, "one retry, not more");
+    }
+
+    #[tokio::test]
+    async fn a_failure_is_not_retried_when_not_enabled() {
+        let calls = Cell::new(0);
+        let r = retried_once(false, "c", |_| {
+            calls.set(calls.get() + 1);
+            async { anyhow::bail!("first") }
+        })
+        .await;
+        assert!(r.is_err());
+        assert_eq!(calls.get(), 1);
+    }
 }

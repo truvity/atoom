@@ -14,7 +14,7 @@ The port has five calls:
 
 ## The contract
 
-- **An address** is one to eight segments joined by `/`; a segment is one to 128 characters of lower-case letters, digits, `-`, `_` and `.`, never `.` or `..`; an address is at most 512 bytes. The first segment is not `.sluis` (a name a driver may keep for itself) and no segment starts with `.tmp-` (the name of a driver's temporary file). A leading dot is allowed otherwise, for `.well-known`.
+- **An address** is one to eight segments joined by `/`; a segment is one to 128 characters of lower-case letters, digits, `-`, `_` and `.`, never `.` or `..`; an address is at most 512 bytes. The first segment is not `.atoom` (a name a driver may keep for itself) and no segment starts with `.tmp-` (the name of a driver's temporary file). A leading dot is allowed otherwise, for `.well-known`. The reserved name is `.atoom`; it was `.sluis` in the code this port came from, and the owner decided on 2026-11-19 (D6 B): "Rename the reserved name segment `.sluis` to `.atoom` before v0.1.0." There is no release that refused `.sluis`, so there is no compatibility shim: `.sluis/...` is an ordinary first segment now. A consumer that wrote documents under `.sluis` in a version of its own (sluis did, in v2 alpha) migrates its own data when it takes this port; atoom holds none.
 - **A write is whole.** A reader sees the old document or the new one, never half of it, and a crash leaves one of them.
 - **A document is the driver's** (listed and removable) only while the driver wrote it: a file that someone else put at the destination is never listed and never removed.
 - **The digest in `List` is of what the destination holds now**, not of what was written, so an edit made at the destination shows.

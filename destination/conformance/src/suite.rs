@@ -200,7 +200,7 @@ async fn cases<D: Destination>(d: &D, caps: &Caps) -> Result<()> {
 
     // What is not an address, a prefix or a header value is refused before anything is written.
     for bad in [
-        "", "/x", "x/", "a//b", "../x", "a/../b", "./a", "A.json", "a b", ".sluis/x",
+        "", "/x", "x/", "a//b", "../x", "a/../b", "./a", "A.json", "a b", ".atoom/x",
     ] {
         rejected!(d.put(doc(bad, b"{}")), format!("put at {bad:?}"));
         rejected!(d.delete(bad), format!("delete at {bad:?}"));

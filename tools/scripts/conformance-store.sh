@@ -65,7 +65,9 @@ if command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
     "$tmp/store-dynamodb" serve --socket "$tmp/dynamodb.sock" --table atoom-conformance --create-table &
     pids+=($!)
     wait_for "the DynamoDB driver" test -S "$tmp/dynamodb.sock"
-    run_kit "store-dynamodb (DynamoDB Local)" "$tmp/dynamodb.sock"
+    # The case version_never_decreases is retried once on DynamoDB Local, which sweeps expired items in the background (issue #14); the kit
+    # reads this variable, and it is set for this run and no other.
+    ATOOM_CONFORMANCE_DYNAMODB_LOCAL=1 run_kit "store-dynamodb (DynamoDB Local)" "$tmp/dynamodb.sock"
     echo "conformance-store: the Go tests of the DynamoDB driver against DynamoDB Local"
     (cd store/dynamodb && ATOOM_REQUIRE_DYNAMODB_LOCAL=1 go test -count=1 ./...)
     ddb_cleanup
