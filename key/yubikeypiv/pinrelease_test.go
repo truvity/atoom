@@ -671,7 +671,7 @@ func TestAnAttestationOfAnotherPKIIsRefused(t *testing.T) {
 	if _, err := stranger.PutKey(0x87, card.KeySpec{Algorithm: card.EC384, PIN: card.PINNever, Touch: card.TouchNever}); err != nil {
 		t.Fatal(err)
 	}
-	c, err := stranger.Opener()(0)
+	c, err := stranger.Opener()(card.Selector{})
 	if err != nil {
 		t.Fatal(err)
 	}

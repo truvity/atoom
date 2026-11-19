@@ -98,15 +98,21 @@ var (
 	// with success instead of the counter, so the counter cannot be read. It is what a card shows after the driver that
 	// verified it ended without the card being reset. It is a state, not a failure of the card: ResetSession clears it.
 	ErrVerified = errors.New("card: the card is already PIN-verified")
-	// ErrSharing is a card that another holder of the PC/SC connection keeps, so that the driver can neither connect to it
-	// exclusively nor reset it. The driver fails closed.
+	// ErrSharing is a card that another holder of the PC/SC connection keeps (SCARD_E_SHARING_VIOLATION), so that the driver
+	// can neither connect to it exclusively nor reset it. The driver fails closed; at open it is an error that names the
+	// reader (SharingError), never a skip.
 	ErrSharing = errors.New("card: another process holds the card")
 	// ErrManagementKey is a management key that the card refuses.
 	ErrManagementKey = errors.New("card: the management key was refused")
 	// ErrNoCardSupport is a build without the card (no atoom_card tag).
 	ErrNoCardSupport = errors.New("card: this build has no card support; the card build is made natively with the tag atoom_card")
-	// ErrNoCard is no card, or more than one when none was named.
+	// ErrNoCard is no reader, or a reader that was named and is not there.
 	ErrNoCard = errors.New("card: no card found")
+	// ErrAmbiguousReader is more than one reader with none named. The driver opens none of them: a serial cannot be read
+	// without connecting to the card, so even a named serial does not choose among readers.
+	ErrAmbiguousReader = errors.New("card: more than one reader and none named")
+	// ErrSerialMismatch is a card whose serial is not the one named; its reader is released and no other reader is tried.
+	ErrSerialMismatch = errors.New("card: the card in the reader has another serial than the one named")
 )
 
 // PINError is a PIN that the card refused. Retries is what the card allows before it blocks; the PIN is not in it.
@@ -181,6 +187,5 @@ type Card interface {
 	Close() error
 }
 
-// Opener opens a card: the one named by serial, or the only one when serial is 0. More than one card with no
-// serial named is refused: "the first one found" is never chosen (docs/contributing/tools.md, Hardware tokens).
-type Opener func(serial uint32) (Card, error)
+// Opener opens the card that a Selector names (see OpenWith for the rules).
+type Opener func(Selector) (Card, error)

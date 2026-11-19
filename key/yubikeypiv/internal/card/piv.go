@@ -32,46 +32,43 @@ func pivSlot(s Slot) (piv.Slot, bool) {
 	return piv.RetiredKeyManagementSlot(uint32(s))
 }
 
-// Open opens a card exclusively through piv-go (SCardConnect with SCARD_SHARE_EXCLUSIVE: while it is open, no other
-// process can talk to the card). serial 0 means the only card; two cards with no serial named are refused.
-func Open(serial uint32) (Card, error) {
-	readers, err := piv.Cards()
+// Open opens the card that sel names (OpenWith has the rules): exclusively through piv-go (SCardConnect with
+// SCARD_SHARE_EXCLUSIVE: while it is open, no other process can talk to the card), and only the card of one reader. It
+// lists the readers first, which connects to no card.
+func Open(sel Selector) (Card, error) { return OpenWith(pivBackend{}, sel) }
+
+// ListReaders lists the PC/SC reader names (SCardListReaders). It connects to no card.
+func ListReaders() ([]string, error) { return pivBackend{}.Readers() }
+
+// pivBackend is the real PC/SC side: piv-go over pcsc-lite.
+type pivBackend struct{}
+
+func (pivBackend) Readers() ([]string, error) { return piv.Cards() }
+
+func (pivBackend) Connect(reader string) (Card, error) {
+	yk, err := piv.Open(reader)
 	if err != nil {
-		return nil, fmt.Errorf("card: list readers: %w", err)
-	}
-	if serial == 0 && len(readers) > 1 {
-		return nil, fmt.Errorf("card: %d readers and no serial named: refusing to choose the first", len(readers))
-	}
-	var shared error // a reader that another process holds: named at the end if no other reader is the card
-	for _, r := range readers {
-		yk, err := piv.Open(r)
-		if err != nil {
-			if strings.Contains(err.Error(), "other connections outstanding") {
-				shared = fmt.Errorf("%w: open %q: %v", ErrSharing, r, err) //nolint:errorlint // the cause is for the journal; the sentinel is what callers test
-			}
-			if serial == 0 {
-				if shared != nil {
-					return nil, shared
-				}
-				return nil, fmt.Errorf("card: open %q: %w", r, err)
-			}
-			continue // another reader, or a card that someone else holds
+		if isSharingViolation(err) {
+			return nil, SharingError(reader)
 		}
-		got, err := yk.Serial()
-		if err != nil {
-			_ = yk.Close()
-			continue
-		}
-		if serial != 0 && got != serial {
-			_ = yk.Close()
-			continue
-		}
-		return &pivCard{yk: yk, reader: r}, nil
+		return nil, fmt.Errorf("card: open reader %q: %w", reader, err)
 	}
-	if shared != nil {
-		return nil, shared
+	return &pivCard{yk: yk, reader: reader}, nil
+}
+
+// isSharingViolation tells SCARD_E_SHARING_VIOLATION from the text of piv-go's error, whose type is not exported: its table
+// says "the smart card cannot be accessed because of other connections outstanding" for 0x8010000B.
+func isSharingViolation(err error) bool {
+	return strings.Contains(err.Error(), "other connections outstanding")
+}
+
+// Release lets the connection go and leaves the card as it was: no reset (a card of another serial is not ours to reset).
+func (c *pivCard) Release() error {
+	if c.shut {
+		return nil
 	}
-	return nil, ErrNoCard
+	c.shut = true
+	return c.yk.Close()
 }
 
 type pivCard struct {

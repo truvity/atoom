@@ -205,20 +205,10 @@ func (c *Card) makeAttestationKey(signerKey *ecdsa.PrivateKey, signerCert *x509.
 	return err
 }
 
-// Opener returns an opener that gives this card, and counts nothing else.
+// Opener returns an opener that gives this card, through a bench with this one reader (ReaderName), by the rules of
+// card.OpenWith: a serial that is not this card's is refused as card.ErrSerialMismatch.
 func (c *Card) Opener() card.Opener {
-	return func(serial uint32) (card.Card, error) {
-		if serial != 0 && serial != c.SerialNo {
-			return nil, card.ErrNoCard
-		}
-		c.mu.Lock()
-		defer c.mu.Unlock()
-		if err := c.init(); err != nil {
-			return nil, err
-		}
-		c.closed = false
-		return c, nil
-	}
+	return NewBench(Reader{Name: ReaderName, Card: c}).Opener()
 }
 
 // Anchors are what a real attestation verifier needs to trust this card: its root (PEM), the bundle of intermediates (PEM)

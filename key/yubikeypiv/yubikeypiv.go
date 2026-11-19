@@ -114,6 +114,12 @@ type Options struct {
 	// Serial binds the driver to one card. Outside development it is required: without it any genuine YubiKey whose
 	// attestations match the slot map would be adopted. In development, 0 means the only card.
 	Serial uint32
+	// Reader is the exact PC/SC reader name of the card (as SCardListReaders gives it; Readers lists them). When it is set, the
+	// driver connects to that reader only, reads the card's serial and, when Serial is set and differs, refuses: no other reader
+	// is ever tried. Empty: the driver opens the only reader there is and refuses when there are several, whatever Serial says
+	// (a serial can be read only from a connected card, so it cannot choose among readers). A reader that another process holds
+	// is an error that names it. Decision D12 C, 2026-11-19.
+	Reader string
 	// Open opens the card; card.Open when nil. Tests pass a fake.
 	Open card.Opener
 	// ManagementKey is what Ensure generates keys with in development; the factory default when nil.
@@ -178,6 +184,10 @@ type Service struct {
 	deadWhy  error // why the driver exits, set before dead is closed
 }
 
+// Readers lists the PC/SC reader names (SCardListReaders), the values of Options.Reader. It connects to no card and selects no
+// applet. A build without the tag atoom_card has no PC/SC and returns card.ErrNoCardSupport.
+func Readers() ([]string, error) { return card.ListReaders() }
+
 // New opens the card, checks its firmware, and verifies the attestation of every key it already holds. It
 // returns a *Problems error when the card or one of its keys is refused. The caller closes the service.
 func New(opts Options) (*Service, error) {
@@ -191,7 +201,7 @@ func New(opts Options) (*Service, error) {
 	if open == nil {
 		open = card.Open
 	}
-	c, err := open(opts.Serial)
+	c, err := open(card.Selector{Reader: opts.Reader, Serial: opts.Serial})
 	if err != nil {
 		return nil, err
 	}
