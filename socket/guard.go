@@ -60,7 +60,7 @@ type guard struct {
 
 // check returns nil when the caller of ctx is admitted, and the refusal otherwise. It looks at the transport only: ctx carries the
 // credentials the server read from the socket.
-func (g guard) check(ctx context.Context, path string) *connect.Error {
+func (g guard) check(ctx context.Context) *connect.Error {
 	if g.allow.kind == anyUID {
 		return nil
 	}
@@ -68,7 +68,8 @@ func (g guard) check(ctx context.Context, path string) *connect.Error {
 	if ok && g.allow.Admits(p.UID, g.own) {
 		return nil
 	}
-	slog.Info("call refused", "reason", ReasonCaller, "path", path, "known", ok, "uid", p.UID, "pid", p.PID)
+	// The path is what the caller sent, so it is not logged.
+	slog.Info("call refused", "reason", ReasonCaller, "known", ok, "uid", p.UID, "pid", p.PID)
 	return refusal.New(connect.CodePermissionDenied, ReasonCaller, "")
 }
 
@@ -126,7 +127,7 @@ func (d denyHandlers) serve(w http.ResponseWriter, r *http.Request, err *connect
 // middleware refuses a call before its handler, and so before its message, is reached.
 func (g guard) middleware(d denyHandlers, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if err := g.check(r.Context(), r.URL.Path); err != nil {
+		if err := g.check(r.Context()); err != nil {
 			d.serve(w, r, err)
 			return
 		}
