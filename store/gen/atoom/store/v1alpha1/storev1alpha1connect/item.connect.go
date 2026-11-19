@@ -36,6 +36,9 @@ const (
 // reflection-formatted method names, remove the leading slash and convert the remaining slash to a
 // period.
 const (
+	// ItemServiceCapabilitiesProcedure is the fully-qualified name of the ItemService's Capabilities
+	// RPC.
+	ItemServiceCapabilitiesProcedure = "/atoom.store.v1alpha1.ItemService/Capabilities"
 	// ItemServiceGetProcedure is the fully-qualified name of the ItemService's Get RPC.
 	ItemServiceGetProcedure = "/atoom.store.v1alpha1.ItemService/Get"
 	// ItemServiceQueryProcedure is the fully-qualified name of the ItemService's Query RPC.
@@ -48,6 +51,7 @@ const (
 
 // ItemServiceClient is a client for the atoom.store.v1alpha1.ItemService service.
 type ItemServiceClient interface {
+	Capabilities(context.Context, *connect.Request[v1alpha1.CapabilitiesRequest]) (*connect.Response[v1alpha1.CapabilitiesResponse], error)
 	Get(context.Context, *connect.Request[v1alpha1.ItemGetRequest]) (*connect.Response[v1alpha1.ItemGetResponse], error)
 	Query(context.Context, *connect.Request[v1alpha1.QueryRequest]) (*connect.Response[v1alpha1.QueryResponse], error)
 	Transact(context.Context, *connect.Request[v1alpha1.TransactRequest]) (*connect.Response[v1alpha1.TransactResponse], error)
@@ -65,6 +69,12 @@ func NewItemServiceClient(httpClient connect.HTTPClient, baseURL string, opts ..
 	baseURL = strings.TrimRight(baseURL, "/")
 	itemServiceMethods := v1alpha1.File_atoom_store_v1alpha1_item_proto.Services().ByName("ItemService").Methods()
 	return &itemServiceClient{
+		capabilities: connect.NewClient[v1alpha1.CapabilitiesRequest, v1alpha1.CapabilitiesResponse](
+			httpClient,
+			baseURL+ItemServiceCapabilitiesProcedure,
+			connect.WithSchema(itemServiceMethods.ByName("Capabilities")),
+			connect.WithClientOptions(opts...),
+		),
 		get: connect.NewClient[v1alpha1.ItemGetRequest, v1alpha1.ItemGetResponse](
 			httpClient,
 			baseURL+ItemServiceGetProcedure,
@@ -94,10 +104,16 @@ func NewItemServiceClient(httpClient connect.HTTPClient, baseURL string, opts ..
 
 // itemServiceClient implements ItemServiceClient.
 type itemServiceClient struct {
-	get      *connect.Client[v1alpha1.ItemGetRequest, v1alpha1.ItemGetResponse]
-	query    *connect.Client[v1alpha1.QueryRequest, v1alpha1.QueryResponse]
-	transact *connect.Client[v1alpha1.TransactRequest, v1alpha1.TransactResponse]
-	tailLog  *connect.Client[v1alpha1.TailLogRequest, v1alpha1.TailLogResponse]
+	capabilities *connect.Client[v1alpha1.CapabilitiesRequest, v1alpha1.CapabilitiesResponse]
+	get          *connect.Client[v1alpha1.ItemGetRequest, v1alpha1.ItemGetResponse]
+	query        *connect.Client[v1alpha1.QueryRequest, v1alpha1.QueryResponse]
+	transact     *connect.Client[v1alpha1.TransactRequest, v1alpha1.TransactResponse]
+	tailLog      *connect.Client[v1alpha1.TailLogRequest, v1alpha1.TailLogResponse]
+}
+
+// Capabilities calls atoom.store.v1alpha1.ItemService.Capabilities.
+func (c *itemServiceClient) Capabilities(ctx context.Context, req *connect.Request[v1alpha1.CapabilitiesRequest]) (*connect.Response[v1alpha1.CapabilitiesResponse], error) {
+	return c.capabilities.CallUnary(ctx, req)
 }
 
 // Get calls atoom.store.v1alpha1.ItemService.Get.
@@ -122,6 +138,7 @@ func (c *itemServiceClient) TailLog(ctx context.Context, req *connect.Request[v1
 
 // ItemServiceHandler is an implementation of the atoom.store.v1alpha1.ItemService service.
 type ItemServiceHandler interface {
+	Capabilities(context.Context, *connect.Request[v1alpha1.CapabilitiesRequest]) (*connect.Response[v1alpha1.CapabilitiesResponse], error)
 	Get(context.Context, *connect.Request[v1alpha1.ItemGetRequest]) (*connect.Response[v1alpha1.ItemGetResponse], error)
 	Query(context.Context, *connect.Request[v1alpha1.QueryRequest]) (*connect.Response[v1alpha1.QueryResponse], error)
 	Transact(context.Context, *connect.Request[v1alpha1.TransactRequest]) (*connect.Response[v1alpha1.TransactResponse], error)
@@ -135,6 +152,12 @@ type ItemServiceHandler interface {
 // and JSON codecs. They also support gzip compression.
 func NewItemServiceHandler(svc ItemServiceHandler, opts ...connect.HandlerOption) (string, http.Handler) {
 	itemServiceMethods := v1alpha1.File_atoom_store_v1alpha1_item_proto.Services().ByName("ItemService").Methods()
+	itemServiceCapabilitiesHandler := connect.NewUnaryHandler(
+		ItemServiceCapabilitiesProcedure,
+		svc.Capabilities,
+		connect.WithSchema(itemServiceMethods.ByName("Capabilities")),
+		connect.WithHandlerOptions(opts...),
+	)
 	itemServiceGetHandler := connect.NewUnaryHandler(
 		ItemServiceGetProcedure,
 		svc.Get,
@@ -161,6 +184,8 @@ func NewItemServiceHandler(svc ItemServiceHandler, opts ...connect.HandlerOption
 	)
 	return "/atoom.store.v1alpha1.ItemService/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
+		case ItemServiceCapabilitiesProcedure:
+			itemServiceCapabilitiesHandler.ServeHTTP(w, r)
 		case ItemServiceGetProcedure:
 			itemServiceGetHandler.ServeHTTP(w, r)
 		case ItemServiceQueryProcedure:
@@ -177,6 +202,10 @@ func NewItemServiceHandler(svc ItemServiceHandler, opts ...connect.HandlerOption
 
 // UnimplementedItemServiceHandler returns CodeUnimplemented from all methods.
 type UnimplementedItemServiceHandler struct{}
+
+func (UnimplementedItemServiceHandler) Capabilities(context.Context, *connect.Request[v1alpha1.CapabilitiesRequest]) (*connect.Response[v1alpha1.CapabilitiesResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("atoom.store.v1alpha1.ItemService.Capabilities is not implemented"))
+}
 
 func (UnimplementedItemServiceHandler) Get(context.Context, *connect.Request[v1alpha1.ItemGetRequest]) (*connect.Response[v1alpha1.ItemGetResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("atoom.store.v1alpha1.ItemService.Get is not implemented"))

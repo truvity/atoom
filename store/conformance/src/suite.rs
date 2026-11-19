@@ -14,14 +14,14 @@ use atoom_socket::{Client, Transport};
 use atoom_store::atoom::common::v1alpha1::IndexEntry;
 use atoom_store::atoom::store::v1alpha1::__buffa::oneof::condition::Expect;
 use atoom_store::atoom::store::v1alpha1::{
-    Condition, Delete, DriverItem, ItemGetRequest, ItemServiceClient, Put, QueryRequest,
-    TailLogRequest, TailLogResponse, TransactRequest,
+    CapabilitiesRequest, Condition, Delete, DriverItem, ItemGetRequest, ItemServiceClient, Put,
+    QueryRequest, TailLogRequest, TailLogResponse, TransactRequest,
 };
 use connectrpc::ConnectError;
 use connectrpc::error::ErrorCode;
 
 use crate::rules::{MAX_PAGE, ms_to_ts, now_ms};
-use crate::{Case, run_case};
+use crate::{Case, run_case, skip_case};
 
 type Rpc = ItemServiceClient<Transport>;
 
@@ -33,7 +33,28 @@ const SILENT: Duration = Duration::from_millis(700);
 /// decides what a failure means ([`crate::report`] fails on any failed case and on none run).
 pub async fn item_suite(client: Client) -> Vec<Case> {
     let s = Suite::new(client);
+    // What the driver declares decides which cases run (plan R4). A driver that does not serve `Capabilities` offers every call, as
+    // the drivers did before the call existed; a driver that answers it must answer it truthfully, which the first case holds it to.
+    let (caps, caps_case) = match s.capabilities().await {
+        Ok(c) => (c, run_case("capabilities", async { Ok(()) }).await),
+        Err(e) => (
+            None,
+            run_case("capabilities", async {
+                Err(e).context("the Capabilities call")
+            })
+            .await,
+        ),
+    };
+    let caps_case = match &caps {
+        Some(c) if c.store.is_empty() => {
+            run_case("capabilities", async { bail!("the driver names no store") }).await
+        }
+        _ => caps_case,
+    };
+    let tail = caps.as_ref().is_none_or(|c| c.tail_log);
+    let no_tail = "the driver does not declare the change log (capabilities.tail_log is false)";
     let mut cases = vec![
+        caps_case,
         run_case("item_round_trip", s.item_round_trip()).await,
         run_case("create_if_absent_twice", s.create_if_absent_twice()).await,
         run_case("update_at_version_and_stale", s.update_versions()).await,
@@ -44,19 +65,39 @@ pub async fn item_suite(client: Client) -> Vec<Case> {
         run_case("version_never_decreases", s.version_never_decreases()).await,
         run_case("prefix_query_order_and_paging", s.prefix_paging()).await,
         run_case("index_query", s.index_query()).await,
-        run_case("log_order_and_from_sequence", s.log_order()).await,
-        run_case("sequence_expired", s.sequence_expired()).await,
-        run_case("query_log_head", s.query_log_head()).await,
-        run_case("log_epoch", s.log_epoch()).await,
-        run_case("linearizable_query", s.linearizable_query()).await,
-        run_case("expired_delete_is_logged", s.expired_delete_is_logged()).await,
-        run_case("transact_logs_atomically", s.transact_logs_atomically()).await,
+    ];
+    if tail {
+        cases.push(run_case("log_order_and_from_sequence", s.log_order()).await);
+        cases.push(run_case("sequence_expired", s.sequence_expired()).await);
+        cases.push(run_case("query_log_head", s.query_log_head()).await);
+        cases.push(run_case("log_epoch", s.log_epoch()).await);
+    } else {
+        for name in [
+            "log_order_and_from_sequence",
+            "sequence_expired",
+            "query_log_head",
+            "log_epoch",
+        ] {
+            cases.push(skip_case(name, no_tail));
+        }
+    }
+    cases.push(run_case("linearizable_query", s.linearizable_query()).await);
+    if tail {
+        cases.push(run_case("expired_delete_is_logged", s.expired_delete_is_logged()).await);
+        cases.push(run_case("transact_logs_atomically", s.transact_logs_atomically()).await);
+    } else {
+        cases.push(skip_case("expired_delete_is_logged", no_tail));
+        cases.push(skip_case("transact_logs_atomically", no_tail));
+        // What a driver without the change log owes instead: it says no, and never takes a log row it will not write.
+        cases.push(run_case("no_log_is_refused", s.no_log_is_refused()).await);
+    }
+    cases.push(
         run_case(
             "concurrent_takers_one_winner",
             s.concurrent_takers_one_winner(),
         )
         .await,
-    ];
+    );
     // What the cases wrote is removed; a failure to do so is a failed case of its own, so a driver
     // that cannot delete does not pass.
     cases.push(run_case("cleanup", s.cleanup()).await);
@@ -155,6 +196,67 @@ impl Suite {
             token = next;
         }
         bail!("a listing that never ends")
+    }
+
+    /// What the driver declares, or `None` when it does not serve `Capabilities` (then it offers every call).
+    async fn capabilities(
+        &self,
+    ) -> Result<Option<atoom_store::atoom::store::v1alpha1::CapabilitiesResponse>, ConnectError>
+    {
+        match self
+            .rpc()
+            .capabilities(CapabilitiesRequest::default())
+            .await
+        {
+            Ok(r) => Ok(Some(r.into_owned())),
+            Err(e) if e.code == ErrorCode::Unimplemented => Ok(None),
+            Err(e) => Err(e),
+        }
+    }
+
+    /// A driver that does not keep the change log refuses what would need it, and writes nothing: `TailLog` is unimplemented, a put or
+    /// a delete that asks for a log row is `unimplemented/log` (not silently written without the row), and the refused transaction
+    /// leaves the item absent.
+    async fn no_log_is_refused(&self) -> anyhow::Result<()> {
+        let k = self.key("nolog", "a");
+        let logged = Put {
+            log: true,
+            ..put(&k, b"v")
+        };
+        let r = self.transact(vec![absent(&k)], vec![logged], vec![]).await;
+        expect_refusal(r, ErrorCode::Unimplemented, "log", Some("puts[0].log"))?;
+        ensure!(
+            is_absent(self.get(&k, true).await),
+            "a put that asked for a log row was written without one"
+        );
+        let delete = Delete {
+            key: k.clone(),
+            log: true,
+            ..Delete::default()
+        };
+        let r = self.transact(vec![], vec![], vec![delete]).await;
+        expect_refusal(r, ErrorCode::Unimplemented, "log", Some("deletes[0].log"))?;
+        // Without the flag the same writes are fine.
+        self.transact(vec![absent(&k)], vec![put(&k, b"v")], vec![])
+            .await?;
+        self.transact(vec![], vec![], vec![del(&k)]).await?;
+        // The tail is unimplemented, at the call or as the first thing its stream says.
+        match self.open_tail(0, 0).await {
+            Err(e) => ensure!(
+                e.code == ErrorCode::Unimplemented,
+                "TailLog answered {:?}, want unimplemented",
+                e.code
+            ),
+            Ok(mut t) => match t.tick(b"", ARRIVES).await {
+                Tick::Failed(e) => ensure!(
+                    e.code == ErrorCode::Unimplemented,
+                    "TailLog answered {:?}, want unimplemented",
+                    e.code
+                ),
+                _ => bail!("TailLog delivered or waits on a driver that declares no change log"),
+            },
+        }
+        Ok(())
     }
 
     // ---- cases ------------------------------------------------------------------------------
@@ -1160,7 +1262,9 @@ impl Suite {
     async fn cleanup(&self) -> anyhow::Result<()> {
         let prefix = format!("{}/", self.base).into_bytes();
         let items = self.query_all(&prefix, 0).await?;
-        for chunk in items.chunks(100) {
+        // Twenty-five at a time: a driver may count the index entries of an item against its limit on one transaction (DynamoDB's is
+        // 100 writes), and an item of this run carries up to two.
+        for chunk in items.chunks(25) {
             let deletes = chunk.iter().map(|i| del(&i.key)).collect();
             self.transact(vec![], vec![], deletes).await?;
         }

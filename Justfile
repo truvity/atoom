@@ -158,13 +158,13 @@ conformance: conformance-store conformance-source conformance-blob conformance-t
         [ "$ran" -gt 0 ] || { echo "conformance: no driver of $port runs the kit through a socket" >&2; exit 1; }
     done
 
-# The item-port kit against the memory driver and the rqlite driver (both namespaces), each through the socket of its thin main
-# (tools/scripts/conformance-store.sh).
+# The item-port kit against the memory driver, the DynamoDB driver (against DynamoDB Local in a container; Linux, where there is a runtime)
+# and the rqlite driver (both namespaces), each through the socket of its thin main (tools/scripts/conformance-store.sh).
 [private]
 conformance-store: rust-toolchain rqlite-fetch
     #!/usr/bin/env bash
     set -euo pipefail
-    if [ "$(uname -s)" = Linux ]; then export ATOOM_REQUIRE_RQLITED=1; fi
+    if [ "$(uname -s)" = Linux ]; then export ATOOM_REQUIRE_RQLITED=1 ATOOM_REQUIRE_DYNAMODB_LOCAL=1; fi
     tools/scripts/conformance-store.sh
 
 # The source-port kit against the file driver and the credential driver, each through the socket of its thin main

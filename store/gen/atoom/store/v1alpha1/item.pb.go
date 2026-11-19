@@ -26,6 +26,98 @@ const (
 	_ = protoimpl.EnforceVersion(protoimpl.MaxVersion - 20)
 )
 
+// CapabilitiesRequest asks what the driver offers.
+type CapabilitiesRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *CapabilitiesRequest) Reset() {
+	*x = CapabilitiesRequest{}
+	mi := &file_atoom_store_v1alpha1_item_proto_msgTypes[0]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *CapabilitiesRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*CapabilitiesRequest) ProtoMessage() {}
+
+func (x *CapabilitiesRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_atoom_store_v1alpha1_item_proto_msgTypes[0]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use CapabilitiesRequest.ProtoReflect.Descriptor instead.
+func (*CapabilitiesRequest) Descriptor() ([]byte, []int) {
+	return file_atoom_store_v1alpha1_item_proto_rawDescGZIP(), []int{0}
+}
+
+// CapabilitiesResponse says what the driver offers. A call that a driver does not offer answers unimplemented, and the driver says so
+// here, so that a caller and the conformance kit know without trying (plan R4). A driver that does not serve Capabilities (it answers
+// unimplemented) is taken to offer every optional call, as the drivers did before this call existed.
+type CapabilitiesResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Store         string                 `protobuf:"bytes,1,opt,name=store,proto3" json:"store,omitempty"`                     // the engine behind the driver: "memory", "rqlite" or "dynamodb"
+	TailLog       bool                   `protobuf:"varint,2,opt,name=tail_log,json=tailLog,proto3" json:"tail_log,omitempty"` // true when the driver keeps the change log: TailLog is served, a put or delete with log set is accepted, and a query names a log head and epoch
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *CapabilitiesResponse) Reset() {
+	*x = CapabilitiesResponse{}
+	mi := &file_atoom_store_v1alpha1_item_proto_msgTypes[1]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *CapabilitiesResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*CapabilitiesResponse) ProtoMessage() {}
+
+func (x *CapabilitiesResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_atoom_store_v1alpha1_item_proto_msgTypes[1]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use CapabilitiesResponse.ProtoReflect.Descriptor instead.
+func (*CapabilitiesResponse) Descriptor() ([]byte, []int) {
+	return file_atoom_store_v1alpha1_item_proto_rawDescGZIP(), []int{1}
+}
+
+func (x *CapabilitiesResponse) GetStore() string {
+	if x != nil {
+		return x.Store
+	}
+	return ""
+}
+
+func (x *CapabilitiesResponse) GetTailLog() bool {
+	if x != nil {
+		return x.TailLog
+	}
+	return false
+}
+
 // DriverItem is an item as a driver keeps it; the driver never knows what a kind means.
 type DriverItem struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
@@ -40,7 +132,7 @@ type DriverItem struct {
 
 func (x *DriverItem) Reset() {
 	*x = DriverItem{}
-	mi := &file_atoom_store_v1alpha1_item_proto_msgTypes[0]
+	mi := &file_atoom_store_v1alpha1_item_proto_msgTypes[2]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -52,7 +144,7 @@ func (x *DriverItem) String() string {
 func (*DriverItem) ProtoMessage() {}
 
 func (x *DriverItem) ProtoReflect() protoreflect.Message {
-	mi := &file_atoom_store_v1alpha1_item_proto_msgTypes[0]
+	mi := &file_atoom_store_v1alpha1_item_proto_msgTypes[2]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -65,7 +157,7 @@ func (x *DriverItem) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DriverItem.ProtoReflect.Descriptor instead.
 func (*DriverItem) Descriptor() ([]byte, []int) {
-	return file_atoom_store_v1alpha1_item_proto_rawDescGZIP(), []int{0}
+	return file_atoom_store_v1alpha1_item_proto_rawDescGZIP(), []int{2}
 }
 
 func (x *DriverItem) GetKey() []byte {
@@ -114,7 +206,7 @@ type ItemGetRequest struct {
 
 func (x *ItemGetRequest) Reset() {
 	*x = ItemGetRequest{}
-	mi := &file_atoom_store_v1alpha1_item_proto_msgTypes[1]
+	mi := &file_atoom_store_v1alpha1_item_proto_msgTypes[3]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -126,7 +218,7 @@ func (x *ItemGetRequest) String() string {
 func (*ItemGetRequest) ProtoMessage() {}
 
 func (x *ItemGetRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_atoom_store_v1alpha1_item_proto_msgTypes[1]
+	mi := &file_atoom_store_v1alpha1_item_proto_msgTypes[3]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -139,7 +231,7 @@ func (x *ItemGetRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ItemGetRequest.ProtoReflect.Descriptor instead.
 func (*ItemGetRequest) Descriptor() ([]byte, []int) {
-	return file_atoom_store_v1alpha1_item_proto_rawDescGZIP(), []int{1}
+	return file_atoom_store_v1alpha1_item_proto_rawDescGZIP(), []int{3}
 }
 
 func (x *ItemGetRequest) GetKey() []byte {
@@ -166,7 +258,7 @@ type ItemGetResponse struct {
 
 func (x *ItemGetResponse) Reset() {
 	*x = ItemGetResponse{}
-	mi := &file_atoom_store_v1alpha1_item_proto_msgTypes[2]
+	mi := &file_atoom_store_v1alpha1_item_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -178,7 +270,7 @@ func (x *ItemGetResponse) String() string {
 func (*ItemGetResponse) ProtoMessage() {}
 
 func (x *ItemGetResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_atoom_store_v1alpha1_item_proto_msgTypes[2]
+	mi := &file_atoom_store_v1alpha1_item_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -191,7 +283,7 @@ func (x *ItemGetResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ItemGetResponse.ProtoReflect.Descriptor instead.
 func (*ItemGetResponse) Descriptor() ([]byte, []int) {
-	return file_atoom_store_v1alpha1_item_proto_rawDescGZIP(), []int{2}
+	return file_atoom_store_v1alpha1_item_proto_rawDescGZIP(), []int{4}
 }
 
 func (x *ItemGetResponse) GetItem() *DriverItem {
@@ -220,7 +312,7 @@ type QueryRequest struct {
 
 func (x *QueryRequest) Reset() {
 	*x = QueryRequest{}
-	mi := &file_atoom_store_v1alpha1_item_proto_msgTypes[3]
+	mi := &file_atoom_store_v1alpha1_item_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -232,7 +324,7 @@ func (x *QueryRequest) String() string {
 func (*QueryRequest) ProtoMessage() {}
 
 func (x *QueryRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_atoom_store_v1alpha1_item_proto_msgTypes[3]
+	mi := &file_atoom_store_v1alpha1_item_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -245,7 +337,7 @@ func (x *QueryRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use QueryRequest.ProtoReflect.Descriptor instead.
 func (*QueryRequest) Descriptor() ([]byte, []int) {
-	return file_atoom_store_v1alpha1_item_proto_rawDescGZIP(), []int{3}
+	return file_atoom_store_v1alpha1_item_proto_rawDescGZIP(), []int{5}
 }
 
 func (x *QueryRequest) GetPrefix() []byte {
@@ -303,7 +395,7 @@ type QueryResponse struct {
 
 func (x *QueryResponse) Reset() {
 	*x = QueryResponse{}
-	mi := &file_atoom_store_v1alpha1_item_proto_msgTypes[4]
+	mi := &file_atoom_store_v1alpha1_item_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -315,7 +407,7 @@ func (x *QueryResponse) String() string {
 func (*QueryResponse) ProtoMessage() {}
 
 func (x *QueryResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_atoom_store_v1alpha1_item_proto_msgTypes[4]
+	mi := &file_atoom_store_v1alpha1_item_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -328,7 +420,7 @@ func (x *QueryResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use QueryResponse.ProtoReflect.Descriptor instead.
 func (*QueryResponse) Descriptor() ([]byte, []int) {
-	return file_atoom_store_v1alpha1_item_proto_rawDescGZIP(), []int{4}
+	return file_atoom_store_v1alpha1_item_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *QueryResponse) GetItems() []*DriverItem {
@@ -371,7 +463,7 @@ type TransactRequest struct {
 
 func (x *TransactRequest) Reset() {
 	*x = TransactRequest{}
-	mi := &file_atoom_store_v1alpha1_item_proto_msgTypes[5]
+	mi := &file_atoom_store_v1alpha1_item_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -383,7 +475,7 @@ func (x *TransactRequest) String() string {
 func (*TransactRequest) ProtoMessage() {}
 
 func (x *TransactRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_atoom_store_v1alpha1_item_proto_msgTypes[5]
+	mi := &file_atoom_store_v1alpha1_item_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -396,7 +488,7 @@ func (x *TransactRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TransactRequest.ProtoReflect.Descriptor instead.
 func (*TransactRequest) Descriptor() ([]byte, []int) {
-	return file_atoom_store_v1alpha1_item_proto_rawDescGZIP(), []int{5}
+	return file_atoom_store_v1alpha1_item_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *TransactRequest) GetConditions() []*Condition {
@@ -435,7 +527,7 @@ type Condition struct {
 
 func (x *Condition) Reset() {
 	*x = Condition{}
-	mi := &file_atoom_store_v1alpha1_item_proto_msgTypes[6]
+	mi := &file_atoom_store_v1alpha1_item_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -447,7 +539,7 @@ func (x *Condition) String() string {
 func (*Condition) ProtoMessage() {}
 
 func (x *Condition) ProtoReflect() protoreflect.Message {
-	mi := &file_atoom_store_v1alpha1_item_proto_msgTypes[6]
+	mi := &file_atoom_store_v1alpha1_item_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -460,7 +552,7 @@ func (x *Condition) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Condition.ProtoReflect.Descriptor instead.
 func (*Condition) Descriptor() ([]byte, []int) {
-	return file_atoom_store_v1alpha1_item_proto_rawDescGZIP(), []int{6}
+	return file_atoom_store_v1alpha1_item_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *Condition) GetKey() []byte {
@@ -525,7 +617,7 @@ type Put struct {
 
 func (x *Put) Reset() {
 	*x = Put{}
-	mi := &file_atoom_store_v1alpha1_item_proto_msgTypes[7]
+	mi := &file_atoom_store_v1alpha1_item_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -537,7 +629,7 @@ func (x *Put) String() string {
 func (*Put) ProtoMessage() {}
 
 func (x *Put) ProtoReflect() protoreflect.Message {
-	mi := &file_atoom_store_v1alpha1_item_proto_msgTypes[7]
+	mi := &file_atoom_store_v1alpha1_item_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -550,7 +642,7 @@ func (x *Put) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Put.ProtoReflect.Descriptor instead.
 func (*Put) Descriptor() ([]byte, []int) {
-	return file_atoom_store_v1alpha1_item_proto_rawDescGZIP(), []int{7}
+	return file_atoom_store_v1alpha1_item_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *Put) GetKey() []byte {
@@ -599,7 +691,7 @@ type Delete struct {
 
 func (x *Delete) Reset() {
 	*x = Delete{}
-	mi := &file_atoom_store_v1alpha1_item_proto_msgTypes[8]
+	mi := &file_atoom_store_v1alpha1_item_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -611,7 +703,7 @@ func (x *Delete) String() string {
 func (*Delete) ProtoMessage() {}
 
 func (x *Delete) ProtoReflect() protoreflect.Message {
-	mi := &file_atoom_store_v1alpha1_item_proto_msgTypes[8]
+	mi := &file_atoom_store_v1alpha1_item_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -624,7 +716,7 @@ func (x *Delete) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Delete.ProtoReflect.Descriptor instead.
 func (*Delete) Descriptor() ([]byte, []int) {
-	return file_atoom_store_v1alpha1_item_proto_rawDescGZIP(), []int{8}
+	return file_atoom_store_v1alpha1_item_proto_rawDescGZIP(), []int{10}
 }
 
 func (x *Delete) GetKey() []byte {
@@ -651,7 +743,7 @@ type TransactResponse struct {
 
 func (x *TransactResponse) Reset() {
 	*x = TransactResponse{}
-	mi := &file_atoom_store_v1alpha1_item_proto_msgTypes[9]
+	mi := &file_atoom_store_v1alpha1_item_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -663,7 +755,7 @@ func (x *TransactResponse) String() string {
 func (*TransactResponse) ProtoMessage() {}
 
 func (x *TransactResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_atoom_store_v1alpha1_item_proto_msgTypes[9]
+	mi := &file_atoom_store_v1alpha1_item_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -676,7 +768,7 @@ func (x *TransactResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TransactResponse.ProtoReflect.Descriptor instead.
 func (*TransactResponse) Descriptor() ([]byte, []int) {
-	return file_atoom_store_v1alpha1_item_proto_rawDescGZIP(), []int{9}
+	return file_atoom_store_v1alpha1_item_proto_rawDescGZIP(), []int{11}
 }
 
 func (x *TransactResponse) GetItems() []*DriverItem {
@@ -702,7 +794,7 @@ type TailLogRequest struct {
 
 func (x *TailLogRequest) Reset() {
 	*x = TailLogRequest{}
-	mi := &file_atoom_store_v1alpha1_item_proto_msgTypes[10]
+	mi := &file_atoom_store_v1alpha1_item_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -714,7 +806,7 @@ func (x *TailLogRequest) String() string {
 func (*TailLogRequest) ProtoMessage() {}
 
 func (x *TailLogRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_atoom_store_v1alpha1_item_proto_msgTypes[10]
+	mi := &file_atoom_store_v1alpha1_item_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -727,7 +819,7 @@ func (x *TailLogRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TailLogRequest.ProtoReflect.Descriptor instead.
 func (*TailLogRequest) Descriptor() ([]byte, []int) {
-	return file_atoom_store_v1alpha1_item_proto_rawDescGZIP(), []int{10}
+	return file_atoom_store_v1alpha1_item_proto_rawDescGZIP(), []int{12}
 }
 
 func (x *TailLogRequest) GetFromSequence() uint64 {
@@ -757,7 +849,7 @@ type TailLogResponse struct {
 
 func (x *TailLogResponse) Reset() {
 	*x = TailLogResponse{}
-	mi := &file_atoom_store_v1alpha1_item_proto_msgTypes[11]
+	mi := &file_atoom_store_v1alpha1_item_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -769,7 +861,7 @@ func (x *TailLogResponse) String() string {
 func (*TailLogResponse) ProtoMessage() {}
 
 func (x *TailLogResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_atoom_store_v1alpha1_item_proto_msgTypes[11]
+	mi := &file_atoom_store_v1alpha1_item_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -782,7 +874,7 @@ func (x *TailLogResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TailLogResponse.ProtoReflect.Descriptor instead.
 func (*TailLogResponse) Descriptor() ([]byte, []int) {
-	return file_atoom_store_v1alpha1_item_proto_rawDescGZIP(), []int{11}
+	return file_atoom_store_v1alpha1_item_proto_rawDescGZIP(), []int{13}
 }
 
 func (x *TailLogResponse) GetSequence() uint64 {
@@ -817,7 +909,11 @@ var File_atoom_store_v1alpha1_item_proto protoreflect.FileDescriptor
 
 const file_atoom_store_v1alpha1_item_proto_rawDesc = "" +
 	"\n" +
-	"\x1fatoom/store/v1alpha1/item.proto\x12\x14atoom.store.v1alpha1\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\"atoom/common/v1alpha1/common.proto\"\xc6\x01\n" +
+	"\x1fatoom/store/v1alpha1/item.proto\x12\x14atoom.store.v1alpha1\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\"atoom/common/v1alpha1/common.proto\"\x15\n" +
+	"\x13CapabilitiesRequest\"G\n" +
+	"\x14CapabilitiesResponse\x12\x14\n" +
+	"\x05store\x18\x01 \x01(\tR\x05store\x12\x19\n" +
+	"\btail_log\x18\x02 \x01(\bR\atailLog\"\xc6\x01\n" +
 	"\n" +
 	"DriverItem\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\fR\x03key\x12\x18\n" +
@@ -875,8 +971,9 @@ const file_atoom_store_v1alpha1_item_proto_rawDesc = "" +
 	"\bsequence\x18\x01 \x01(\x04R\bsequence\x12\x10\n" +
 	"\x03key\x18\x02 \x01(\fR\x03key\x12\x18\n" +
 	"\aversion\x18\x03 \x01(\x04R\aversion\x12\x18\n" +
-	"\adeleted\x18\x04 \x01(\bR\adeleted2\xe8\x02\n" +
-	"\vItemService\x12R\n" +
+	"\adeleted\x18\x04 \x01(\bR\adeleted2\xcf\x03\n" +
+	"\vItemService\x12e\n" +
+	"\fCapabilities\x12).atoom.store.v1alpha1.CapabilitiesRequest\x1a*.atoom.store.v1alpha1.CapabilitiesResponse\x12R\n" +
 	"\x03Get\x12$.atoom.store.v1alpha1.ItemGetRequest\x1a%.atoom.store.v1alpha1.ItemGetResponse\x12P\n" +
 	"\x05Query\x12\".atoom.store.v1alpha1.QueryRequest\x1a#.atoom.store.v1alpha1.QueryResponse\x12Y\n" +
 	"\bTransact\x12%.atoom.store.v1alpha1.TransactRequest\x1a&.atoom.store.v1alpha1.TransactResponse\x12X\n" +
@@ -895,44 +992,48 @@ func file_atoom_store_v1alpha1_item_proto_rawDescGZIP() []byte {
 	return file_atoom_store_v1alpha1_item_proto_rawDescData
 }
 
-var file_atoom_store_v1alpha1_item_proto_msgTypes = make([]protoimpl.MessageInfo, 12)
+var file_atoom_store_v1alpha1_item_proto_msgTypes = make([]protoimpl.MessageInfo, 14)
 var file_atoom_store_v1alpha1_item_proto_goTypes = []any{
-	(*DriverItem)(nil),            // 0: atoom.store.v1alpha1.DriverItem
-	(*ItemGetRequest)(nil),        // 1: atoom.store.v1alpha1.ItemGetRequest
-	(*ItemGetResponse)(nil),       // 2: atoom.store.v1alpha1.ItemGetResponse
-	(*QueryRequest)(nil),          // 3: atoom.store.v1alpha1.QueryRequest
-	(*QueryResponse)(nil),         // 4: atoom.store.v1alpha1.QueryResponse
-	(*TransactRequest)(nil),       // 5: atoom.store.v1alpha1.TransactRequest
-	(*Condition)(nil),             // 6: atoom.store.v1alpha1.Condition
-	(*Put)(nil),                   // 7: atoom.store.v1alpha1.Put
-	(*Delete)(nil),                // 8: atoom.store.v1alpha1.Delete
-	(*TransactResponse)(nil),      // 9: atoom.store.v1alpha1.TransactResponse
-	(*TailLogRequest)(nil),        // 10: atoom.store.v1alpha1.TailLogRequest
-	(*TailLogResponse)(nil),       // 11: atoom.store.v1alpha1.TailLogResponse
-	(*timestamppb.Timestamp)(nil), // 12: google.protobuf.Timestamp
-	(*v1alpha1.IndexEntry)(nil),   // 13: atoom.common.v1alpha1.IndexEntry
+	(*CapabilitiesRequest)(nil),   // 0: atoom.store.v1alpha1.CapabilitiesRequest
+	(*CapabilitiesResponse)(nil),  // 1: atoom.store.v1alpha1.CapabilitiesResponse
+	(*DriverItem)(nil),            // 2: atoom.store.v1alpha1.DriverItem
+	(*ItemGetRequest)(nil),        // 3: atoom.store.v1alpha1.ItemGetRequest
+	(*ItemGetResponse)(nil),       // 4: atoom.store.v1alpha1.ItemGetResponse
+	(*QueryRequest)(nil),          // 5: atoom.store.v1alpha1.QueryRequest
+	(*QueryResponse)(nil),         // 6: atoom.store.v1alpha1.QueryResponse
+	(*TransactRequest)(nil),       // 7: atoom.store.v1alpha1.TransactRequest
+	(*Condition)(nil),             // 8: atoom.store.v1alpha1.Condition
+	(*Put)(nil),                   // 9: atoom.store.v1alpha1.Put
+	(*Delete)(nil),                // 10: atoom.store.v1alpha1.Delete
+	(*TransactResponse)(nil),      // 11: atoom.store.v1alpha1.TransactResponse
+	(*TailLogRequest)(nil),        // 12: atoom.store.v1alpha1.TailLogRequest
+	(*TailLogResponse)(nil),       // 13: atoom.store.v1alpha1.TailLogResponse
+	(*timestamppb.Timestamp)(nil), // 14: google.protobuf.Timestamp
+	(*v1alpha1.IndexEntry)(nil),   // 15: atoom.common.v1alpha1.IndexEntry
 }
 var file_atoom_store_v1alpha1_item_proto_depIdxs = []int32{
-	12, // 0: atoom.store.v1alpha1.DriverItem.expires_at:type_name -> google.protobuf.Timestamp
-	13, // 1: atoom.store.v1alpha1.DriverItem.indexes:type_name -> atoom.common.v1alpha1.IndexEntry
-	0,  // 2: atoom.store.v1alpha1.ItemGetResponse.item:type_name -> atoom.store.v1alpha1.DriverItem
-	0,  // 3: atoom.store.v1alpha1.QueryResponse.items:type_name -> atoom.store.v1alpha1.DriverItem
-	6,  // 4: atoom.store.v1alpha1.TransactRequest.conditions:type_name -> atoom.store.v1alpha1.Condition
-	7,  // 5: atoom.store.v1alpha1.TransactRequest.puts:type_name -> atoom.store.v1alpha1.Put
-	8,  // 6: atoom.store.v1alpha1.TransactRequest.deletes:type_name -> atoom.store.v1alpha1.Delete
-	12, // 7: atoom.store.v1alpha1.Put.expires_at:type_name -> google.protobuf.Timestamp
-	13, // 8: atoom.store.v1alpha1.Put.indexes:type_name -> atoom.common.v1alpha1.IndexEntry
-	0,  // 9: atoom.store.v1alpha1.TransactResponse.items:type_name -> atoom.store.v1alpha1.DriverItem
-	1,  // 10: atoom.store.v1alpha1.ItemService.Get:input_type -> atoom.store.v1alpha1.ItemGetRequest
-	3,  // 11: atoom.store.v1alpha1.ItemService.Query:input_type -> atoom.store.v1alpha1.QueryRequest
-	5,  // 12: atoom.store.v1alpha1.ItemService.Transact:input_type -> atoom.store.v1alpha1.TransactRequest
-	10, // 13: atoom.store.v1alpha1.ItemService.TailLog:input_type -> atoom.store.v1alpha1.TailLogRequest
-	2,  // 14: atoom.store.v1alpha1.ItemService.Get:output_type -> atoom.store.v1alpha1.ItemGetResponse
-	4,  // 15: atoom.store.v1alpha1.ItemService.Query:output_type -> atoom.store.v1alpha1.QueryResponse
-	9,  // 16: atoom.store.v1alpha1.ItemService.Transact:output_type -> atoom.store.v1alpha1.TransactResponse
-	11, // 17: atoom.store.v1alpha1.ItemService.TailLog:output_type -> atoom.store.v1alpha1.TailLogResponse
-	14, // [14:18] is the sub-list for method output_type
-	10, // [10:14] is the sub-list for method input_type
+	14, // 0: atoom.store.v1alpha1.DriverItem.expires_at:type_name -> google.protobuf.Timestamp
+	15, // 1: atoom.store.v1alpha1.DriverItem.indexes:type_name -> atoom.common.v1alpha1.IndexEntry
+	2,  // 2: atoom.store.v1alpha1.ItemGetResponse.item:type_name -> atoom.store.v1alpha1.DriverItem
+	2,  // 3: atoom.store.v1alpha1.QueryResponse.items:type_name -> atoom.store.v1alpha1.DriverItem
+	8,  // 4: atoom.store.v1alpha1.TransactRequest.conditions:type_name -> atoom.store.v1alpha1.Condition
+	9,  // 5: atoom.store.v1alpha1.TransactRequest.puts:type_name -> atoom.store.v1alpha1.Put
+	10, // 6: atoom.store.v1alpha1.TransactRequest.deletes:type_name -> atoom.store.v1alpha1.Delete
+	14, // 7: atoom.store.v1alpha1.Put.expires_at:type_name -> google.protobuf.Timestamp
+	15, // 8: atoom.store.v1alpha1.Put.indexes:type_name -> atoom.common.v1alpha1.IndexEntry
+	2,  // 9: atoom.store.v1alpha1.TransactResponse.items:type_name -> atoom.store.v1alpha1.DriverItem
+	0,  // 10: atoom.store.v1alpha1.ItemService.Capabilities:input_type -> atoom.store.v1alpha1.CapabilitiesRequest
+	3,  // 11: atoom.store.v1alpha1.ItemService.Get:input_type -> atoom.store.v1alpha1.ItemGetRequest
+	5,  // 12: atoom.store.v1alpha1.ItemService.Query:input_type -> atoom.store.v1alpha1.QueryRequest
+	7,  // 13: atoom.store.v1alpha1.ItemService.Transact:input_type -> atoom.store.v1alpha1.TransactRequest
+	12, // 14: atoom.store.v1alpha1.ItemService.TailLog:input_type -> atoom.store.v1alpha1.TailLogRequest
+	1,  // 15: atoom.store.v1alpha1.ItemService.Capabilities:output_type -> atoom.store.v1alpha1.CapabilitiesResponse
+	4,  // 16: atoom.store.v1alpha1.ItemService.Get:output_type -> atoom.store.v1alpha1.ItemGetResponse
+	6,  // 17: atoom.store.v1alpha1.ItemService.Query:output_type -> atoom.store.v1alpha1.QueryResponse
+	11, // 18: atoom.store.v1alpha1.ItemService.Transact:output_type -> atoom.store.v1alpha1.TransactResponse
+	13, // 19: atoom.store.v1alpha1.ItemService.TailLog:output_type -> atoom.store.v1alpha1.TailLogResponse
+	15, // [15:20] is the sub-list for method output_type
+	10, // [10:15] is the sub-list for method input_type
 	10, // [10:10] is the sub-list for extension type_name
 	10, // [10:10] is the sub-list for extension extendee
 	0,  // [0:10] is the sub-list for field type_name
@@ -943,7 +1044,7 @@ func file_atoom_store_v1alpha1_item_proto_init() {
 	if File_atoom_store_v1alpha1_item_proto != nil {
 		return
 	}
-	file_atoom_store_v1alpha1_item_proto_msgTypes[6].OneofWrappers = []any{
+	file_atoom_store_v1alpha1_item_proto_msgTypes[8].OneofWrappers = []any{
 		(*Condition_Absent)(nil),
 		(*Condition_Version)(nil),
 	}
@@ -953,7 +1054,7 @@ func file_atoom_store_v1alpha1_item_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_atoom_store_v1alpha1_item_proto_rawDesc), len(file_atoom_store_v1alpha1_item_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   12,
+			NumMessages:   14,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

@@ -12,8 +12,9 @@ use anyhow::{Context, bail};
 use atoom_common::refusal;
 use atoom_store::atoom::common::v1alpha1::IndexEntry;
 use atoom_store::atoom::store::v1alpha1::{
-    DriverItem, ItemGetRequest, ItemGetResponse, ItemService, ItemServiceExt, QueryRequest,
-    QueryResponse, TailLogRequest, TailLogResponse, TransactRequest, TransactResponse,
+    CapabilitiesRequest, CapabilitiesResponse, DriverItem, ItemGetRequest, ItemGetResponse,
+    ItemService, ItemServiceExt, QueryRequest, QueryResponse, TailLogRequest, TailLogResponse,
+    TransactRequest, TransactResponse,
 };
 use atoom_store_conformance::rules::{self, now_ms};
 use connectrpc::error::ErrorCode;
@@ -200,6 +201,18 @@ fn items(rows: &[Vec<Value>]) -> anyhow::Result<Vec<DriverItem>> {
 }
 
 impl ItemService for Driver {
+    async fn capabilities(
+        &self,
+        _ctx: RequestContext,
+        _request: ServiceRequest<'_, CapabilitiesRequest>,
+    ) -> ServiceResult<CapabilitiesResponse> {
+        Response::ok(CapabilitiesResponse {
+            store: "rqlite".to_owned(),
+            tail_log: true,
+            ..CapabilitiesResponse::default()
+        })
+    }
+
     async fn get(
         &self,
         _ctx: RequestContext,

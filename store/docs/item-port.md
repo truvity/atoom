@@ -2,14 +2,15 @@
 
 `atoom.store.v1alpha1.ItemService`: a store of **items**. An item is a key, a version, bytes, an optional expiry and the index entries its writer computed. A driver sees items and nothing else; it never knows what the bytes mean. The contract is [item.proto](../proto/atoom/store/v1alpha1/item.proto); this page is its rules in prose, and the conformance kit ([README](../conformance/README.md), [the suite](../conformance/docs/suite.md)) holds every driver to them.
 
-The port has four calls:
+The port has five calls:
 
 | Call | What it does |
 | --- | --- |
+| `Capabilities` | what the driver offers: the optional calls it declares |
 | `Get` | an item by key; `not_found` (reason `absent`) if absent or expired |
 | `Query` | items by key prefix, or by index entry, in key order, paged |
 | `Transact` | conditions, puts and deletes, all or none |
-| `TailLog` | the change log from a sequence, as a stream |
+| `TailLog` | the change log from a sequence, as a stream; optional (see Capabilities) |
 
 ## The contract
 
@@ -19,6 +20,18 @@ The port has four calls:
 - **One put with one condition is one conditional update**, not a transaction. A counter that many callers change depends on it, and a driver must not turn it into something slower.
 - **An index** is a set of `(name, value)` entries that the writer computes and sends with the put. `Query` by `index` and `index_value` lists the items that have the entry, in key order, under the key prefix. The driver never computes an index.
 - **`Query`** pages by key. A `page_size` of 0 is 100, above 500 is 500. The page token is the last key of the page, as bytes, and must be a key under the prefix; it is empty on the last page. `linearizable: true` asks for a read that sees every write acknowledged before it; a driver that cannot give one refuses the call (`unavailable`) and never answers a weaker read in its place. `Get` has the same flag.
+
+## Capabilities
+
+`Capabilities` is the first call a caller makes and the one the kit makes: `store` names the engine (`memory`, `rqlite`, `dynamodb`) and `tail_log` says whether the driver keeps the change log. A call the driver does not offer answers `unimplemented` and the driver says so here (plan R4); the kit skips the cases that need it, and runs a case of its own that holds the driver to its word.
+
+A driver with `tail_log: false`:
+
+- answers `TailLog` with `unimplemented`;
+- refuses a put or a delete that asks for a log row (`log: true`) with `unimplemented`, reason `log`, field `puts[i].log` or `deletes[i].log`, and writes nothing, so that no change is lost silently;
+- names no log head and no epoch in `QueryResponse` (both 0).
+
+A driver that does not serve `Capabilities` (it answers `unimplemented`) is taken to offer every call, as the drivers did before the call existed. The call is an additive change of the contract. Drivers may also be stricter than the contract in the size of a `Transact` (`store/dynamodb` takes 100 writes, not 256) and say so in their documentation.
 
 ## Time to live
 
@@ -47,6 +60,7 @@ Every refusal is a Connect error with the `Refusal` detail of [common](../../com
 | `invalid_argument` | `index` | an `index_value` with no `index`, or an index entry of a put with no name |
 | `aborted` | `version` | a failed condition, with `conditions[i]` |
 | `failed_precondition` | `sequence_expired` | a sequence or an epoch the log does not hold (`from_sequence`) |
+| `unimplemented` | `log` | a put or a delete asks for a log row of a driver that keeps no change log (`puts[i].log`, `deletes[i].log`) |
 | `unavailable` | `engine` | the engine is down or cannot answer at the asked level; the message is the reason only, never the engine's text |
 
 ## Engines
@@ -57,9 +71,9 @@ A driver keeps the items in an engine. The drivers in this repository:
 | --- | --- | --- |
 | [store/rqlite](../rqlite/README.md) | rqlite (replicated SQLite on Raft) | a board or a local installation with one node or a cluster |
 | [store/memory](../memory/README.md) | a map under a mutex | tests, and a consumer that needs no backend |
-| `store/dynamodb` | DynamoDB | planned: AWS, serverless |
+| [store/dynamodb](../dynamodb/README.md) | DynamoDB | AWS, serverless; a Go library that links into a Lambda function; no change log |
 
-Optional calls (`TailLog` on a driver whose engine cannot stream changes) are planned to be declared through a `Capabilities` call, an additive change of this contract (the plan's R4); until then every driver serves all four calls.
+Optional calls (`TailLog` on a driver whose engine cannot stream changes) are declared through `Capabilities` (below).
 
 ## A driver of your own
 
