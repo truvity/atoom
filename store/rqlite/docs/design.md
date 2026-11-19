@@ -29,7 +29,7 @@ Every statement is in [`sql.rs`](../src/sql.rs), one function per shape, so that
 
 ## The sweeper
 
-`sweeper::run` ticks every `--sweep-interval` (30 s by default). On the leader only, it frees expired items in batches of 500 (an item written with a log row leaves its delete row), then trims the change log to `--changelog-retention` (one hour by default, at most seven days). It only frees space: a read checks the expiry itself. An item with no expiry is never swept.
+`sweeper::run` ticks every `--sweep-interval` (30 s by default). On the leader only, it frees expired items in batches of 500 (an item written with a log row leaves its delete row), then trims the change log to `--changelog-retention` (one hour by default, at most seven days; a longer retention is refused at start with a message that begins `--changelog-retention`). It only frees space: a read checks the expiry itself. An item with no expiry is never swept.
 
 ## A cluster
 

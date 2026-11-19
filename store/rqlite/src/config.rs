@@ -70,7 +70,8 @@ impl Settings {
     ///
     /// # Errors
     ///
-    /// For a bad URL or namespace, or a retention above [`MAX_RETENTION`]. The error never shows a credential.
+    /// For a bad URL or namespace, or a retention above [`MAX_RETENTION`] (the message begins `--changelog-retention`). The error never
+    /// shows a credential.
     pub fn new(
         url: &str,
         namespace: &str,
@@ -81,7 +82,8 @@ impl Settings {
         Ok(Self {
             driver: Driver::new(Rq::new(url, basic_auth)?, Ns::new(namespace)?),
             sweep_interval,
-            retention: check_retention(retention).context("the change-log retention")?,
+            // The message names the flag, as it did when this code lived in sluis: the operator reads it at start.
+            retention: check_retention(retention).context("--changelog-retention")?,
         })
     }
 
@@ -163,6 +165,24 @@ mod tests {
         );
         assert!(check_retention(parse_duration("168h").unwrap()).is_ok());
         assert!(check_retention(parse_duration("169h").unwrap()).is_err());
+    }
+
+    #[test]
+    fn a_retention_above_the_maximum_is_refused_and_the_message_names_the_flag() {
+        let new = |retention: &str| {
+            Settings::new(
+                "http://127.0.0.1:1",
+                "durable",
+                None,
+                Duration::from_secs(30),
+                parse_duration(retention).unwrap(),
+            )
+        };
+        assert!(new("168h").is_ok());
+        let Err(e) = new("169h") else {
+            panic!("169h must be refused")
+        };
+        assert_eq!(format!("{e:#}"), "--changelog-retention: at most 7d");
     }
 
     #[cfg(feature = "cli")]
