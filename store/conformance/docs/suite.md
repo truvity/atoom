@@ -12,7 +12,7 @@ The cases of `item_suite`, in the order they run. Each one speaks the contract a
 | `transact_all_or_none` | a failed condition applies nothing; the field path names the first that failed |
 | `one_put_one_condition` | the counter shape: one put with one condition is one conditional update |
 | `expiry` | an item past its expiry is absent to a read, a listing and a condition, and a put over it continues its version |
-| `version_never_decreases` | a version never goes back while the engine still holds the item: not across an expiry and a create over it, however often (a delete, or a sweep that freed the row, starts the key again, and the suite cannot make an engine sweep) |
+| `version_never_decreases` | a version never goes back while the engine still holds the item: not across an expiry and a create over it, however often (a delete, or a sweep that freed the row, starts the key again, and the suite cannot make an engine sweep); on DynamoDB Local, which sweeps in the background, the case is retried once, see below |
 | `prefix_query_order_and_paging` | key order, the default and maximum page size, the page token |
 | `index_query` | a query by index entry, in key order, under the prefix |
 | `log_order_and_from_sequence` | the change log in order; a `TailLog` from a sequence and from 0 |
@@ -45,3 +45,7 @@ It cannot reset a driver's log, so that a log made again has another epoch is th
 ## Running it
 
 Against a socket: `store-conformance --socket PATH`. From Rust: `atoom_store_conformance::item_suite(atoom_socket::dial(path)).await`, then `report`. A driver in Go can run the binary as a test step; the contract is the same in every language.
+
+## The one retry
+
+`version_never_decreases` is retried once, and only when the driver under test runs on DynamoDB Local: `tools/scripts/conformance-store.sh` sets `ATOOM_CONFORMANCE_DYNAMODB_LOCAL=1` for that one run, and the kit reads it. DynamoDB Local deletes expired items in a background sweep, and a sweep that frees the row between two steps of the case starts the version again (the versions `[1, 2, 3, 1]` on the arm64 runner, issue [#14](https://github.com/truvity/atoom/issues/14)). On a failure the kit prints `RETRIED version_never_decreases: <first failure>` and runs the case again under a key of its own; the case passes only if the second run passes. Every other case and every other driver run once. The cause stays open in #14: the retry makes the run tell a real regression (it fails twice) from the race, and the `RETRIED` line keeps the race visible in the log.

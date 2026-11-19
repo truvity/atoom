@@ -11,7 +11,7 @@ What `suite::run` holds a destination to, in the order it runs. It speaks the co
 | `a large body` | a binary body near the limit (2 MiB) survives byte for byte |
 | `a write is whole` | a reader that lists while a document is replaced sees the old digest or the new one, never a mixture |
 | `delete` | `Delete` removes what was written and says so; a second `Delete` says `false`; the document is no longer listed |
-| `refusals` | an address that is empty, has a leading or trailing `/`, an empty segment, `..`, `./`, a capital letter, a space or the reserved first segment `.sluis` is refused by `Put` and `Delete`, a prefix of `../` or `/` by `List`, a body over the limit and a header value with a line break by `Put`, all as `invalid`; a refused `Put` leaves no document |
+| `refusals` | an address that is empty, has a leading or trailing `/`, an empty segment, `..`, `./`, a capital letter, a space or the reserved first segment `.atoom` is refused by `Put` and `Delete`, a prefix of `../` or `/` by `List`, a body over the limit and a header value with a line break by `Put`, all as `invalid`; a refused `Put` leaves no document |
 | `no public address` (when `public_base` is not set) | `ReadBack` is `unsupported` and `Purge` answers `None` |
 | `public address, purge and read back` (when it is set) | `ReadBack` of the public address gives status 200, the body and the content type and cache control that were written; after a replacement and a `Purge` the next `ReadBack` gives the new document; `Purge` answers `Purged` with an edge and `None` without; a `Purge` or `ReadBack` of another host is `invalid`; a document that is not there is a 404 |
 

@@ -159,7 +159,7 @@ pub fn hex(bytes: &[u8]) -> String {
 
 /// Checks an address: one to [`SEGMENTS_MAX`] segments joined by `/`, each 1 to [`SEGMENT_MAX`] characters of lower-case
 /// letters, digits, `-`, `_` and `.`, never `.` or `..`, at most [`ADDRESS_MAX`] bytes. The first segment is not
-/// `.sluis`, which a driver may keep for itself, and no segment starts with `.tmp-`, the name of a driver's temporary
+/// `.atoom`, which a driver may keep for itself, and no segment starts with `.tmp-`, the name of a driver's temporary
 /// file. A leading dot is allowed otherwise, for `.well-known`.
 ///
 /// # Errors
@@ -183,8 +183,8 @@ pub fn check_address(address: &str) -> Result<(), Error> {
             return Err(Error::Invalid("address"));
         }
     }
-    // A driver keeps `.sluis` for itself and makes its temporary files `.tmp-*` beside the document it writes.
-    if address.split('/').next() == Some(".sluis")
+    // A driver keeps `.atoom` for itself and makes its temporary files `.tmp-*` beside the document it writes.
+    if address.split('/').next() == Some(".atoom")
         || address.split('/').any(|s| s.starts_with(".tmp-"))
     {
         return Err(Error::Invalid("address"));
@@ -265,7 +265,7 @@ mod tests {
         let deep = ["a"; SEGMENTS_MAX + 1].join("/");
         for bad in [
             "", "/a", "a/", "a//b", ".", "..", "a/../b", "./a", "A", "a b", "a\\b", "a\0b",
-            ".sluis/x", ".sluis", ".tmp-1-2", "a/.tmp-x", "é", &long, &deep,
+            ".atoom/x", ".atoom", ".tmp-1-2", "a/.tmp-x", "é", &long, &deep,
         ] {
             assert_eq!(
                 check_address(bad),
