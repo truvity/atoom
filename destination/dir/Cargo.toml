@@ -15,7 +15,7 @@ workspace = true
 # The command-line flags and the socket of the thin main (clap, atoom-socket): what destination-dir needs and a library consumer does
 # not. A consumer that mounts the router in a host of its own turns the default features off.
 default = ["cli"]
-cli = ["dep:clap", "dep:atoom-socket", "dep:tracing-subscriber", "tokio/rt-multi-thread", "tokio/macros", "tokio/signal"]
+cli = ["dep:clap", "dep:atoom-socket", "atoom-socket/cli", "dep:tracing-subscriber", "tokio/rt-multi-thread", "tokio/macros", "tokio/signal"]
 
 [lib]
 name = "atoom_destination_dir"

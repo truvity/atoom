@@ -3,8 +3,12 @@
 //! ```text
 //! blob-fs serve --socket PATH --root DIR    # serves the blob contract on the UNIX socket PATH (mode 0600) until SIGINT or SIGTERM
 //! blob-fs check --root DIR                  # opens DIR by the rules of serve; exit 3 when it cannot be served
-//! blob-fs --version
+//! blob-fs version                          # and --version
 //! ```
+//!
+//! The socket is guarded (`docs/socket-guard.md`): its mode is 0600 and it admits the callers of this process's uid, unless `serve` is
+//! given the guard flags `--allow-uid UID` (repeatable), `--allow-any-uid`, `--socket-gid GID` and `--socket-mode MODE`. A caller
+//! outside the set is refused with the reason `caller`. `version` prints the version of the build.
 //!
 //! `serve` opens the directory before the socket exists (no directory, no service) and removes the temporary files an earlier crash
 //! left behind. The root must be a directory owned by this process's uid and closed to others (mode no wider than 0750).
@@ -14,8 +18,8 @@ use std::path::PathBuf;
 use anyhow::Context;
 use atoom_blob_fs::Fs;
 use atoom_blob_fs::service::Service;
-use atoom_socket::ServerConfig;
-use clap::{Arg, Command, value_parser};
+use atoom_socket::cli::{self, GuardArgs};
+use clap::{Arg, Args as _, Command, FromArgMatches as _, value_parser};
 
 fn command() -> Command {
     let root = || {
@@ -27,11 +31,12 @@ fn command() -> Command {
             .help("The blob directory")
     };
     Command::new("blob-fs")
-        .version(env!("CARGO_PKG_VERSION"))
+        .version(atoom_socket::VERSION)
         .about("The fs driver of the blob port")
         .subcommand_required(true)
+        .subcommand(cli::version_command())
         .subcommand(
-            Command::new("serve")
+            GuardArgs::augment_args(Command::new("serve"))
                 .about("Serve the blob contract on a UNIX socket")
                 .arg(
                     Arg::new("socket")
@@ -39,7 +44,7 @@ fn command() -> Command {
                         .value_name("PATH")
                         .required(true)
                         .value_parser(value_parser!(PathBuf))
-                        .help("The UNIX socket to serve on (mode 0600)"),
+                        .help("The UNIX socket to serve on (mode 0600 by default)"),
                 )
                 .arg(root()),
         )
@@ -86,7 +91,7 @@ async fn main() -> anyhow::Result<()> {
             let swept = fs.sweep()?;
             tracing::info!(swept, "temporary files of an earlier run removed");
             atoom_socket::serve(
-                ServerConfig::new(socket),
+                GuardArgs::from_arg_matches(m)?.config(socket),
                 Service(fs).router(),
                 shutdown_signal(),
             )
@@ -105,6 +110,10 @@ async fn main() -> anyhow::Result<()> {
                     std::process::exit(3);
                 }
             }
+        }
+        Some(("version", _)) => {
+            cli::print_version("blob-fs");
+            Ok(())
         }
         _ => unreachable!("a subcommand is required"),
     }

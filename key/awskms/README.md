@@ -6,7 +6,8 @@ The AWS KMS key driver of atoom: the [key port](../README.md) over asymmetric ke
 | --- | --- |
 | Go module | `github.com/truvity/atoom/key/awskms` (requires the port, the common types, the AWS SDK for Go v2 and the kit for its tests; no other driver) |
 | Library | package `awskms`: `New(Options)` takes a KMS client (`API`; `*kms.Client` is one) and returns a `Service`; `Service.Handler()` is the Connect handler to mount in-process or on a server; `Run(ctx, opts, host)` serves it on a server the host provides |
-| Thin main | `cmd/awskms`: `awskms serve --socket PATH`, `awskms version` |
+| Thin main | `cmd/awskms`: `awskms serve --socket PATH [--alias-prefix P] [--create-keys]` (a socket of mode 0600 that admits this process's uid), `awskms version` |
+| Guard flags | `--allow-uid UID` (repeatable; without it only this process's uid may call), `--allow-any-uid`, `--socket-gid GID`, `--socket-mode MODE`: the [socket guard](../../docs/socket-guard.md) |
 | Documentation | [docs/layout.md](docs/layout.md) (how the contract maps to KMS), [docs/research](docs/research) |
 | Where it came from | [PROVENANCE.md](PROVENANCE.md) |
 

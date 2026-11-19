@@ -19,3 +19,5 @@ What stayed in sluis: the wrapper of each driver's `main` (the socket with peer 
 Sluis requirement tags in the tests and comments (`verifies: REQ-...`) and references to sluis's decision records were dropped or replaced by pointers into this repository's pages.
 
 Added in step 3b (new, not from sluis): the call `Capabilities` of `item.proto` (an additive change, plan R4: `store` and `tail_log`), its answers in `memory` and `rqlite`, the skip of the log cases and the case `no_log_is_refused` in the kit, and the Go driver [`dynamodb`](dynamodb/PROVENANCE.md).
+
+Added in step G1 (2026-11-19, [docs/plan.md](../docs/plan.md), decision D11 A): the thin mains `store-rqlite` and `store-memory` carry the guard flags (and `store-rqlite` the `version` command); `MemoryEngine::serve_with` takes a `ServerConfig`. The Go thin main of `store/dynamodb` has them too. The guard comes from sluis's kits (`kits/rust/sluis-kit`, `kits/go/rpc`) with the names left out: it decides by uid and knows no registry. What stays in sluis: the registry names, the owner check and the `conformance` subcommand, until the hosts are deleted (step G4).

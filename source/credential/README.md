@@ -5,7 +5,8 @@ The credential driver of the [source port](../docs/source-port.md): the secret s
 | | |
 | --- | --- |
 | Library | crate `atoom-source-credential`: `Dir::open(path)` opens the directory by the rules below; `Dir::verify()` reads every credential in it; `service::Service(dir).router()` is the ConnectRPC handler; `suite::run_temp()` is the backend suite that a host may run from a command of its own |
-| Thin main | `source-credential serve --socket PATH [--dir DIR]` (mode 0600 socket, until SIGINT or SIGTERM; `DIR` defaults to `$CREDENTIALS_DIRECTORY`); `source-credential check [--dir DIR]` (reads every credential, prints no value, exit 3 when the directory cannot be served); `source-credential --version` |
+| Thin main | `source-credential serve --socket PATH [--dir DIR]` (a socket of mode 0600 that admits this process's uid, until SIGINT or SIGTERM; `DIR` defaults to `$CREDENTIALS_DIRECTORY`); `source-credential check [--dir DIR]` (reads every credential, prints no value, exit 3 when the directory cannot be served); `source-credential version` (and `--version`) |
+| Guard flags | `--allow-uid UID` (repeatable; without it only this process's uid may call), `--allow-any-uid`, `--socket-gid GID`, `--socket-mode MODE`: the [socket guard](../../docs/socket-guard.md) |
 | Feature | `cli` (default): the flags and the socket (`clap`, `atoom-socket`, `tracing-subscriber`). A consumer that mounts `router()` in a host of its own turns the default features off |
 | Watch | `NONE`: a credential cannot change under a running service, and `Watch` is `unimplemented` |
 

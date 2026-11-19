@@ -5,7 +5,8 @@ The dir driver of the [destination port](../docs/destination-port.md): the desti
 | | |
 | --- | --- |
 | Library | crate `atoom-destination-dir`: `Directory::open(root, state)` opens the two directories; `Directory` is a `Destination` of the kit (serve it with `atoom_destination_conformance::rpc::Service(Arc::new(dir)).router()`); `Directory::sweep()` removes the temporary files a crash left; `suite::run_temp()` is the backend suite (the port's suite in process, plus modes, files the driver did not write, a document and a directory at one address, a write stopped before the rename) that a host may run from a command of its own |
-| Thin main | `destination-dir serve --socket PATH --root DIR --state-dir DIR` (mode 0600 socket, until SIGINT or SIGTERM; removes the temporary files an earlier crash left); `destination-dir check --root DIR --state-dir DIR` (exit 3 when the directories cannot be served); `destination-dir --version` |
+| Thin main | `destination-dir serve --socket PATH --root DIR --state-dir DIR` (a socket of mode 0600 that admits this process's uid, until SIGINT or SIGTERM; removes the temporary files an earlier crash left); `destination-dir check --root DIR --state-dir DIR` (exit 3 when the directories cannot be served); `destination-dir version` (and `--version`) |
+| Guard flags | `--allow-uid UID` (repeatable; without it only this process's uid may call), `--allow-any-uid`, `--socket-gid GID`, `--socket-mode MODE`: the [socket guard](../../docs/socket-guard.md) |
 | Feature | `cli` (default): the flags and the socket (`clap`, `atoom-socket`, `tracing-subscriber`). A consumer that mounts the router in a host of its own turns the default features off |
 
 How it works is in [docs/dir.md](docs/dir.md). Where the code came from is in [../PROVENANCE.md](../PROVENANCE.md).

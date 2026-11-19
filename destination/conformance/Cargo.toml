@@ -26,7 +26,7 @@ path = "src/bin/memory.rs"
 anyhow = "1"
 atoom-common = { path = "../../common" }
 atoom-destination = { path = ".." }
-atoom-socket = { path = "../../socket" }
+atoom-socket = { path = "../../socket", features = ["cli"] }
 aws-lc-rs = "1"
 clap = { version = "4", features = ["derive"] }
 connectrpc = { version = "=0.9.1", default-features = false, features = ["json", "gzip", "client", "server"] }

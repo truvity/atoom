@@ -1000,3 +1000,75 @@ async fn a_query_is_read_at_the_level_it_asked_for() {
     }
     served.stop().await;
 }
+
+/// A child process that dies with the test.
+struct Killed(Child);
+
+impl Drop for Killed {
+    fn drop(&mut self) {
+        let _ = self.0.kill();
+        let _ = self.0.wait();
+    }
+}
+
+/// The thin main serves behind the guard: `--allow-uid` decides who may call, and a caller outside the set is refused with the reason
+/// `caller`. (The guard itself is tested in `atoom-socket`; this proves that the main wires its flags.)
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn the_thin_main_guards_its_socket() {
+    use std::os::unix::fs::MetadataExt;
+
+    let Some(bin) = rqlited() else { return };
+    let word = rqlite_command(&["version"]);
+    assert!(word.status.success());
+    assert!(String::from_utf8_lossy(&word.stdout).starts_with("store-rqlite "));
+
+    let node = start_node(&bin, None).await;
+    let dir = tempfile::tempdir().unwrap();
+    let me = std::fs::metadata(dir.path()).unwrap().uid();
+    let run = |allow: u32, name: &str| {
+        let socket = dir.path().join(name);
+        let child = Command::new(env!("CARGO_BIN_EXE_store-rqlite"))
+            .args([
+                "serve",
+                "--rqlite-url",
+                node.url.as_str(),
+                "--namespace",
+                "durable",
+            ])
+            .arg("--socket")
+            .arg(&socket)
+            .args(["--allow-uid", &allow.to_string()])
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn()
+            .expect("run store-rqlite serve");
+        (socket, Killed(child))
+    };
+    let call = |socket: &Path| {
+        let c = dial(socket);
+        let rpc = ItemServiceClient::new(c.transport(), c.config());
+        async move {
+            rpc.capabilities(atoom_store::atoom::store::v1alpha1::CapabilitiesRequest::default())
+                .await
+                .map(|_| ())
+        }
+    };
+    for (allow, admitted) in [(me, true), (me + 1, false)] {
+        let (socket, _main) = run(allow, &format!("g{allow}.sock"));
+        // The main waits for rqlite and makes the schema before it listens.
+        for _ in 0..600 {
+            if std::os::unix::net::UnixStream::connect(&socket).is_ok() {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+        let result = call(&socket).await;
+        if admitted {
+            result.expect("the listed uid is admitted");
+        } else {
+            let err = result.expect_err("a uid outside --allow-uid is refused");
+            assert_eq!(err.code, ErrorCode::PermissionDenied, "{err:?}");
+            assert_eq!(refusal_reason(&err).as_deref(), Some("caller"), "{err:?}");
+        }
+    }
+}

@@ -13,6 +13,8 @@ use hyper_util::server::graceful::GracefulShutdown;
 use tokio::net::{UnixListener, UnixStream};
 use tower::Service;
 
+use crate::guard::{Allow, Guard, Peer};
+
 /// How long a graceful shutdown waits for calls in flight.
 const GRACE: Duration = Duration::from_secs(5);
 
@@ -21,20 +23,29 @@ const GRACE: Duration = Duration::from_secs(5);
 pub struct ServerConfig {
     /// The absolute path of the socket.
     pub socket: PathBuf,
-    /// The mode of the socket file. 0o600 lets the owner connect and nobody else: who may connect is the file's permission and
-    /// nothing more, since the server asks no one who they are.
+    /// The mode of the socket file: 0o600 lets the owner connect and nobody else.
     pub mode: u32,
+    /// The group of the socket file, or `None` to leave the one the kernel gave. A socket for a caller of another uid is given a group
+    /// and the mode 0o660, so that the members of the group, and only they, can open it; the process must be a member of the group.
+    /// It changes who may open the socket and nothing else: the guard still decides, from the peer's uid, who may call. A gid of 0 is
+    /// refused.
+    pub socket_gid: Option<u32>,
+    /// Who may call: the second wall behind the mode. The default is the uid this process runs as.
+    pub allow: Allow,
     /// The deadline of a call that carries none.
     pub default_deadline: Duration,
 }
 
 impl ServerConfig {
-    /// A configuration for `socket`: mode 0o600 and a deadline of 30 seconds for a call that carries none.
+    /// A configuration for `socket`: mode 0o600, no group of its own, callers of this process's uid only, and a deadline of 30 seconds
+    /// for a call that carries none.
     #[must_use]
     pub fn new(socket: impl Into<PathBuf>) -> Self {
         Self {
             socket: socket.into(),
             mode: 0o600,
+            socket_gid: None,
+            allow: Allow::SameUid,
             default_deadline: Duration::from_secs(30),
         }
     }
@@ -43,7 +54,9 @@ impl ServerConfig {
 /// Serves `router` on `cfg.socket` until `shutdown` resolves, then drains for at most 5 seconds.
 ///
 /// The socket is made fresh: a stale socket file is replaced, a symlink or any other file is refused, and a socket that still has a
-/// listener is never taken over.
+/// listener is never taken over. Each connection's peer credentials are read once; every call passes the guard (`cfg.allow`) before
+/// its message is decoded, and a caller outside the set is `permission_denied` with the reason `caller`. A handler reads the caller
+/// with [`peer`](crate::peer).
 ///
 /// # Errors
 ///
@@ -53,9 +66,14 @@ pub async fn serve(
     router: Router,
     shutdown: impl Future<Output = ()> + Send,
 ) -> anyhow::Result<()> {
-    let listener = listen(&cfg.socket, cfg.mode)?;
-    let service = ConnectRpcService::new(router)
+    let listener = listen(&cfg.socket, cfg.mode, cfg.socket_gid)?;
+    let mut service = ConnectRpcService::new(router)
         .with_deadline_policy(DeadlinePolicy::new().with_default_timeout(cfg.default_deadline));
+    // A server that admits every uid that can open the socket has nothing to check.
+    let any = cfg.allow == Allow::Any;
+    if !any {
+        service = service.with_interceptor(Guard::new(cfg.allow.clone()));
+    }
     tracing::info!(socket = %cfg.socket.display(), "listening");
 
     let graceful = GracefulShutdown::new();
@@ -64,7 +82,7 @@ pub async fn serve(
         tokio::select! {
             () = &mut shutdown => break Ok(()),
             accepted = listener.accept() => match accepted {
-                Ok((stream, _)) => accept(stream, &service, &graceful),
+                Ok((stream, _)) => accept(stream, &service, &graceful, any),
                 Err(e) => break Err(e).context("accept"),
             },
         }
@@ -81,9 +99,24 @@ pub async fn serve(
     result
 }
 
-fn accept(stream: UnixStream, service: &ConnectRpcService, graceful: &GracefulShutdown) {
+fn accept(stream: UnixStream, service: &ConnectRpcService, graceful: &GracefulShutdown, any: bool) {
+    let peer = match Peer::read(&stream) {
+        Ok(p) => Some(p),
+        Err(e) if any => {
+            tracing::debug!(error = %e, "peer credentials unreadable; the connection is served without a caller");
+            None
+        }
+        Err(e) => {
+            // Without credentials the caller cannot be named: drop the connection.
+            tracing::warn!(error = %e, "peer credentials unreadable; connection dropped");
+            return;
+        }
+    };
     let service = service.clone();
-    let svc = hyper::service::service_fn(move |req: http::Request<hyper::body::Incoming>| {
+    let svc = hyper::service::service_fn(move |mut req: http::Request<hyper::body::Incoming>| {
+        if let Some(p) = peer {
+            req.extensions_mut().insert(p);
+        }
         let mut service = service.clone();
         async move { service.call(req).await }
     });
@@ -98,9 +131,12 @@ fn accept(stream: UnixStream, service: &ConnectRpcService, graceful: &GracefulSh
     });
 }
 
-/// Makes the listening socket: a stale file is replaced, a symlink or a non-socket refused, and the mode is set before the socket
-/// gets its final name.
-fn listen(path: &Path, mode: u32) -> anyhow::Result<UnixListener> {
+/// Makes the listening socket: a stale file is replaced, a symlink or a non-socket refused, and the group and the mode are set before
+/// the socket gets its final name.
+fn listen(path: &Path, mode: u32, gid: Option<u32>) -> anyhow::Result<UnixListener> {
+    if gid == Some(0) {
+        bail!("the socket group 0 is refused: use None for no group");
+    }
     match std::fs::symlink_metadata(path) {
         Ok(m) if m.file_type().is_symlink() => {
             bail!("{}: a symlink is in the way of the socket", path.display())
@@ -128,16 +164,25 @@ fn listen(path: &Path, mode: u32) -> anyhow::Result<UnixListener> {
     }
     let parent = path.parent().context("the socket path has no directory")?;
     let name = path.file_name().context("the socket path has no name")?;
-    // Bind under a temporary name, set the mode, then rename: the socket is never reachable at its final name with a wider mode than
-    // asked for.
+    // Bind under a temporary name, set the group and the mode, then rename: the socket is never reachable at its final name with a wider
+    // mode than asked for.
     let mut tmp = name.to_owned();
     tmp.push(format!(".{}.tmp", std::process::id()));
     let tmp = parent.join(tmp);
     let _ = std::fs::remove_file(&tmp);
     let listener = UnixListener::bind(&tmp).context("bind the socket")?;
-    if let Err(e) = std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(mode)) {
+    // The group first, then the mode, both before the final name. A failure leaves no socket behind.
+    let placed = (|| -> anyhow::Result<()> {
+        if let Some(g) = gid {
+            rustix::fs::chown(&tmp, None, Some(rustix::fs::Gid::from_raw(g)))
+                .context("set the socket group")?;
+        }
+        std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(mode))
+            .context("set the socket mode")
+    })();
+    if let Err(e) = placed {
         let _ = std::fs::remove_file(&tmp);
-        return Err(e).context("set the socket mode");
+        return Err(e);
     }
     std::fs::rename(&tmp, path).context("put the socket in place")?;
     Ok(listener)

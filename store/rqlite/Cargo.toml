@@ -15,7 +15,7 @@ workspace = true
 # The command-line flags of the driver (clap): what the thin main reads, and what a host adds to its own command line. A consumer
 # that links the library and builds its own settings turns the default features off.
 default = ["cli"]
-cli = ["dep:clap"]
+cli = ["dep:clap", "atoom-socket/cli"]
 
 [lib]
 name = "atoom_store_rqlite"

@@ -10,4 +10,4 @@ What it does and does not do, for a consumer that links it.
 - **Words become quoted phrases** of the FTS5 expression, so that no FTS5 operator, column filter or special character of the person's text means anything; a trailing `*` makes a prefix; at most 16 words of at most 64 bytes.
 - **Bounds.** At most 1024 rows in an `Apply`, a record of at most 1 MiB, at most 100 tenants and 32 partitions in a query.
 - **The blocking calls run on the blocking threads** of the runtime (`spawn_blocking`), so a slow disk does not stall the server.
-- **No guard on the sockets** beyond their mode, in the thin main. A host that guards its sockets registers the routers on servers of its own.
+- **Who may call** each socket is decided by the [socket guard](../../../docs/socket-guard.md) of the thin main: by default the uid of the process; `--allow-uid` names the callers of the write socket and `--read-allow-uid` those of the read socket. A host that names its callers registers the routers on servers of its own.

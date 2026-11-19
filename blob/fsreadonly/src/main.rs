@@ -3,8 +3,12 @@
 //! ```text
 //! blob-fsreadonly serve --socket PATH --root DIR [--owner-uid UID]
 //! blob-fsreadonly check --root DIR [--owner-uid UID]
-//! blob-fsreadonly --version
+//! blob-fsreadonly version                          # and --version
 //! ```
+//!
+//! The socket is guarded (`docs/socket-guard.md`): its mode is 0600 and it admits the callers of this process's uid, unless `serve` is
+//! given the guard flags `--allow-uid UID` (repeatable), `--allow-any-uid`, `--socket-gid GID` and `--socket-mode MODE`. A caller
+//! outside the set is refused with the reason `caller`. `version` prints the version of the build.
 //!
 //! The directory is the one `blob-fs` keeps. It must belong to `--owner-uid`, the uid of the driver that writes it (this process's own
 //! uid when the flag is not given), and be closed to others (mode no wider than 0750); this process reads it through the group of that
@@ -16,8 +20,8 @@ use std::path::PathBuf;
 use anyhow::Context;
 use atoom_blob_fsdir::Fs;
 use atoom_blob_fsreadonly::ReadOnly;
-use atoom_socket::ServerConfig;
-use clap::{Arg, Command, value_parser};
+use atoom_socket::cli::{self, GuardArgs};
+use clap::{Arg, Args as _, Command, FromArgMatches as _, value_parser};
 
 fn command() -> Command {
     let root = || {
@@ -36,11 +40,12 @@ fn command() -> Command {
             .help("The uid that owns the directory (the writing driver's); default this process's own")
     };
     Command::new("blob-fsreadonly")
-        .version(env!("CARGO_PKG_VERSION"))
+        .version(atoom_socket::VERSION)
         .about("The read-only fs driver of the blob port")
         .subcommand_required(true)
+        .subcommand(cli::version_command())
         .subcommand(
-            Command::new("serve")
+            GuardArgs::augment_args(Command::new("serve"))
                 .about("Serve Get and List of the blob contract on a UNIX socket")
                 .arg(
                     Arg::new("socket")
@@ -48,7 +53,7 @@ fn command() -> Command {
                         .value_name("PATH")
                         .required(true)
                         .value_parser(value_parser!(PathBuf))
-                        .help("The UNIX socket to serve on (mode 0600)"),
+                        .help("The UNIX socket to serve on (mode 0600 by default)"),
                 )
                 .arg(root())
                 .arg(owner()),
@@ -102,7 +107,7 @@ async fn main() -> anyhow::Result<()> {
             // The root is checked before the socket exists: no directory, no service.
             let fs = open(m)?;
             atoom_socket::serve(
-                ServerConfig::new(socket),
+                GuardArgs::from_arg_matches(m)?.config(socket),
                 ReadOnly(fs).router(),
                 shutdown_signal(),
             )
@@ -120,6 +125,10 @@ async fn main() -> anyhow::Result<()> {
                     std::process::exit(3);
                 }
             }
+        }
+        Some(("version", _)) => {
+            cli::print_version("blob-fsreadonly");
+            Ok(())
         }
         _ => unreachable!("a subcommand is required"),
     }

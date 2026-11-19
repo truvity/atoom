@@ -11,3 +11,5 @@ This library is new code written for atoom (the extraction plan, step 3b, [docs/
 | `docs/research/` | new, 2026-11-19; reads the DynamoDB developer guide (quotas, time to live, transactions) | cites, does not copy |
 
 What stays in the host: the socket's peer check, the registry owner, the command line of a larger system, and the table and its IAM policy (deployment code).
+
+Added in step G1 (2026-11-19, [docs/plan.md](../../docs/plan.md), decision D11 A): the thin main `cmd/dynamodb` serves through `github.com/truvity/atoom/socket` and carries the guard flags; its own copy of the socket code is gone. The guard comes from sluis's kits (`kits/rust/sluis-kit`, `kits/go/rpc`) with the names left out: it decides by uid and knows no registry. What stays in sluis: the registry owner check, until the host is deleted (step G4).

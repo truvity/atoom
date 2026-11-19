@@ -2,35 +2,34 @@
 // does nothing else. The library (github.com/truvity/atoom/store/dynamodb) is the driver; a program that needs the driver inside its own
 // process (a Lambda function) links the library instead and needs no socket.
 //
-//	dynamodb serve --socket PATH [--table NAME] [--create-table] [--socket-mode 0600]
+//	dynamodb serve --socket PATH [--table NAME] [--create-table]
+//	               [--allow-uid UID]... [--allow-any-uid] [--socket-gid GID] [--socket-mode MODE]
 //	dynamodb create-table [--table NAME]
 //	dynamodb check [--table NAME]
 //	dynamodb version
 //
 // The region, the credentials and an endpoint of another place (AWS_ENDPOINT_URL_DYNAMODB, for DynamoDB Local) come from the AWS SDK's
-// own configuration chain: the environment, the shared files, the role of the host. The socket is mode 0600 by default, so that the file
-// system decides who may call: any process that can open the socket may read and write every item. The exit status is 0 on success, 1 on a
-// failure, 2 on a usage error.
+// own configuration chain: the environment, the shared files, the role of the host. The socket is guarded
+// (github.com/truvity/atoom/socket, docs/socket-guard.md): mode 0600 and the uid of the process by default, so that no other process may
+// read or write an item; --allow-uid names the callers, and a caller outside the set is refused with the reason caller. The exit status
+// is 0 on success, 1 on a failure, 2 on a usage error.
 package main
 
 import (
 	"context"
-	"errors"
 	"flag"
 	"fmt"
 	"io"
-	"net"
 	"net/http"
 	"os"
 	"os/signal"
 	"runtime/debug"
-	"strconv"
 	"syscall"
-	"time"
 
 	"github.com/aws/aws-sdk-go-v2/config"
 	awsdynamodb "github.com/aws/aws-sdk-go-v2/service/dynamodb"
 
+	atoomsocket "github.com/truvity/atoom/socket"
 	"github.com/truvity/atoom/store/dynamodb"
 )
 
@@ -121,10 +120,11 @@ func table(args []string, stderr io.Writer, create bool) int {
 func serve(args []string, stderr io.Writer) int {
 	fs := flag.NewFlagSet("dynamodb serve", flag.ContinueOnError)
 	fs.SetOutput(stderr)
+	var guard atoomsocket.Flags
+	guard.Register(fs)
 	socket := fs.String("socket", "", "the UNIX socket to serve on (required)")
 	tbl := fs.String("table", dynamodb.DefaultTable, "the name of the table")
 	create := fs.Bool("create-table", false, "make the table first if it is absent, and enable its time to live (for a test or a first start)")
-	mode := fs.String("socket-mode", "0600", "the mode of the socket, octal")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
@@ -132,9 +132,9 @@ func serve(args []string, stderr io.Writer) int {
 		_, _ = fmt.Fprintln(stderr, "dynamodb serve: --socket is required")
 		return 2
 	}
-	m, err := strconv.ParseUint(*mode, 8, 32)
-	if err != nil || m > 0o777 {
-		_, _ = fmt.Fprintln(stderr, "dynamodb serve: --socket-mode is not an octal mode")
+	cfg, err := guard.Config(*socket)
+	if err != nil {
+		_, _ = fmt.Fprintln(stderr, "dynamodb serve:", err)
 		return 2
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -151,79 +151,11 @@ func serve(args []string, stderr io.Writer) int {
 		}
 	}
 	host := dynamodb.Host{Serve: func(ctx context.Context, path string, h http.Handler) error {
-		return serveUnix(ctx, *socket, os.FileMode(m), path, h) //nolint:gosec // m is at most 0o777
+		return atoomsocket.Serve(ctx, cfg, path, h)
 	}}
 	if err := dynamodb.Run(ctx, dynamodb.Options{DynamoDB: api, Table: *tbl}, host); err != nil {
 		_, _ = fmt.Fprintln(stderr, "dynamodb:", err)
 		return 1
 	}
 	return 0
-}
-
-// serveUnix serves h at path on a UNIX socket until ctx ends: HTTP/1.1 and HTTP/2 without TLS. A stale socket file is replaced; a live
-// one, a symlink or another kind of file is refused. The socket has its mode from the moment it is reachable (it is made under a
-// temporary name and renamed).
-func serveUnix(ctx context.Context, socket string, mode os.FileMode, path string, h http.Handler) error {
-	ln, err := listenUnix(socket, mode)
-	if err != nil {
-		return err
-	}
-	mux := http.NewServeMux()
-	mux.Handle(path, h)
-	var protocols http.Protocols
-	protocols.SetHTTP1(true)
-	protocols.SetUnencryptedHTTP2(true)
-	srv := &http.Server{Handler: mux, Protocols: &protocols, ReadHeaderTimeout: 10 * time.Second}
-	errc := make(chan error, 1)
-	go func() { errc <- srv.Serve(ln) }()
-	defer func() { _ = os.Remove(socket) }()
-	select {
-	case err := <-errc:
-		if errors.Is(err, http.ErrServerClosed) {
-			return nil
-		}
-		return fmt.Errorf("serve: %w", err)
-	case <-ctx.Done():
-	}
-	sctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
-	defer cancel()
-	if err := srv.Shutdown(sctx); err != nil {
-		_ = srv.Close()
-	}
-	return nil
-}
-
-func listenUnix(socket string, mode os.FileMode) (net.Listener, error) {
-	if fi, err := os.Lstat(socket); err == nil {
-		if fi.Mode()&os.ModeSocket == 0 {
-			return nil, fmt.Errorf("%s exists and is not a socket", socket)
-		}
-		if c, derr := net.DialTimeout("unix", socket, time.Second); derr == nil {
-			_ = c.Close()
-			return nil, fmt.Errorf("%s is in use", socket)
-		}
-		if err := os.Remove(socket); err != nil {
-			return nil, fmt.Errorf("remove the stale socket: %w", err)
-		}
-	} else if !errors.Is(err, os.ErrNotExist) {
-		return nil, err
-	}
-	tmp := fmt.Sprintf("%s.tmp-%d", socket, os.Getpid())
-	_ = os.Remove(tmp)
-	ln, err := net.Listen("unix", tmp)
-	if err != nil {
-		return nil, err
-	}
-	ln.(*net.UnixListener).SetUnlinkOnClose(false)
-	if err := os.Chmod(tmp, mode); err != nil {
-		_ = ln.Close()
-		_ = os.Remove(tmp)
-		return nil, err
-	}
-	if err := os.Rename(tmp, socket); err != nil {
-		_ = ln.Close()
-		_ = os.Remove(tmp)
-		return nil, err
-	}
-	return ln, nil
 }

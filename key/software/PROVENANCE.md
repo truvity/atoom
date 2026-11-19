@@ -12,3 +12,5 @@ The code of this library was copied as it is from [truvity/sluis](https://github
 | `docs/` | truvity/ritueel `docs/reference/software-store.md`, `docs/learn/a-key-in-a-file.mdx`, `docs/research/software-key-backends-2026-11-01.md`, `docs/research/age-or-jwe-for-the-key-file-2026-11-13.md` at commit `a569f9366c0bef69e376db2ae25db8808336a875` | copied; site markup removed; ritueel keeps its copies until it is restarted |
 
 What stayed in sluis: `drivers/key/software/main.go` and `testcaller_*.go` (the wrapper: socket with peer credentials, `registry.DriverOwner`, the command line), and the unit and user files of the deploy.
+
+Added in step G1 (2026-11-19, [docs/plan.md](../../docs/plan.md), decision D11 A): the thin main `cmd/software` serves through `github.com/truvity/atoom/socket` and carries the guard flags; its own copy of the socket code is gone. The guard comes from sluis's kits (`kits/rust/sluis-kit`, `kits/go/rpc`) with the names left out: it decides by uid and knows no registry. What stays in sluis: the registry (which uid is which actor), the owner check and `Options.Caller`, until the host is deleted (step G4).

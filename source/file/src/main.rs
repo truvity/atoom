@@ -3,8 +3,12 @@
 //! ```text
 //! source-file serve --socket P --dir DIR
 //! source-file check --dir DIR
-//! source-file --version
+//! source-file version                          # and --version
 //! ```
+//!
+//! The socket is guarded (`docs/socket-guard.md`): its mode is 0600 and it admits the callers of this process's uid, unless `serve` is
+//! given the guard flags `--allow-uid UID` (repeatable), `--allow-any-uid`, `--socket-gid GID` and `--socket-mode MODE`. A caller
+//! outside the set is refused with the reason `caller`. `version` prints the version of the build.
 //!
 //! `serve` opens the directory (no directory, no service), serves the source contract on the UNIX socket P (mode 0600: the owner of
 //! the process is the only caller) until SIGINT or SIGTERM. `check` opens the directory and says whether it can be served; it exits 3 when it cannot.
@@ -12,10 +16,10 @@
 use std::path::PathBuf;
 
 use anyhow::Context;
-use atoom_socket::ServerConfig;
+use atoom_socket::cli::{self, GuardArgs};
 use atoom_source_file::Dir;
 use atoom_source_file::service::Service;
-use clap::{Arg, Command, value_parser};
+use clap::{Arg, Args as _, Command, FromArgMatches as _, value_parser};
 
 fn command() -> Command {
     let dir = || {
@@ -27,11 +31,12 @@ fn command() -> Command {
             .help("The directory of signed config documents (<name>.jws)")
     };
     Command::new("source-file")
-        .version(env!("CARGO_PKG_VERSION"))
+        .version(atoom_socket::VERSION)
         .about("The file driver of the source port")
         .subcommand_required(true)
+        .subcommand(cli::version_command())
         .subcommand(
-            Command::new("serve")
+            GuardArgs::augment_args(Command::new("serve"))
                 .about("Serve the source contract on a UNIX socket")
                 .arg(
                     Arg::new("socket")
@@ -39,7 +44,7 @@ fn command() -> Command {
                         .value_name("PATH")
                         .required(true)
                         .value_parser(value_parser!(PathBuf))
-                        .help("The UNIX socket to serve on (mode 0600)"),
+                        .help("The UNIX socket to serve on (mode 0600 by default)"),
                 )
                 .arg(dir()),
         )
@@ -83,7 +88,7 @@ async fn main() -> anyhow::Result<()> {
             // The directory is checked before the socket exists: no directory, no service.
             let dir = Dir::open(dir)?;
             atoom_socket::serve(
-                ServerConfig::new(socket),
+                GuardArgs::from_arg_matches(m)?.config(socket),
                 Service(dir).router(),
                 shutdown_signal(),
             )
@@ -97,6 +102,10 @@ async fn main() -> anyhow::Result<()> {
                 std::process::exit(3);
             }
             println!("config directory ok");
+            Ok(())
+        }
+        Some(("version", _)) => {
+            cli::print_version("source-file");
             Ok(())
         }
         _ => unreachable!("a subcommand is required"),

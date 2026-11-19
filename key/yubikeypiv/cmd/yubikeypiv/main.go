@@ -4,11 +4,13 @@
 // (sluis does). This main takes no key plan, so it releases no PIN to a peer: the PIN is delivered on the admin socket alone.
 //
 //	yubikeypiv serve --socket PATH --admin-socket PATH --node NAME --environment development|staging|production
-//	                 [--boundary NAME] [--serial N] [--state-dir DIR] [--socket-mode 0600] [--admin-uid N]
+//	                 [--boundary NAME] [--serial N] [--state-dir DIR] [--admin-uid N]
+//	                 [--allow-uid UID]... [--allow-any-uid] [--socket-gid GID] [--socket-mode MODE]
 //	yubikeypiv check [--serial N] [--environment E]
 //	yubikeypiv version
 //
-// The driver holds the card exclusively and starts locked: it has no PIN until an administrator delivers it on the admin socket. A build
+// The key socket is guarded (github.com/truvity/atoom/socket, docs/socket-guard.md): mode 0600 and the uid of the process by default;
+// the guard flags do not apply to the admin socket, which admits --admin-uid only. The driver holds the card exclusively and starts locked: it has no PIN until an administrator delivers it on the admin socket. A build
 // without the build tag atoom_card has the same commands and refuses to open a card; the executable that talks to a card is built
 // natively with the tag and CGO_ENABLED=1. The exit status is 0 on success, 1 on a refusal or a failure, 2 on a usage error.
 package main
@@ -19,16 +21,14 @@ import (
 	"flag"
 	"fmt"
 	"io"
-	"net"
 	"net/http"
 	"os"
 	"os/signal"
 	"runtime/debug"
-	"strconv"
 	"syscall"
-	"time"
 
 	"github.com/truvity/atoom/key/yubikeypiv"
+	atoomsocket "github.com/truvity/atoom/socket"
 )
 
 // version is stamped at build time (-ldflags "-X main.version=..."); a build without it reports the module version.
@@ -79,6 +79,8 @@ func fail(stderr io.Writer, err error) int {
 func serve(args []string, stderr io.Writer) int {
 	fs := flag.NewFlagSet("yubikeypiv serve", flag.ContinueOnError)
 	fs.SetOutput(stderr)
+	var guard atoomsocket.Flags
+	guard.Register(fs)
 	socket := fs.String("socket", "", "the UNIX socket of the key-store service (required)")
 	adminSocket := fs.String("admin-socket", "", "the absolute path of the local admin socket that takes the PIN (required)")
 	node := fs.String("node", "", "the node whose card this is (required)")
@@ -86,7 +88,6 @@ func serve(args []string, stderr io.Writer) int {
 	boundary := fs.String("boundary", "", "the boundary of the node, which a PIN release names")
 	serial := fs.Uint("serial", 0, "the serial number of the card the driver is bound to; required outside development (in development, none means the only card)")
 	state := fs.String("state-dir", "", "the driver's own state directory, mode 0700: it holds the stop that a refused released PIN leaves")
-	mode := fs.String("socket-mode", "0600", "the mode of the key-store socket, octal")
 	adminUID := fs.Uint("admin-uid", 0, "the uid that may use the admin socket (the socket is mode 0600 as well)")
 	if err := fs.Parse(args); err != nil {
 		return 2
@@ -95,9 +96,9 @@ func serve(args []string, stderr io.Writer) int {
 		_, _ = fmt.Fprintln(stderr, "yubikeypiv serve: --environment, --socket, --admin-socket and --node are required")
 		return 2
 	}
-	m, err := strconv.ParseUint(*mode, 8, 32)
-	if err != nil || m > 0o777 {
-		_, _ = fmt.Fprintln(stderr, "yubikeypiv serve: --socket-mode is not an octal mode")
+	cfg, err := guard.Config(*socket)
+	if err != nil {
+		_, _ = fmt.Fprintln(stderr, "yubikeypiv serve:", err)
 		return 2
 	}
 	if *serial > 1<<32-1 {
@@ -111,7 +112,7 @@ func serve(args []string, stderr io.Writer) int {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	host := yubikeypiv.Host{Serve: func(ctx context.Context, path string, h http.Handler) error {
-		return serveUnix(ctx, *socket, os.FileMode(m), path, h) //nolint:gosec // m is at most 0o777
+		return atoomsocket.Serve(ctx, cfg, path, h)
 	}}
 	uid := uint32(*adminUID) //nolint:gosec // a uid fits 32 bits
 	admin := yubikeypiv.AdminConfig{Socket: *adminSocket, Allow: func(peer uint32) bool { return peer == uid }}
@@ -140,72 +141,4 @@ func check(args []string, stderr io.Writer) int {
 		return fail(stderr, err)
 	}
 	return 0
-}
-
-// serveUnix serves h at path on a UNIX socket until ctx ends: HTTP/1.1 and HTTP/2 without TLS. A stale socket file is replaced; a live
-// one, a symlink or another kind of file is refused. The socket has its mode from the moment it is reachable (it is made under a
-// temporary name and renamed).
-func serveUnix(ctx context.Context, socket string, mode os.FileMode, path string, h http.Handler) error {
-	ln, err := listenUnix(socket, mode)
-	if err != nil {
-		return err
-	}
-	mux := http.NewServeMux()
-	mux.Handle(path, h)
-	var protocols http.Protocols
-	protocols.SetHTTP1(true)
-	protocols.SetUnencryptedHTTP2(true)
-	srv := &http.Server{Handler: mux, Protocols: &protocols, ReadHeaderTimeout: 10 * time.Second}
-	errc := make(chan error, 1)
-	go func() { errc <- srv.Serve(ln) }()
-	defer func() { _ = os.Remove(socket) }()
-	select {
-	case err := <-errc:
-		if errors.Is(err, http.ErrServerClosed) {
-			return nil
-		}
-		return fmt.Errorf("serve: %w", err)
-	case <-ctx.Done():
-	}
-	sctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
-	defer cancel()
-	if err := srv.Shutdown(sctx); err != nil {
-		_ = srv.Close()
-	}
-	return nil
-}
-
-func listenUnix(socket string, mode os.FileMode) (net.Listener, error) {
-	if fi, err := os.Lstat(socket); err == nil {
-		if fi.Mode()&os.ModeSocket == 0 {
-			return nil, fmt.Errorf("%s exists and is not a socket", socket)
-		}
-		if c, derr := net.DialTimeout("unix", socket, time.Second); derr == nil {
-			_ = c.Close()
-			return nil, fmt.Errorf("%s is in use", socket)
-		}
-		if err := os.Remove(socket); err != nil {
-			return nil, fmt.Errorf("remove the stale socket: %w", err)
-		}
-	} else if !errors.Is(err, os.ErrNotExist) {
-		return nil, err
-	}
-	tmp := fmt.Sprintf("%s.tmp-%d", socket, os.Getpid())
-	_ = os.Remove(tmp)
-	ln, err := net.Listen("unix", tmp)
-	if err != nil {
-		return nil, err
-	}
-	ln.(*net.UnixListener).SetUnlinkOnClose(false)
-	if err := os.Chmod(tmp, mode); err != nil {
-		_ = ln.Close()
-		_ = os.Remove(tmp)
-		return nil, err
-	}
-	if err := os.Rename(tmp, socket); err != nil {
-		_ = ln.Close()
-		_ = os.Remove(tmp)
-		return nil, err
-	}
-	return ln, nil
 }

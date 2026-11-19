@@ -4,8 +4,9 @@ The memory driver of the [item port](../docs/item-port.md): the item contract ov
 
 | | |
 | --- | --- |
-| Library | crate `atoom-store-memory`: `MemoryEngine::new()`; `.router()` is the ConnectRPC handler (register it on a server of your own); `.serve(socket, shutdown)` serves it on a UNIX socket, plain; `.sweep()` frees expired items as a real engine's sweeper does (a tail runs it too); `.reset()` starts again with an empty engine and a log with a new epoch |
-| Thin main | `store-memory --socket PATH`: serves on the socket (mode 0600) until SIGINT or SIGTERM |
+| Library | crate `atoom-store-memory`: `MemoryEngine::new()`; `.router()` is the ConnectRPC handler (register it on a server of your own); `.serve(socket, shutdown)` serves it on a UNIX socket (mode 0600, this process's uid; `.serve_with(config, shutdown)` takes a `ServerConfig` with its own group, mode and callers); `.sweep()` frees expired items as a real engine's sweeper does (a tail runs it too); `.reset()` starts again with an empty engine and a log with a new epoch |
+| Thin main | `store-memory --socket PATH`: serves on the socket (mode 0600, callers of this process's uid) until SIGINT or SIGTERM; `--version` |
+| Guard flags | `--allow-uid UID` (repeatable; without it only this process's uid may call), `--allow-any-uid`, `--socket-gid GID`, `--socket-mode MODE`: the [socket guard](../../docs/socket-guard.md) |
 
 ```rust
 let engine = atoom_store_memory::MemoryEngine::new();
