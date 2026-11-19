@@ -5,7 +5,7 @@ The conformance kit of the [item port](../docs/item-port.md): the cases every it
 | | |
 | --- | --- |
 | Library | crate `atoom-store-conformance`: `item_suite(client)` runs the cases and returns their results, `report(&cases, out)` prints them and fails on a failed case and on none run; `rules` holds what every Rust engine decides in the same way (keys, page sizes, timestamps, the checks of a `Transact`, the epoch of a log) |
-| Binary | `store-conformance --socket PATH` runs the suite against the driver that serves on the UNIX socket PATH, whatever its language; the exit status is 0 only when every case passed |
+| Binary | `store-conformance --socket PATH` runs the suite against the driver that serves on the UNIX socket PATH, whatever its language; the exit status is 0 only when no case failed and at least one ran (a case the driver does not declare is skipped) |
 
 ```sh
 cargo build -p atoom-store-memory -p atoom-store-conformance

@@ -18,8 +18,9 @@ use atoom_common::refusal;
 use atoom_socket::ServerConfig;
 use atoom_store::atoom::common::v1alpha1::IndexEntry;
 use atoom_store::atoom::store::v1alpha1::{
-    DriverItem, ItemGetRequest, ItemGetResponse, ItemService, ItemServiceExt, QueryRequest,
-    QueryResponse, TailLogRequest, TailLogResponse, TransactRequest, TransactResponse,
+    CapabilitiesRequest, CapabilitiesResponse, DriverItem, ItemGetRequest, ItemGetResponse,
+    ItemService, ItemServiceExt, QueryRequest, QueryResponse, TailLogRequest, TailLogResponse,
+    TransactRequest, TransactResponse,
 };
 use atoom_store_conformance::rules::{self, Expected, now_ms};
 use connectrpc::error::ErrorCode;
@@ -189,6 +190,18 @@ impl MemoryEngine {
 }
 
 impl ItemService for MemoryEngine {
+    async fn capabilities(
+        &self,
+        _ctx: RequestContext,
+        _request: ServiceRequest<'_, CapabilitiesRequest>,
+    ) -> ServiceResult<CapabilitiesResponse> {
+        Response::ok(CapabilitiesResponse {
+            store: "memory".to_owned(),
+            tail_log: true,
+            ..CapabilitiesResponse::default()
+        })
+    }
+
     async fn get(
         &self,
         _ctx: RequestContext,

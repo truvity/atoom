@@ -40,10 +40,22 @@ pub use suite::item_suite;
 pub struct Case {
     /// The name of the case.
     pub name: &'static str,
-    /// Whether it passed.
+    /// Whether it passed. A skipped case has not failed and has not passed either: it is `passed: true` with `skipped` set.
     pub passed: bool,
-    /// Why it failed; empty when it passed.
+    /// Why it failed (or, for a skipped case, why it was skipped); empty when it passed.
     pub detail: String,
+    /// True when the driver's `Capabilities` say it does not offer what the case tests (plan R4): the kit does not fail a driver for a
+    /// call it did not declare, and does not pass it for the call either.
+    pub skipped: bool,
+}
+
+fn skip_case(name: &'static str, why: &str) -> Case {
+    Case {
+        name,
+        passed: true,
+        detail: why.to_owned(),
+        skipped: true,
+    }
 }
 
 async fn run_case(name: &'static str, fut: impl Future<Output = anyhow::Result<()>>) -> Case {
@@ -52,16 +64,18 @@ async fn run_case(name: &'static str, fut: impl Future<Output = anyhow::Result<(
             name,
             passed: true,
             detail: String::new(),
+            skipped: false,
         },
         Err(e) => Case {
             name,
             passed: false,
             detail: format!("{e:#}"),
+            skipped: false,
         },
     }
 }
 
-/// Prints each case (name and result) and fails when a case failed, and when no case ran: a
+/// Prints each case (name and result) and fails when a case failed, and when no case ran (every case skipped included): a
 /// suite that ran nothing proved nothing.
 ///
 /// # Errors
@@ -70,8 +84,12 @@ async fn run_case(name: &'static str, fut: impl Future<Output = anyhow::Result<(
 pub fn report(cases: &[Case], out: &mut impl Write) -> anyhow::Result<()> {
     anyhow::ensure!(!cases.is_empty(), "no case ran");
     let mut failed = 0usize;
+    let mut skipped = 0usize;
     for c in cases {
-        if c.passed {
+        if c.skipped {
+            skipped += 1;
+            writeln!(out, "SKIP {}: {}", c.name, c.detail)?;
+        } else if c.passed {
             writeln!(out, "PASS {}", c.name)?;
         } else {
             failed += 1;
@@ -80,11 +98,12 @@ pub fn report(cases: &[Case], out: &mut impl Write) -> anyhow::Result<()> {
     }
     writeln!(
         out,
-        "{} cases, {} passed, {failed} failed",
+        "{} cases, {} passed, {failed} failed, {skipped} skipped",
         cases.len(),
-        cases.len() - failed
+        cases.len() - failed - skipped
     )?;
     anyhow::ensure!(failed == 0, "{failed} of {} cases failed", cases.len());
+    anyhow::ensure!(skipped < cases.len(), "every case was skipped: nothing ran");
     Ok(())
 }
 
@@ -98,17 +117,39 @@ mod tests {
     }
 
     #[test]
+    fn a_skipped_case_is_not_a_failure_and_a_run_of_skips_is_one() {
+        let ran = Case {
+            name: "a",
+            passed: true,
+            detail: String::new(),
+            skipped: false,
+        };
+        let skipped = skip_case("b", "the driver does not offer it");
+        let mut out = Vec::new();
+        assert!(report(&[ran, skipped.clone()], &mut out).is_ok());
+        let out = String::from_utf8(out).unwrap();
+        assert!(
+            out.contains("SKIP b: the driver does not offer it"),
+            "{out}"
+        );
+        assert!(out.contains("1 skipped"), "{out}");
+        assert!(report(&[skipped], &mut Vec::new()).is_err());
+    }
+
+    #[test]
     fn a_failed_case_fails_the_report_and_is_named() {
         let cases = [
             Case {
                 name: "a",
                 passed: true,
                 detail: String::new(),
+                skipped: false,
             },
             Case {
                 name: "b",
                 passed: false,
                 detail: "because".into(),
+                skipped: false,
             },
         ];
         let mut out = Vec::new();

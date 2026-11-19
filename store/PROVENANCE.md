@@ -17,3 +17,5 @@ The code of the store libraries was copied as it is from [truvity/sluis](https:/
 What stayed in sluis: the wrapper of each driver's `main` (the socket with peer credentials, `registry.DriverOwner`, the command line, `--socket-gid`, the version stamp), `actors/store` (store@), `kits/go/store`, `kits/rust/sluis-store`, the registry, the kinds and the signed configuration.
 
 Sluis requirement tags in the tests and comments (`verifies: REQ-...`) and references to sluis's decision records were dropped or replaced by pointers into this repository's pages.
+
+Added in step 3b (new, not from sluis): the call `Capabilities` of `item.proto` (an additive change, plan R4: `store` and `tail_log`), its answers in `memory` and `rqlite`, the skip of the log cases and the case `no_log_is_refused` in the kit, and the Go driver [`dynamodb`](dynamodb/PROVENANCE.md).

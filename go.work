@@ -18,6 +18,7 @@ use (
 	./key/yubikeypiv
 	./source
 	./store
+	./store/dynamodb
 	./tools
 	./transport
 )
@@ -33,4 +34,5 @@ replace (
 	github.com/truvity/atoom/key/slotplan v0.0.0 => ./key/slotplan
 	github.com/truvity/atoom/key/software v0.0.0 => ./key/software
 	github.com/truvity/atoom/key/yubikeypiv v0.0.0 => ./key/yubikeypiv
+	github.com/truvity/atoom/store v0.0.0 => ./store
 )

@@ -4,6 +4,7 @@ The cases of `item_suite`, in the order they run. Each one speaks the contract a
 
 | Case | What it holds a driver to |
 | --- | --- |
+| `capabilities` | the driver names its engine; one that does not serve the call is taken to offer every call |
 | `item_round_trip` | a put is read back with its bytes, version 1 and its index entries |
 | `create_if_absent_twice` | a conditional create succeeds once; the second is `aborted/version` |
 | `update_at_version_and_stale` | an update at the current version succeeds and raises the version; a stale one is refused |
@@ -22,7 +23,10 @@ The cases of `item_suite`, in the order they run. Each one speaks the contract a
 | `expired_delete_is_logged` | an item written with a log row is logged when it is removed, whatever the path, a delete of an expired item that is not swept yet included; one written without a log row leaves none |
 | `transact_logs_atomically` | the row of a change is written in the transaction of the change: a refused transaction leaves no row, one that holds leaves one row for each put and delete with `log` and nothing else |
 | `concurrent_takers_one_winner` | takers racing for one key with the same condition: one wins and the others are refused, at the creation and at each takeover, and the winner's version is the next one |
+| `no_log_is_refused` | for a driver that declares no change log: `TailLog` is unimplemented, a put or delete with a log row is `unimplemented/log` and writes nothing |
 | `cleanup` | what the suite wrote is removed, so a driver that cannot delete does not pass |
+
+A case that needs the change log (`log_order_and_from_sequence`, `sequence_expired`, `query_log_head`, `log_epoch`, `expired_delete_is_logged`, `transact_logs_atomically`) is **skipped** when `Capabilities` says `tail_log: false`, and the report says `SKIP` with the reason: the kit does not fail a driver for a call it did not declare and does not pass it for the call either. A run in which every case was skipped fails.
 
 ## What the suite fixes beyond the proto comments
 

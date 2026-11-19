@@ -1,11 +1,14 @@
 #!/usr/bin/env bash
 # Runs the conformance kit of the item port (the binary store-conformance) against every item driver that is built on this machine, each
-# through the socket of its own thin main: the memory driver, and the rqlite driver (both namespaces) when an rqlited is fetched
-# (`just rqlite-fetch`; rqlite publishes no macOS build, so there the rqlite driver is skipped and the run says so).
+# through the socket of its own thin main: the memory driver; the DynamoDB driver (a Go thin main) against DynamoDB Local, which runs in a
+# container (one at a time, removed at the end), when a container runtime is there; and the rqlite driver (both namespaces) when an rqlited
+# is fetched (`just rqlite-fetch`; rqlite publishes no macOS build, so there the rqlite driver is skipped and the run says so). The Go tests of
+# the DynamoDB driver that need DynamoDB Local run against the same container.
 #
 #   tools/scripts/conformance-store.sh
 #
-# ATOOM_REQUIRE_RQLITED=1 turns a missing rqlited into a failure (CI sets it on Linux).
+# ATOOM_REQUIRE_RQLITED=1 turns a missing rqlited into a failure, and ATOOM_REQUIRE_DYNAMODB_LOCAL=1 a missing container runtime (CI sets
+# both on Linux; the macOS runners have no container runtime, so there the DynamoDB driver is skipped and the run says so).
 set -euo pipefail
 cd "$(dirname "$0")/../.."
 
@@ -42,6 +45,37 @@ run_kit() { # name socket
 pids+=($!)
 wait_for "the memory driver" test -S "$tmp/memory.sock"
 run_kit "store-memory" "$tmp/memory.sock"
+
+# The DynamoDB driver, against DynamoDB Local. The image is the multi-arch index of amazon/dynamodb-local 3.3.2, pinned by digest (it has
+# linux/amd64 and linux/arm64 manifests, so each native runner pulls its own); it runs in memory, with no data volume, on a random loopback
+# port, and is removed when the script ends. The credentials are placeholders that DynamoDB Local does not check.
+ddb_image=amazon/dynamodb-local@sha256:6ada631ec7aa5fc83446855eb17233e3dad184fec47477e8140c6c569cfe0c86
+if command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
+    ddb_name=atoom-dynamodb-local-$$
+    docker run --detach --rm --name "$ddb_name" --publish 127.0.0.1::8000 "$ddb_image" -jar DynamoDBLocal.jar -inMemory -port 8000 >/dev/null
+    ddb_cleanup() { docker rm --force "$ddb_name" >/dev/null 2>&1 || true; }
+    trap 'ddb_cleanup; cleanup' EXIT
+    ddb_addr=$(docker port "$ddb_name" 8000/tcp | head -n 1)
+    export ATOOM_DYNAMODB_ENDPOINT="http://${ddb_addr/0.0.0.0/127.0.0.1}"
+    export AWS_ACCESS_KEY_ID=local AWS_SECRET_ACCESS_KEY=local AWS_REGION=us-east-1 AWS_ENDPOINT_URL_DYNAMODB=$ATOOM_DYNAMODB_ENDPOINT
+    (cd store/dynamodb && go build -o "$tmp/store-dynamodb" ./cmd/dynamodb)
+    # The container is up when the thin main can make its table.
+    ddb_ready() { "$tmp/store-dynamodb" create-table --table atoom-ready; }
+    wait_for "DynamoDB Local" ddb_ready
+    "$tmp/store-dynamodb" serve --socket "$tmp/dynamodb.sock" --table atoom-conformance --create-table &
+    pids+=($!)
+    wait_for "the DynamoDB driver" test -S "$tmp/dynamodb.sock"
+    run_kit "store-dynamodb (DynamoDB Local)" "$tmp/dynamodb.sock"
+    echo "conformance-store: the Go tests of the DynamoDB driver against DynamoDB Local"
+    (cd store/dynamodb && ATOOM_REQUIRE_DYNAMODB_LOCAL=1 go test -count=1 ./...)
+    ddb_cleanup
+    trap cleanup EXIT
+elif [ -n "${ATOOM_REQUIRE_DYNAMODB_LOCAL:-}" ]; then
+    echo "::error::conformance-store: there is no container runtime and the run is required to use DynamoDB Local" >&2
+    exit 1
+else
+    echo "conformance-store: SKIP: the DynamoDB driver (no container runtime for DynamoDB Local)"
+fi
 
 # The rqlite driver.
 case "$(uname -m)" in
