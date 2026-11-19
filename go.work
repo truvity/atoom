@@ -10,6 +10,7 @@ use (
 	./destination
 	./index
 	./key
+	./key/awskms
 	./key/conformance
 	./key/pinrelease
 	./key/slotplan
