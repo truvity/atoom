@@ -30,6 +30,18 @@ const procedure = "/atoom.test.v1.Who/Ask"
 
 func me() uint32 { return uint32(os.Geteuid()) } //nolint:gosec // a uid is non-negative
 
+// shortDir is a directory with a short name: a UNIX socket path is at most 104 bytes on macOS, and the name of a test in t.TempDir() is
+// long.
+func shortDir(t *testing.T) string {
+	t.Helper()
+	dir, err := os.MkdirTemp("", "g")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(dir) })
+	return dir
+}
+
 type running struct {
 	socket string
 	calls  *atomic.Int32
@@ -40,7 +52,7 @@ type running struct {
 func start(t *testing.T, cfg socket.Config) running {
 	t.Helper()
 	if cfg.Socket == "" {
-		cfg.Socket = filepath.Join(t.TempDir(), "g.sock")
+		cfg.Socket = filepath.Join(shortDir(t), "s")
 	}
 	var calls atomic.Int32
 	h := connect.NewUnaryHandler(procedure, func(ctx context.Context, _ *connect.Request[commonv1alpha1.Refusal]) (*connect.Response[commonv1alpha1.Refusal], error) {
@@ -236,8 +248,8 @@ func TestAGroupTheProcessIsNotInIsRefusedAndLeavesNoSocket(t *testing.T) {
 	if os.Geteuid() == 0 {
 		t.Skip("as root a chown to any group succeeds: this case is not exercised")
 	}
-	dir := t.TempDir()
-	cfg := socket.Config{Socket: filepath.Join(dir, "g.sock"), GID: uint32(os.Getegid()) + 54321} //nolint:gosec // a gid is non-negative
+	dir := shortDir(t)
+	cfg := socket.Config{Socket: filepath.Join(dir, "s"), GID: uint32(os.Getegid()) + 54321} //nolint:gosec // a gid is non-negative
 	err := socket.Serve(context.Background(), cfg, procedure, http.NotFoundHandler())
 	if err == nil || !strings.Contains(err.Error(), "socket group") {
 		t.Fatalf("err %v; want the group refused", err)
@@ -248,9 +260,9 @@ func TestAGroupTheProcessIsNotInIsRefusedAndLeavesNoSocket(t *testing.T) {
 }
 
 func TestASocketIsMadeFresh(t *testing.T) {
-	dir := t.TempDir()
+	dir := shortDir(t)
 	// A stale socket (nobody listens) is replaced.
-	stale := filepath.Join(dir, "stale.sock")
+	stale := filepath.Join(dir, "stale")
 	l, err := net.Listen("unix", stale)
 	if err != nil {
 		t.Fatal(err)
@@ -264,7 +276,7 @@ func TestASocketIsMadeFresh(t *testing.T) {
 		t.Fatalf("err %v; want in use", err)
 	}
 	// A symlink or a plain file in the way is refused.
-	link := filepath.Join(dir, "link.sock")
+	link := filepath.Join(dir, "link")
 	if err := os.Symlink(filepath.Join(dir, "elsewhere"), link); err != nil {
 		t.Fatal(err)
 	}
