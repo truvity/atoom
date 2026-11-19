@@ -19,10 +19,9 @@ Each is its own Go module with its own README and documentation; a consumer that
 | [conformance](conformance/README.md) | the conformance kit: the cases every key driver must pass, through its ConnectRPC endpoint; the command `key-conformance --socket` | the port |
 | [software](software/README.md) | driver: P-384 keys held in files; library and a thin main | the port, the kit (tests only) |
 | [yubikeypiv](yubikeypiv/README.md) | driver: the keys of a YubiKey 5 over PIV; library and a thin main; the C code is behind the build tag `atoom_card` | the port, the kit (tests only), `slotplan`, `pinrelease` |
+| [awskms](awskms/README.md) | driver: asymmetric keys in AWS KMS, found by alias; library (links into a Lambda function) and a thin main; no attestation | the port, the kit (tests only), the AWS SDK |
 | [slotplan](slotplan/README.md) | the check of a card slot map: which slot each purpose lives in | nothing |
 | [pinrelease](pinrelease/README.md) | the wire format of the PIN release between boards: signed texts and a sealed PIN | nothing |
-
-`key/awskms`, the driver for AWS KMS, is a later step of the plan ([docs/plan.md](../docs/plan.md), step 2b).
 
 ## A driver of your own
 
