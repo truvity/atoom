@@ -5,7 +5,7 @@ libraries changed. `just release-prepare X.Y.Z` writes the section.
 
 <!-- release-prepare: new sections go below this line -->
 
-## 0.2.0 - 2026-11-20
+## 0.2.0 - 2026-11-20 (second candidate, after #27)
 
 One version for the whole repository: every library is tagged 0.2.0, changed or not. This release adds the packages and the container images that 0.1.0 left for it, the call context of every port client, the destination client in its port crate, the card bench, and a dependency security fix.
 
