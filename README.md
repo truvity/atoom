@@ -21,7 +21,8 @@ The key port has moved: [key](key/README.md), its [conformance kit](key/conforma
 - [The extraction plan](docs/plan.md): the design principle, what moves out of sluis and in which order, languages, versioning and releases, how session and ritueel adopt it, the research that moves here, and the open questions.
 - [The socket guard](docs/socket-guard.md): how every thin main guards its UNIX socket (the allowed uids, the group and mode, the peer handed to the handler, the version stamp), in Rust and in Go.
 - [The call context](docs/call-context.md): the deadline and the correlation id that every client of a port sends and every thin main reads and hands down, in Rust and in Go.
-- [Releasing](docs/release.md): how a release is made, step by step, and what the repository owner sets before the first tag.
+- [Packages, images and tarballs](docs/packages.md): every driver as a tarball, a `.deb` and an `.rpm` package and an OCI image: the naming rules, what a package holds and depends on, the images, the checks.
+- [Releasing](docs/release.md): how a release is made, step by step (the candidate and the tag run), and what the repository owner sets before the first tag.
 - [Decision records](docs/decisions/README.md): purpose and name; ports and drivers over ConnectRPC; libraries with thin dependencies; multi-architecture; one version; research lives here; release management.
 
 ## Development
@@ -39,6 +40,8 @@ The environment is [devbox](https://www.jetify.com/devbox) (`devbox shell`, or d
 | `just check-isolation` | the dependency rules: no driver requires another driver, a port requires only the runtimes |
 | `just check-versions` | every pinned runtime agrees with [versions.yaml](versions.yaml) |
 | `just release-prepare X.Y.Z`, `just release-tag X.Y.Z --dry-run`, `just release-rehearsal` | the release flow, see [docs/release.md](docs/release.md) |
+| `just release-packages`, `just release-smoke`, `just release-images-rehearsal` | build every driver's tarball, packages and image on this machine (docker needed), install and run them in containers, push the images to a throw-away registry; see [docs/packages.md](docs/packages.md) |
+| `just release-check-table`, `just release-candidate-test` | the table of the drivers against the tree; the candidate scripts on fixtures |
 
 CI runs on GitHub-hosted runners for linux/amd64, linux/arm64 and macOS (arm64); the one required check is `check`.
 

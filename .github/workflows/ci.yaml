@@ -89,7 +89,7 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
       - uses: truvity/ci-actions/setup-devbox@82e404675ef3f826755e2939d1072cddcd07ed26 # v3.9.0
-      - run: devbox run -- just gen-check proto-breaking check-isolation check-versions
+      - run: devbox run -- just gen-check proto-breaking check-isolation check-versions release-check-table
 
   # Licences of the Rust dependencies, and known advisories in the Go and Rust dependencies.
   supply:
@@ -125,13 +125,25 @@ jobs:
         with:
           persist-credentials: false
       - uses: truvity/ci-actions/setup-devbox@82e404675ef3f826755e2939d1072cddcd07ed26 # v3.9.0
-      - run: devbox run -- just release-rehearsal
+      - run: devbox run -- just release-rehearsal release-candidate-test
+
+  # The rehearsal of the candidate (candidate.yaml): every driver built for both architectures, packaged as .deb and .rpm, installed on Ubuntu,
+  # Rocky Linux and Amazon Linux and run as an image, on a runner of each architecture, when the change can affect the packaging or the
+  # release machinery (the workflow decides, so a change to a document starts nothing and this job is then a success that did nothing).
+  # Nothing is pushed or published.
+  release-candidate:
+    name: release candidate (rehearsal)
+    uses: ./.github/workflows/candidate.yaml
+    with:
+      rehearsal: true
+    permissions:
+      contents: read
 
   # The one required check. It passes only when every job above succeeded: a failed, cancelled or skipped job fails it.
   check:
     name: check
     if: ${{ always() }}
-    needs: [build-test, lint, contracts, supply, release-rehearsal]
+    needs: [build-test, lint, contracts, supply, release-rehearsal, release-candidate]
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:

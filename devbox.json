@@ -12,7 +12,12 @@
     "golangci-lint":   "2.15.0",
     "govulncheck":     "1.9.0",
     "cargo-audit":     "0.22.2",
-    "cargo-deny":      "0.20.2"
+    "cargo-deny":      "0.20.2",
+    "zig":             "0.16.0",
+    "cargo-zigbuild":  "0.23.4",
+    "cargo-auditable": "0.7.6",
+    "syft":            "1.55.0",
+    "nfpm":            "2.48.0"
   },
   "env": {
     "RUSTUP_AUTO_INSTALL": "0",

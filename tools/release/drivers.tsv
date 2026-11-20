@@ -1,0 +1,26 @@
+# The drivers that atoom releases: one row for each, and the one place that says which executables are built, archived, packaged and
+# put in an image (docs/packages.md). Columns, separated by a tab:
+#   id          <port>-<driver>: the name of the tarball (atoom-<id>_<version>_<os>_<arch>.tar.gz), of the executable in the package and the
+#               image (/usr/bin/atoom-<id>), of the image (ghcr.io/truvity/atoom-<id>); the package is atoom-driver-<id>
+#   lang        go or rust
+#   dir         the directory of the driver in the repository
+#   target      go: the main package, below dir (the Go module); rust: <cargo package>:<bin name>
+#   build       portable: Go with CGO off, Rust through cargo-zigbuild to static musl, cross-compiled for both architectures;
+#               native:<go build tag>: Go with cgo, built on a host of each architecture in an Ubuntu 22.04 userland (tools/release/native-build.sh)
+#   os          the operating systems of the tarballs (linux; darwin for pure Go); the packages and images are Linux
+#   deb_dep, rpm_dep, deb_rec, rpm_rec   the runtime dependencies and recommendations of the packages, comma separated; - for none
+#   summary     the one line of the package, the image and the tarball
+# `tools/release/check-table.sh` holds this file to the tree: a thin main that is neither here nor in its exceptions fails the check.
+key-software	go	key/software	./cmd/software	portable	linux,darwin	-	-	-	-	The software key driver of the key port: P-384 keys held in files, served on a UNIX socket
+key-yubikeypiv	go	key/yubikeypiv	./cmd/yubikeypiv	native:atoom_card	linux	pcscd, libpcsclite1, libc6 (>= 2.34)	pcsc-lite, pcsc-lite-libs, glibc >= 2.34	libccid	pcsc-lite-ccid	The YubiKey PIV driver of the key port: the keys of a card over PC/SC, served on a UNIX socket
+key-awskms	go	key/awskms	./cmd/awskms	portable	linux,darwin	-	-	-	-	The AWS KMS driver of the key port: KMS keys served on a UNIX socket
+store-dynamodb	go	store/dynamodb	./cmd/dynamodb	portable	linux,darwin	-	-	-	-	The DynamoDB driver of the item port: a DynamoDB table served on a UNIX socket
+store-rqlite	rust	store/rqlite	atoom-store-rqlite:store-rqlite	portable	linux	-	-	-	-	The rqlite driver of the item port: rqlite's HTTP API served on a UNIX socket
+store-memory	rust	store/memory	atoom-store-memory:store-memory	portable	linux	-	-	-	-	The memory driver of the item port: a map in memory served on a UNIX socket, for tests
+source-file	rust	source/file	atoom-source-file:source-file	portable	linux	-	-	-	-	The file driver of the source port: a directory of signed config documents served on a UNIX socket
+source-credential	rust	source/credential	atoom-source-credential:source-credential	portable	linux	-	-	-	-	The credential driver of the source port: systemd credentials served on a UNIX socket
+blob-fs	rust	blob/fs	atoom-blob-fs:blob-fs	portable	linux	-	-	-	-	The fs driver of the blob port: a local directory served on a UNIX socket
+blob-fsreadonly	rust	blob/fsreadonly	atoom-blob-fsreadonly:blob-fsreadonly	portable	linux	-	-	-	-	The read-only fs driver of the blob port: the directory of blob-fs, read only, on a UNIX socket
+transport-spool	rust	transport/spool	atoom-transport-spool:transport-spool	portable	linux	-	-	-	-	The spool driver of the transport port: a durable local queue served on a UNIX socket
+index-sqlite	rust	index/sqlite	atoom-index-sqlite:index-sqlite	portable	linux	-	-	-	-	The sqlite driver of the index port: one SQLite file served on a UNIX socket
+destination-dir	rust	destination/dir	atoom-destination-dir:destination-dir	portable	linux	-	-	-	-	The dir driver of the destination port: a local directory served on a UNIX socket

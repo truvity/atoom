@@ -6,7 +6,7 @@
 //	               [--allow-uid UID]... [--allow-any-uid] [--socket-gid GID] [--socket-mode MODE]
 //	dynamodb create-table [--table NAME]
 //	dynamodb check [--table NAME]
-//	dynamodb version
+//	dynamodb version  (also --version)
 //
 // The region, the credentials and an endpoint of another place (AWS_ENDPOINT_URL_DYNAMODB, for DynamoDB Local) come from the AWS SDK's
 // own configuration chain: the environment, the shared files, the role of the host. The socket is guarded
@@ -61,7 +61,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return 2
 	}
 	switch args[0] {
-	case "version":
+	case "version", "--version":
 		_, _ = fmt.Fprintln(stdout, versionString())
 		return 0
 	case "serve":

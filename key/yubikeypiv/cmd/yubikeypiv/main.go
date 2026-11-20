@@ -7,7 +7,7 @@
 //	                 [--boundary NAME] [--reader NAME] [--serial N] [--state-dir DIR] [--admin-uid N]
 //	                 [--allow-uid UID]... [--allow-any-uid] [--socket-gid GID] [--socket-mode MODE]
 //	yubikeypiv check [--reader NAME] [--serial N] [--environment E]
-//	yubikeypiv version
+//	yubikeypiv version  (also --version)
 //
 // The key socket is guarded (github.com/truvity/atoom/socket, docs/socket-guard.md): mode 0600 and the uid of the process by default;
 // the guard flags do not apply to the admin socket, which admits --admin-uid only. The driver holds the card exclusively and starts locked: it has no PIN until an administrator delivers it on the admin socket. A build
@@ -47,7 +47,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return 2
 	}
 	switch args[0] {
-	case "version":
+	case "version", "--version":
 		_, _ = fmt.Fprintln(stdout, versionString())
 		return 0
 	case "serve":

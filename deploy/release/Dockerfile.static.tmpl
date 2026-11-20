@@ -1,0 +1,22 @@
+# The image of a driver that is a static executable (tools/release/images.sh renders this template for every driver of
+# tools/release/drivers.tsv whose build is `portable`; the @NAME@ words are replaced, and nothing else is). The executable of each
+# platform is in the build context at <os>/<arch>/<name>: it is the one in the tarball that the candidate built, not a new build.
+#
+# distroless static, non-root (uid 65532): no shell, no package manager, no C library. The socket path and every other setting are flags
+# of the executable (docs/packages.md): there is no default command, so the container fails with a usage error until it has them.
+# The base is pinned by the digest of its multi-architecture index (gcr.io/distroless/static-debian12:nonroot, checked 2026-11-20).
+FROM gcr.io/distroless/static-debian12:nonroot@sha256:afa5c872c891853ca7fcf1f12c3edb23f7eeef36189728842dd51042ff57f7ab
+ARG TARGETPLATFORM
+LABEL org.opencontainers.image.title="@NAME@" \
+      org.opencontainers.image.description="@DESCRIPTION@" \
+      org.opencontainers.image.version="@VERSION@" \
+      org.opencontainers.image.revision="@REVISION@" \
+      org.opencontainers.image.source="https://github.com/truvity/atoom" \
+      org.opencontainers.image.url="https://github.com/truvity/atoom" \
+      org.opencontainers.image.documentation="https://github.com/truvity/atoom/blob/master/docs/packages.md" \
+      org.opencontainers.image.licenses="MIT" \
+      org.opencontainers.image.vendor="Truvity B.V." \
+      org.opencontainers.image.base.name="gcr.io/distroless/static-debian12:nonroot"
+COPY --chmod=0555 ${TARGETPLATFORM}/@NAME@ /usr/bin/@NAME@
+USER 65532:65532
+ENTRYPOINT ["/usr/bin/@NAME@"]

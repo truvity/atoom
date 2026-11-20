@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Holds every file that spells a pinned runtime to versions.yaml (docs/plan.md, "Pinned runtimes"): the devbox packages, the Rust
 # toolchain and edition, the Go directive and toolchain of go.work and of every go.mod, the ConnectRPC and Protobuf requirements of
-# every go.mod, and the exact pins of the Rust runtimes in every Cargo.toml.
+# every go.mod, the exact pins of the Rust runtimes in every Cargo.toml, and the checksum of the Go toolchain of the native release build.
 #
 #   tools/scripts/check-versions.sh
 set -euo pipefail
@@ -40,6 +40,11 @@ check_go_header() { # file
     want "$1" "toolchain directive" "$(sed -n 's/^toolchain \(go[0-9.]*\)$/\1/p' "$1")" "${v[go_toolchain]}"
 }
 check_go_header go.work
+# The native build of the release (tools/release/native-build.sh) takes its Go toolchain from go.dev and checks the SHA-256 pinned here.
+for a in amd64 arm64; do
+    grep -qE "^${v[go_toolchain]}\.linux-$a\.tar\.gz [0-9a-f]{64}\$" tools/release/go-toolchain.sha256 ||
+        bad "tools/release/go-toolchain.sha256: no SHA-256 for ${v[go_toolchain]}.linux-$a.tar.gz, the toolchain of versions.yaml"
+done
 while IFS= read -r f; do
     check_go_header "$f"
     got=$(awk '$1 == "connectrpc.com/connect" || ($1 == "require" && $2 == "connectrpc.com/connect") { print ($1 == "require" ? $3 : $2) }' "$f")
