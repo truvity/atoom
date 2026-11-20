@@ -35,7 +35,8 @@ struct Args {
 #[tokio::main]
 async fn main() -> ExitCode {
     let args = Args::parse();
-    let client = Client::new(&atoom_socket::dial(&args.socket));
+    let dial = atoom_socket::dial(&args.socket);
+    let client = Client::new(dial.transport(), dial.config());
     let caps = Caps {
         public_base: args.public_base,
         edge: args.edge,

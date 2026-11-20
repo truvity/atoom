@@ -176,6 +176,7 @@ dependencies = [
 name = "atoom-destination"
 version = "0.1.0"
 dependencies = [
+ "atoom-common",
  "buffa",
  "buffa-types",
  "connectrpc",

@@ -62,7 +62,8 @@ async fn the_suite_passes_through_the_socket() {
     let sock = s.path().join("directory.sock");
     let stop = serve(&sock, Directory::open(root.path(), state.path()).unwrap());
     up(&sock).await;
-    let client = Client::new(&dial(&sock));
+    let d = dial(&sock);
+    let client = Client::new(d.transport(), d.config());
     run(&client, &Caps::default()).await.unwrap();
     // A directory has no public address: ReadBack is unsupported on the wire, as `unimplemented`.
     assert_eq!(

@@ -1,6 +1,6 @@
 # The destination suite
 
-What `suite::run` holds a destination to, in the order it runs. It speaks the contract through the five calls of the `Destination` trait (over a socket, through `rpc::Client`, which maps each call to the contract and each refusal back), writes under the address prefix `conformance/`, and removes what it wrote, whatever happened.
+What `suite::run` holds a destination to, in the order it runs. It speaks the contract through the five calls of the `Destination` trait (over a socket, through `rpc::Client` (`atoom_destination::client::Client`), which maps each call to the contract and each refusal back), writes under the address prefix `conformance/`, and removes what it wrote, whatever happened.
 
 | Step (printed as `ok: ...`) | What it holds a driver to |
 | --- | --- |
