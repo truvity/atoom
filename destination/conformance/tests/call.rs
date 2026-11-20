@@ -1,4 +1,4 @@
-//! The `Destination` client of this port carries the call: the deadline left and the correlation id of the call being served go out on
+//! The `Destination` client of this port (`atoom_destination::client::Client`) carries the call: the deadline left and the correlation id of the call being served go out on
 //! every one of its five calls (`docs/call-context.md`), and the same client says the same to a server of any language. A server that
 //! records what arrived stands in for the driver.
 
@@ -6,7 +6,7 @@
 
 use std::time::Duration;
 
-use atoom_destination_conformance::rpc::Client;
+use atoom_destination::client::Client;
 use atoom_destination_conformance::{Destination, Document};
 use atoom_socket::call::{self, Call};
 use atoom_socket::testing::Recorder;
@@ -25,7 +25,7 @@ async fn every_call_of_the_client_carries_the_deadline_and_the_correlation_id() 
     let dir = tempfile::tempdir().unwrap();
     let rec = Recorder::start(dir.path().join("r.sock"));
     let dial = rec.client();
-    let client = Client::new(&dial);
+    let client = Client::new(dial.transport(), dial.config());
     let scoped = Call::new()
         .with_correlation("destination-1")
         .with_timeout(Duration::from_secs(5));

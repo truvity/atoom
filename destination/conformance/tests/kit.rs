@@ -13,6 +13,12 @@ use atoom_destination_conformance::suite::{Caps, run};
 use atoom_destination_conformance::{Destination, Document, Error, Fetched, Page, Purged, Written};
 use atoom_socket::{ServerConfig, dial};
 
+/// The client of the driver's socket.
+fn client_of(sock: &std::path::Path) -> Client<atoom_socket::Transport> {
+    let d = dial(sock);
+    Client::new(d.transport(), d.config())
+}
+
 /// A driver that says another digest than the one of the bytes it holds.
 struct Liar(Memory);
 
@@ -54,7 +60,7 @@ async fn through_the_wire<D: Destination + 'static>(driver: D, caps: Caps) -> an
         }
         tokio::time::sleep(Duration::from_millis(10)).await;
     }
-    let outcome = run(&Client::new(&dial(&sock)), &caps).await;
+    let outcome = run(&client_of(&sock), &caps).await;
     let _ = stop.send(());
     server.await.unwrap().unwrap();
     outcome

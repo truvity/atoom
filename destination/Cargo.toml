@@ -16,6 +16,7 @@ workspace = true
 doctest = false
 
 [dependencies]
+atoom-common = { path = "../common" }
 buffa = { version = "=0.9.2", features = ["json"] }
 buffa-types = { version = "=0.9.2", features = ["json"] }
 connectrpc = { version = "=0.9.1", default-features = false, features = ["json", "gzip", "client", "server"] }

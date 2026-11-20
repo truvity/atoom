@@ -7,8 +7,11 @@
 //! The crate also holds what a Rust consumer or driver of the port shares and needs no more than `std` for: the [`Destination`] trait
 //! of the five calls, [`Document`] and the other values it passes, [`Error`], and the rules every driver applies the same way
 //! ([`check_address`], [`check_prefix`], [`check_document`], [`page_size`]). A consumer such as an exporter takes them from here, without
-//! the kit's command line, socket host and digest library; the kit (`atoom-destination-conformance`) re-exports them.
+//! the kit's command line, socket host and digest library; the kit (`atoom-destination-conformance`) re-exports them. [`client::Client`] is the
+//! [`Destination`] over the generated client, for a consumer that calls a driver's socket; it is generic over the transport, so the crate
+//! takes no socket host either.
 
+pub mod client;
 mod port;
 
 pub use port::{
