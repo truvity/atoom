@@ -56,8 +56,8 @@ go-lint:
 
 # The card driver with its build tag atoom_card (key/yubikeypiv; docs/plan.md, section 5): cgo over libpcsclite on Linux (pkg-config and
 # libpcsclite-dev) or the PC/SC framework on macOS. The default recipes above build it without the tag, with no C code; this one builds,
-# vets, lints and tests it with the tag, on the architecture it runs on (nothing is cross-compiled). The tests use the fake card; the ones
-# that need a real card are run by hand on a bench. tools/scripts/card-env.sh says what a machine without the C library does.
+# vets, lints and tests it with the tag, on the architecture it runs on (nothing is cross-compiled). The tests use the fake card; the run
+# against a real card is `just card-bench`, by hand on a bench. tools/scripts/card-env.sh says what a machine without the C library does.
 go-card:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -75,6 +75,15 @@ go-card:
     if [ -n "${ATOOM_CARD_CC:-}" ]; then test_path="$(dirname "$ATOOM_CARD_CC"):$PATH"; fi
     PATH=$test_path go test -tags atoom_card -race -count=1 -v ./... 2>&1 \
       | awk '!/^=== (RUN|PAUSE|CONT|NAME)/ && !/^[[:space:]]*--- PASS/ && !/^PASS$/ && !/^no test files$/' ; test "${PIPESTATUS[0]}" -eq 0
+
+# The card driver (key/yubikeypiv) against a REAL YubiKey in factory state, by hand: `just card-bench READER="<exact PC/SC reader name>" SERIAL=<serial>`.
+# Both are required, and it refuses to run when CI is set. It builds the thin main with the tag atoom_card, checks the card (read only), makes the
+# negative checks, serves on UNIX sockets in a short temp dir, unlocks with the FACTORY PIN and runs the key conformance kit, runs the
+# several-readers and busy-reader cases, and ends with `check --environment staging`. It writes keys to the card's slots (docs/bench.md),
+# never changes a PIN, a PUK or a management key and never resets a card. Read key/yubikeypiv/docs/bench.md before the first run.
+[positional-arguments]
+card-bench *args:
+    tools/scripts/card-bench.sh "$@"
 
 # Build the Cargo workspace. A crate that builds only on Linux (the manifest says so: `[package.metadata.atoom] os`) is left out on any
 # other system, and the run says which (tools/scripts/rust-skip.sh).

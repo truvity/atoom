@@ -207,7 +207,7 @@ Paths: none from sluis. Creates the layout of section 5, `versions.yaml`, `Justf
 | `key/awskms`, `store/dynamodb` (SDK, no C) | yes | yes | yes |
 | Rust drivers that use Linux calls (`source/file` uses `openat2`; `source/credential` systemd credentials) | yes | yes | no: the README says Linux only, and the darwin job skips it through a manifest field |
 
-The card driver is never cross-compiled: sluis already builds it natively per architecture because it links libpcsclite (ADR 0013). atoom builds it on a runner of each architecture, so no QEMU is needed. Tests that need a real card run by hand on a bench; the default tests use the fake card in `internal/card/cardtest`.
+The card driver is never cross-compiled: sluis already builds it natively per architecture because it links libpcsclite (ADR 0013). atoom builds it on a runner of each architecture, so no QEMU is needed. Tests that need a real card run by hand on a bench (`just card-bench`); the default tests use the fake card in `internal/card/cardtest`.
 
 **Release management of the driver binaries** (decision of 2026-11-18). For each driver, under the one repository version: binaries for linux/amd64 and linux/arm64 (and darwin where it makes sense), `.deb` and `.rpm` packages, and OCI images as multi-arch manifests. Plus the conformance kits as binaries. What is copied from sluis's release practice (READ, ADR 0013, `docs/distribution/packages.md`, `.github/workflows/release.yaml`, `tools/release`):
 
