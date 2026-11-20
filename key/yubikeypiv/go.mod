@@ -13,8 +13,10 @@ require (
 	github.com/truvity/atoom/key/pinrelease v0.1.0
 	github.com/truvity/atoom/key/slotplan v0.1.0
 	github.com/truvity/atoom/socket v0.1.0
-	golang.org/x/sys v0.43.0 // indirect
 	google.golang.org/protobuf v1.36.12
 )
 
-require golang.org/x/crypto v0.50.0 // indirect
+require (
+	golang.org/x/crypto v0.59.0 // indirect
+	golang.org/x/sys v0.50.0 // indirect
+)
