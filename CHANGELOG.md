@@ -5,6 +5,13 @@ libraries changed. `just release-prepare X.Y.Z` writes the section.
 
 <!-- release-prepare: new sections go below this line -->
 
+## Unreleased
+
+- `key/yubikeypiv`: the card bench. `just card-bench READER="<reader>" SERIAL=<serial>` runs the driver against a real YubiKey in factory state (by hand; it
+  refuses without both arguments and in CI): `check`, the negative checks, `serve` with an unlock by the factory PIN and the key conformance kit, the
+  D12 C cases (several readers, a serial alone, a busy reader) and a final `check --environment staging`. The helper `internal/bench` (unlock and status over
+  the admin socket, hold a reader) is built with `atoom_card`; `docs/bench.md` has the safety rules and what the run writes to the card.
+
 ## 0.1.0 - 2026-11-19
 
 The first release. One version for the whole repository: every library is tagged 0.1.0. This release carries the libraries and the programs

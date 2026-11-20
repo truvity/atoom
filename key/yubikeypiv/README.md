@@ -53,11 +53,12 @@ The driver runs unchanged inside a larger system, which keeps what is its own an
 
 **The driver can be unlocked only on Linux.** It holds the PIN in locked memory (`mlock`, `MADV_DONTDUMP`) and reads the peer's uid off the admin socket (`SO_PEERCRED`); on another system it builds, starts and stays locked, and the tests that serve the unlock service skip there with that reason.
 
-The tests use the fake card of `internal/card/cardtest` (a test PKI of its own, factory state, PIN `123456`). The tests that need a real card run by hand on a bench; no real card or PIN is used in CI. `just go-card` builds, vets, lints and tests with the tag.
+The tests use the fake card of `internal/card/cardtest` (a test PKI of its own, factory state, PIN `123456`). No real card or PIN is used in CI. `just go-card` builds, vets, lints and tests with the tag. The run against a real card is `just card-bench READER="<reader>" SERIAL=<serial>`, by hand, on a card in factory state ([docs/bench.md](docs/bench.md)).
 
 ## Documentation
 
 - [slots-pin-touch.md](docs/slots-pin-touch.md), [card-slot-map.md](docs/card-slot-map.md): the keys per board, the slot plan, touch and PIN, exclusive access, the floors in code (from sluis)
 - [pcsc-and-cards-on-boards.md](docs/pcsc-and-cards-on-boards.md), [restart-and-session-reset.md](docs/restart-and-session-reset.md), [runtime-dependencies.md](docs/runtime-dependencies.md), [examples/](docs/examples): how a host runs the driver, what a restarted driver does to the card, what it needs at run time
 - [how-a-yubikey-holds-keys.md](docs/how-a-yubikey-holds-keys.md), [cards.md](docs/cards.md), [which-keys-to-buy.md](docs/which-keys-to-buy.md): background (from ritueel)
+- [bench.md](docs/bench.md): the card bench, `just card-bench`: the driver against a real YubiKey in factory state, its safety rules, what it writes to the card
 - [research/](docs/research): the spike on piv-go or PKCS#11 (S4), whether a reader name maps to a serial without connecting (no, 2026-11-19), the card libraries and tooling, PIN, touch and reset measured on cards, speed and sharing, the Nitrokey 3 as a PIV card
