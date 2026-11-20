@@ -30,6 +30,10 @@ The call context: every client of a port sends the deadline and the correlation 
   D12 C cases (several readers, a serial alone, a busy reader) and a final `check --environment staging`. The helper `internal/bench` (unlock and status over
   the admin socket, hold a reader) is built with `atoom_card`; `docs/bench.md` has the safety rules and what the run writes to the card.
 
+### Security
+
+- `key/yubikeypiv`: `golang.org/x/crypto` v0.50.0 to v0.59.0 (and `golang.org/x/sys` v0.43.0 to v0.50.0, which it needs). It is an indirect requirement, reached only through `github.com/go-piv/piv-go/v2` (package `cryptobyte`); the advisories fixed in v0.52.0 (13 Dependabot alerts, among them GHSA-5cgq-3rg8-m6cv, GHSA-89gr-r52h-f8rx, GHSA-f5wc-c3c7-36mc, GHSA-jppx-rxg9-jmrx, GHSA-rm3j-f69w-wqmq, GHSA-vgwf-h737-ff37 and GHSA-x527-x647-q7gg) are in `ssh`, `ssh/agent` and related packages that no atoom module imports, so `govulncheck` reported nothing before and reports nothing now. No other Go module requires `golang.org/x/crypto`.
+
 ## 0.1.0 - 2026-11-19
 
 The first release. One version for the whole repository: every library is tagged 0.1.0. This release carries the libraries and the programs
