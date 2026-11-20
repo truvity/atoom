@@ -37,7 +37,10 @@ rm "$work/gone/$first"
 must_refuse "$first taken away" "$work/gone" "$work/real.json" "$commit"
 
 must_refuse "another commit" "$dir" "$work/real.json" "0000000000000000000000000000000000000000"
-must_refuse "the evidence of a rehearsal" "$dir" "$ev" "$commit"
+# The flag set on purpose: on a real candidate (a push to master) the evidence already says `rehearsal: false`, so passing "$ev" as it
+# came would test nothing and pass the gate (0.2.0's first candidate failed here).
+jq '.rehearsal = true' "$work/real.json" >"$work/rehearsal.json"
+must_refuse "the evidence of a rehearsal" "$dir" "$work/rehearsal.json" "$commit"
 arch=$(jq -r '.smoke | keys[0]' "$work/real.json")
 jq --arg a "$arch" 'del(.smoke[$a])' "$work/real.json" >"$work/nosmoke.json"
 must_refuse "no smoke of $arch" "$dir" "$work/nosmoke.json" "$commit"
