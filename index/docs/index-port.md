@@ -40,6 +40,10 @@ Every refusal is a Connect error with the `Refusal` detail of [common](../../com
 | --- | --- | --- |
 | [index/sqlite](../sqlite/README.md) | one SQLite file with FTS5 | a boundary whose index fits on one disk |
 
+## Every call carries the deadline and the correlation id
+
+Every call of the port carries what is left of the caller's deadline (`Connect-Timeout-Ms`) and the correlation id of the request (`Sluis-Correlation-Id`, 1 to 64 characters of letters, digits, `-` and `_`), and the thin main of every driver reads both and hands them to its handler, which hands them down to the calls it makes. A callee never extends its caller's deadline, and an id of another shape is dropped. A client of the index port: `IndexServiceClient` and `IndexReadServiceClient`, Rust over `atoom_socket::dial`, Go `indexv1alpha1connect.NewIndexServiceClient(hc, url, call.ClientOptions()...)` (and the same for `NewIndexReadServiceClient`). The rules and how a caller outside a handler states them are on [the call context](../../docs/call-context.md).
+
 ## A driver of your own
 
 Serve `IndexService` and `IndexReadService` (Go: implement the handlers of `indexv1alpha1connect`; Rust: implement the traits of the crate `atoom-index`), serve them on a socket or mount them in a process, and run the kit against them: `index-conformance --socket PATH --read-socket PATH` (the same path twice for a driver that serves both on one socket). A driver passes the suite or it is not a driver. The kit speaks the contract only, so the driver may be written in any language.

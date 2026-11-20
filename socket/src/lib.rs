@@ -7,17 +7,24 @@
 //!   are read from the kernel once per connection and every call passes the guard ([`Allow`]) before its message is decoded: a caller
 //!   whose uid is not admitted is refused with the reason `caller`. A handler reads the caller with [`peer`]. `ServerConfig` also
 //!   sets the group and the mode of the socket.
+//! - [`call`] is the deadline and the correlation id of a call, handed down to the calls it makes: [`serve`] reads them from each call it
+//!   accepts, a client made by [`dial`] puts them on each call a handler makes, and [`call::scope`] states them for code that is not
+//!   in a handler.
 //! - [`cli`] (feature `cli`) is the same guard as flags of a thin main: `--allow-uid`, `--allow-any-uid`, `--socket-gid`,
 //!   `--socket-mode`, and the `version` command.
 //!
 //! Nothing here knows who a uid is: a host that names its callers maps the [`Peer`] it is handed to a name of its own.
 
+pub mod call;
 #[cfg(feature = "cli")]
 pub mod cli;
 mod client;
 mod guard;
 mod server;
+#[cfg(feature = "testing")]
+pub mod testing;
 
+pub use call::{Call, HEADER_CORRELATION};
 pub use client::{Client, Transport, dial};
 pub use guard::{Allow, Peer, REASON_CALLER, peer};
 pub use server::{ServerConfig, serve};
@@ -31,3 +38,6 @@ pub const VERSION: &str = match option_env!("ATOOM_VERSION") {
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod call_tests;

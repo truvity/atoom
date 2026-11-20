@@ -43,6 +43,10 @@ Every refusal is a Connect error with the `Refusal` detail of [common](../../com
 
 Both are Linux only (they open every path with `openat2`), and say so in their manifests; the macOS jobs of CI leave them out.
 
+## Every call carries the deadline and the correlation id
+
+Every call of the port carries what is left of the caller's deadline (`Connect-Timeout-Ms`) and the correlation id of the request (`Sluis-Correlation-Id`, 1 to 64 characters of letters, digits, `-` and `_`), and the thin main of every driver reads both and hands them to its handler, which hands them down to the calls it makes. A callee never extends its caller's deadline, and an id of another shape is dropped. A client of the blob port: `BlobServiceClient`, Rust over `atoom_socket::dial`, Go `blobv1alpha1connect.NewBlobServiceClient(hc, url, call.ClientOptions()...)`. The rules and how a caller outside a handler states them are on [the call context](../../docs/call-context.md).
+
 ## A driver of your own
 
 Serve `BlobService` (Go: implement `blobv1alpha1connect.BlobServiceHandler`; Rust: implement the `BlobService` trait of the crate `atoom-blob`), serve it on a socket or mount it in a process, and run the kit against it: `blob-conformance --socket PATH`. A driver that only reads passes the read-only suite: `blob-conformance --socket PATH --read-only --present PATH --bytes FILE`. A driver passes the suite or it is not a driver. The kit speaks the contract only, so the driver may be written in any language.

@@ -15,14 +15,18 @@ workspace = true
 # The flags of the guard for a thin main (`--allow-uid`, `--allow-any-uid`, `--socket-gid`, `--socket-mode`) and its `version` command:
 # what a command line needs and a library consumer does not.
 cli = ["dep:clap"]
+# `testing::Recorder`: a server that records the deadline and the correlation id each call carried, for the tests of a port's client.
+testing = ["dep:bytes", "dep:http-body-util"]
 
 [dependencies]
 anyhow = "1"
 atoom-common = { path = "../common" }
+bytes = { version = "1", optional = true }
 clap = { version = "4", features = ["derive", "string"], optional = true }
 connectrpc = { version = "=0.9.1", default-features = false, features = ["json", "gzip", "client", "server"] }
 futures = "0.3"
 http = "1"
+http-body-util = { version = "0.1", optional = true }
 hyper = { version = "1", features = ["server", "http1", "http2"] }
 hyper-util = { version = "0.1", features = ["server-auto", "server-graceful", "tokio", "http1", "http2"] }
 rustix = { version = "1", features = ["fs", "process"] }

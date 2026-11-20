@@ -8,6 +8,8 @@
 //   - [Serve] listens on Config.Socket and serves a handler until the context ends. A stale socket file is replaced; a live
 //     one, a symlink or another kind of file is refused. The socket has its group and mode from the moment it is reachable (it is made
 //     under a temporary name and renamed).
+//   - The context of a handler carries the correlation id of the request and the deadline of the caller, to hand down to the calls it
+//     makes: see the package github.com/truvity/atoom/common/call.
 //   - [Allow] says who may call: the uid of this process (the default), exactly the listed uids, or every uid.
 //   - [PeerFromContext] is the caller of the call that a handler is serving.
 //   - [Flags] registers the flags --allow-uid, --allow-any-uid, --socket-gid and --socket-mode on a flag set, so that every thin main

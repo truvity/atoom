@@ -5,11 +5,14 @@ import (
 	"net"
 	"net/http"
 
+	"github.com/truvity/atoom/common/call"
 	"github.com/truvity/atoom/key/gen/atoom/key/v1alpha1/keyv1alpha1connect"
 )
 
 // Dial returns a client of the key-store service of the driver that listens on a UNIX socket. It speaks HTTP/2 without TLS (h2c), which
-// is what the thin mains and sluis's hosts serve beside HTTP/1.1; a socket that serves only HTTP/1.1 is reached with DialHTTP1.
+// is what the thin mains and sluis's hosts serve beside HTTP/1.1; a socket that serves only HTTP/1.1 is reached with DialHTTP1. The
+// client carries the call: the deadline of the context of a call goes out as Connect-Timeout-Ms, and the correlation id of the context
+// (call.WithCorrelationID) as its header (docs/call-context.md).
 func Dial(socket string) Client {
 	return dial(socket, false)
 }
@@ -33,5 +36,5 @@ func dial(socket string, http1 bool) Client {
 		},
 		Protocols: &protocols,
 	}
-	return keyv1alpha1connect.NewKeyStoreServiceClient(&http.Client{Transport: tr}, "http://key")
+	return keyv1alpha1connect.NewKeyStoreServiceClient(&http.Client{Transport: tr}, "http://key", call.ClientOptions()...)
 }

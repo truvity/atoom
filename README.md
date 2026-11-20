@@ -20,6 +20,7 @@ The key port has moved: [key](key/README.md), its [conformance kit](key/conforma
 
 - [The extraction plan](docs/plan.md): the design principle, what moves out of sluis and in which order, languages, versioning and releases, how session and ritueel adopt it, the research that moves here, and the open questions.
 - [The socket guard](docs/socket-guard.md): how every thin main guards its UNIX socket (the allowed uids, the group and mode, the peer handed to the handler, the version stamp), in Rust and in Go.
+- [The call context](docs/call-context.md): the deadline and the correlation id that every client of a port sends and every thin main reads and hands down, in Rust and in Go.
 - [Releasing](docs/release.md): how a release is made, step by step, and what the repository owner sets before the first tag.
 - [Decision records](docs/decisions/README.md): purpose and name; ports and drivers over ConnectRPC; libraries with thin dependencies; multi-architecture; one version; research lives here; release management.
 

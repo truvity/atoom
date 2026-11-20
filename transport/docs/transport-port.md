@@ -41,6 +41,10 @@ Every refusal is a Connect error with the `Refusal` detail of [common](../../com
 | --- | --- | --- |
 | [transport/spool](../spool/README.md) | a local directory of fsync'd segment files, bounded | a host with a disk, where a message must survive the writer being down |
 
+## Every call carries the deadline and the correlation id
+
+Every call of the port carries what is left of the caller's deadline (`Connect-Timeout-Ms`) and the correlation id of the request (`Sluis-Correlation-Id`, 1 to 64 characters of letters, digits, `-` and `_`), and the thin main of every driver reads both and hands them to its handler, which hands them down to the calls it makes. A callee never extends its caller's deadline, and an id of another shape is dropped. A client of the transport port: `TransportServiceClient`, Rust over `atoom_socket::dial`, Go `transportv1alpha1connect.NewTransportServiceClient(hc, url, call.ClientOptions()...)`. `Receive` carries them too. The rules and how a caller outside a handler states them are on [the call context](../../docs/call-context.md).
+
 ## A driver of your own
 
 Serve `TransportService` (Go: implement `transportv1alpha1connect.TransportServiceHandler`; Rust: implement the `TransportService` trait of the crate `atoom-transport`), serve it on a socket or mount it in a process, and run the kit against it: `transport-conformance --emit-socket PATH --receive-socket PATH` (the same path twice for a driver that serves both sides on one socket). A driver passes the suite or it is not a driver. The kit speaks the contract only, so the driver may be written in any language.

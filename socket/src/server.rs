@@ -13,6 +13,7 @@ use hyper_util::server::graceful::GracefulShutdown;
 use tokio::net::{UnixListener, UnixStream};
 use tower::Service;
 
+use crate::call::Inherit;
 use crate::guard::{Allow, Guard, Peer};
 
 /// How long a graceful shutdown waits for calls in flight.
@@ -32,7 +33,8 @@ pub struct ServerConfig {
     pub socket_gid: Option<u32>,
     /// Who may call: the second wall behind the mode. The default is the uid this process runs as.
     pub allow: Allow,
-    /// The deadline of a call that carries none.
+    /// The deadline of a call that carries none. A call that carries one keeps it (`Connect-Timeout-Ms`, honoured by the server), and the
+    /// handler hands what is left to the calls it makes (`docs/call-context.md`).
     pub default_deadline: Duration,
 }
 
@@ -74,6 +76,8 @@ pub async fn serve(
     if !any {
         service = service.with_interceptor(Guard::new(cfg.allow.clone()));
     }
+    // After the guard, so that a refused call is refused before its headers are read. Every server hands the call down.
+    service = service.with_interceptor(Inherit);
     tracing::info!(socket = %cfg.socket.display(), "listening");
 
     let graceful = GracefulShutdown::new();

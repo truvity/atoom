@@ -52,3 +52,7 @@ A card that starts locked needs a PIN from an administrator, once. A board whose
 2. Answer `Capabilities` truthfully. The kit skips what you do not declare.
 3. Run `key-conformance --socket PATH` against your endpoint; `go test` of a Go driver can call `conformance.Run` on an in-process client instead.
 4. Keep the keys inside. A driver that exports a key is not a driver of this port, whatever its tests say.
+
+## Every call carries the deadline and the correlation id
+
+Every call of the port carries what is left of the caller's deadline (`Connect-Timeout-Ms`) and the correlation id of the request (`Sluis-Correlation-Id`, 1 to 64 characters of letters, digits, `-` and `_`), and the thin main of every driver reads both and hands them to its handler, which hands them down to the calls it makes. A callee never extends its caller's deadline, and an id of another shape is dropped. A client of the key port: `keyv1alpha1connect.NewKeyStoreServiceClient(hc, url, call.ClientOptions()...)`; `key/conformance.Dial` (the kit's client) already does. A driver of this port serves it on a socket with `socket.Serve`, which hands both to the handler. The rules and how a caller outside a handler states them are on [the call context](../../docs/call-context.md).

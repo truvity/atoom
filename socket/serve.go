@@ -11,6 +11,8 @@ import (
 	"net/http"
 	"os"
 	"time"
+
+	"github.com/truvity/atoom/common/call"
 )
 
 // shutdownGrace bounds the graceful shutdown of a server.
@@ -34,7 +36,9 @@ type Config struct {
 // Serve listens on cfg.Socket, serves h at path (HTTP/1.1 and HTTP/2 without TLS) and returns when ctx ends, after a graceful
 // shutdown bounded by 5 seconds. The peer credentials of each connection are read once; every call passes the guard (cfg.Allow)
 // before its handler is reached, and a call from a uid that is not admitted is answered permission_denied with the reason "caller",
-// without its message being read. A handler reads the caller with [PeerFromContext].
+// without its message being read. A handler reads the caller with [PeerFromContext]. Behind the guard, [call.Inherit] gives the context of
+// a handler the correlation id of the request (call.CorrelationID), and the Connect handler gives it the deadline of the caller
+// (Connect-Timeout-Ms), so that a handler that calls on with its own context hands both down (docs/call-context.md).
 //
 // Its signature is the Serve of the Host of the key and store drivers: pass a closure around it.
 func Serve(ctx context.Context, cfg Config, path string, h http.Handler) error {
@@ -53,7 +57,7 @@ func Serve(ctx context.Context, cfg Config, path string, h http.Handler) error {
 	protocols.SetUnencryptedHTTP2(true)
 	g := guard{allow: cfg.Allow, own: uint32(os.Geteuid())} //nolint:gosec // a uid is non-negative
 	srv := &http.Server{
-		Handler:           g.middleware(newDenyHandlers(), mux),
+		Handler:           g.middleware(newDenyHandlers(), call.Inherit(mux)),
 		Protocols:         &protocols,
 		ReadHeaderTimeout: 10 * time.Second,
 		ConnContext: func(c context.Context, conn net.Conn) context.Context {
