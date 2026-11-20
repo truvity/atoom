@@ -5,9 +5,11 @@ libraries changed. `just release-prepare X.Y.Z` writes the section.
 
 <!-- release-prepare: new sections go below this line -->
 
-## Unreleased
+## 0.2.0 - 2026-11-20
 
-G2: every driver is released as a tarball, a `.deb` and an `.rpm` package and an OCI image (owner decision D11 A; no Helm charts, D7 A). Nothing here changes a library or a contract; the first release with them is the next one. The reference is [packages, images and tarballs](docs/packages.md), the flow is [releasing](docs/release.md).
+One version for the whole repository: every library is tagged 0.2.0, changed or not. This release adds the packages and the container images that 0.1.0 left for it, the call context of every port client, the destination client in its port crate, the card bench, and a dependency security fix.
+
+G2: every driver is released as a tarball, a `.deb` and an `.rpm` package and an OCI image (owner decision D11 A; no Helm charts, D7 A). This is the first release with them (0.1.0 has libraries and programs only); G2 changes no library or contract. The reference is [packages, images and tarballs](docs/packages.md), the flow is [releasing](docs/release.md).
 
 - Thirteen drivers, from the table `tools/release/drivers.tsv`: `key/software`, `key/yubikeypiv`, `key/awskms`, `store/dynamodb`, `store/rqlite`, `store/memory`, `source/file`, `source/credential`, `blob/fs`, `blob/fsreadonly`, `transport/spool`, `index/sqlite`, `destination/dir`. One name for each, `<port>-<driver>`: the executable `/usr/bin/atoom-<id>`, the package `atoom-driver-<id>`, the image `ghcr.io/truvity/atoom-<id>:<version>`, the tarball `atoom-<id>_<version>_<os>_<arch>.tar.gz`.
 - Packages for linux/amd64 and linux/arm64, made with nfpm: the executable, the README, the socket guard page and the licence, and no unit, user, state or script (how a driver runs is the consumer's). Only the card driver has dependencies (`pcscd`, `libpcsclite1`, `libc6 >= 2.34`; the CCID driver recommended); it is built natively on a runner of each architecture in an Ubuntu 22.04 userland and checked for no `GLIBC` symbol newer than 2.34. The others are static (Go with CGO off, Rust through cargo-zigbuild to musl, `cargo auditable`).
@@ -33,6 +35,8 @@ The call context: every client of a port sends the deadline and the correlation 
 ### Security
 
 - `key/yubikeypiv`: `golang.org/x/crypto` v0.50.0 to v0.59.0 (and `golang.org/x/sys` v0.43.0 to v0.50.0, which it needs). It is an indirect requirement, reached only through `github.com/go-piv/piv-go/v2` (package `cryptobyte`); the advisories fixed in v0.52.0 (13 Dependabot alerts, among them GHSA-5cgq-3rg8-m6cv, GHSA-89gr-r52h-f8rx, GHSA-f5wc-c3c7-36mc, GHSA-jppx-rxg9-jmrx, GHSA-rm3j-f69w-wqmq, GHSA-vgwf-h737-ff37 and GHSA-x527-x647-q7gg) are in `ssh`, `ssh/agent` and related packages that no atoom module imports, so `govulncheck` reported nothing before and reports nothing now. No other Go module requires `golang.org/x/crypto`.
+
+Libraries that changed since v0.1.0: `blob`, `blob/conformance`, `common`, `destination`, `destination/conformance`, `destination/dir`, `index`, `index/conformance`, `key`, `key/awskms`, `key/conformance`, `key/software`, `key/yubikeypiv`, `socket`, `source`, `source/conformance`, `store`, `store/conformance`, `store/dynamodb`, `transport`, `transport/conformance`.
 
 ## 0.1.0 - 2026-11-19
 
