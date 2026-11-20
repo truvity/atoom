@@ -22,9 +22,12 @@ func TestUsage(t *testing.T) {
 }
 
 func TestVersion(t *testing.T) {
-	var out bytes.Buffer
-	if code := run([]string{"version"}, &out, &bytes.Buffer{}); code != 0 || strings.TrimSpace(out.String()) == "" {
-		t.Fatalf("version: %d %q", code, out.String())
+	// `version` and `--version` say the same, and the release smoke runs the second (tools/release/smoke.sh).
+	for _, arg := range []string{"version", "--version"} {
+		var out bytes.Buffer
+		if code := run([]string{arg}, &out, &bytes.Buffer{}); code != 0 || strings.TrimSpace(out.String()) == "" {
+			t.Fatalf("%s: %d %q", arg, code, out.String())
+		}
 	}
 }
 

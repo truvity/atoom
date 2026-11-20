@@ -1,0 +1,37 @@
+# The image of a driver that links a C library (tools/release/images.sh renders this template for every driver of
+# tools/release/drivers.tsv whose build is `native`: the card driver, which talks to pcscd through libpcsclite). The executable of each
+# platform is in the build context at <os>/<arch>/<name>: the one in the tarball that the candidate built, on a host of that architecture.
+#
+# distroless base (glibc, no shell, no package manager), non-root (uid 65532), and the one library the executable needs, libpcsclite1,
+# taken from Debian 12 in a stage that runs on the BUILD platform: the package of the target architecture is downloaded and unpacked
+# (dpkg-deb -x runs nothing of the target), so a multi-architecture build runs no emulation. The executable was built in Ubuntu 22.04
+# (glibc 2.35) and Debian 12 has 2.36. The card service is not in the image: a container reaches the pcscd of its host through the
+# socket /run/pcscd/pcscd.comm, which the consumer mounts (docs/packages.md). Bases pinned by the digest of their multi-architecture
+# index (checked 2026-11-20).
+FROM --platform=$BUILDPLATFORM debian:12-slim@sha256:734a72b3d6142a71993b4bc580ca01d8ca687f77a2c422d96a961d3376b179bc AS pcsclite
+ARG TARGETARCH
+RUN set -eux; \
+    dpkg --add-architecture "$TARGETARCH"; \
+    apt-get update -qq; \
+    mkdir /deb /out; \
+    cd /deb; \
+    apt-get download "libpcsclite1:$TARGETARCH"; \
+    dpkg-deb -x ./libpcsclite1_*.deb /out; \
+    ls -l /out/usr/lib/*/libpcsclite.so.1
+
+FROM gcr.io/distroless/base-debian12:nonroot@sha256:7f0c72cd138b442ae0deeb69c08b1acf5525439ba251a49ad93c320a061567e5
+ARG TARGETPLATFORM
+LABEL org.opencontainers.image.title="@NAME@" \
+      org.opencontainers.image.description="@DESCRIPTION@" \
+      org.opencontainers.image.version="@VERSION@" \
+      org.opencontainers.image.revision="@REVISION@" \
+      org.opencontainers.image.source="https://github.com/truvity/atoom" \
+      org.opencontainers.image.url="https://github.com/truvity/atoom" \
+      org.opencontainers.image.documentation="https://github.com/truvity/atoom/blob/master/docs/packages.md" \
+      org.opencontainers.image.licenses="MIT" \
+      org.opencontainers.image.vendor="Truvity B.V." \
+      org.opencontainers.image.base.name="gcr.io/distroless/base-debian12:nonroot"
+COPY --from=pcsclite /out/usr/lib/ /usr/lib/
+COPY --chmod=0555 ${TARGETPLATFORM}/@NAME@ /usr/bin/@NAME@
+USER 65532:65532
+ENTRYPOINT ["/usr/bin/@NAME@"]

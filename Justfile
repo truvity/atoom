@@ -8,7 +8,7 @@ default:
 
 # Everything CI runs, in one go: format and lint, build and test every library, the generated code, the dependency rules, the pinned
 # versions, licences, advisories, the breaking-change check, the conformance kits and the release rehearsal.
-check: lint test go-card gen-check check-isolation check-versions check-licenses check-advisories proto-breaking conformance release-rehearsal
+check: lint test go-card gen-check check-isolation check-versions check-licenses check-advisories proto-breaking conformance release-rehearsal release-check-table release-candidate-test
 
 # Build every library, Go and Rust.
 build: go-build rust-build
@@ -309,6 +309,61 @@ release-tag version *flags:
 # It makes no tag in this repository and pushes nothing.
 release-rehearsal: rust-toolchain
     tools/release/rehearse.sh
+
+# The release of the drivers (docs/packages.md, docs/release.md): every driver as a tarball, a .deb and an .rpm package and an OCI image, from
+# the table tools/release/drivers.tsv. The candidate workflow (.github/workflows/candidate.yaml) runs these steps once, on both architectures,
+# and the tag run publishes the bytes it made; nothing here pushes, tags or needs a credential. `version` is X.Y.Z.
+#
+# The executables of the drivers that are built anywhere: Go with CGO off and Rust through cargo-zigbuild to static musl, cross-compiled for
+# the architectures given (both by default), into dist/bin/<os>_<arch>/.
+release-build version arches="amd64 arm64": rust-toolchain
+    tools/release/build.sh {{ version }} {{ arches }}
+
+# The card driver (it links libpcsclite), built natively for the architecture of this machine in an Ubuntu 22.04 userland (needs docker).
+release-native version:
+    tools/release/native.sh {{ version }}
+
+# The tarballs, the packages, the SBOMs and the sums into dist/release from the executables in dist/bin, checked against the table.
+release-assemble version:
+    tools/release/package.sh {{ version }}
+    tools/release/check-dist.sh dist/release {{ version }}
+
+# Builds on THIS machine what the candidate builds, for its architecture alone (arch amd64 or arm64; the default is this machine's), into
+# dist/: the executables, then tarballs and packages in dist/release. Needs docker, for the card driver. `just release-smoke` then installs
+# and runs them. The version defaults to 0.0.0, which no release is.
+release-packages version="0.0.0" arch="":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    arch={{ arch }}
+    if [ -z "$arch" ]; then case "$(uname -m)" in x86_64) arch=amd64 ;; *) arch=arm64 ;; esac; fi
+    rm -rf dist/bin dist/release
+    export ATOOM_ARCHES=$arch
+    just release-build {{ version }} "$arch"
+    just release-native {{ version }}
+    just release-assemble {{ version }}
+
+# Installs every package of dist/release in containers (Ubuntu 24.04 with apt, Rocky Linux 10 and Amazon Linux 2023 with dnf) and runs the
+# executables with --version, then builds every image for this machine's architecture and runs it. Needs docker. Run `release-packages` first
+# (with the same version, and the architecture of this machine).
+release-smoke version="0.0.0":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    case "$(uname -m)" in x86_64) export ATOOM_ARCHES=amd64 ;; *) export ATOOM_ARCHES=arm64 ;; esac
+    tools/release/smoke.sh {{ version }}
+    tools/release/images.sh smoke {{ version }}
+
+# Pushes every image of dist/release to a throw-away registry on a loopback port and pulls, keeps and describes them, as the tag run will do
+# at ghcr.io (needs docker and syft; run `release-packages` first, and with both architectures the images hold both).
+release-images-rehearsal version="0.0.0":
+    tools/release/rehearse-images.sh {{ version }}
+
+# The table of the drivers (tools/release/drivers.tsv) against the tree: every thin main is a row or an exception.
+release-check-table:
+    tools/release/check-table.sh
+
+# The candidate scripts on fixtures (the scope of a push, the evidence gate and its mutants); no build, no network.
+release-candidate-test:
+    tools/release/test-candidate.sh
 
 # Install and check the pinned Rust toolchain (`devbox run -- just rust-toolchain`). It is safe to run at any time and in parallel: a
 # complete toolchain is a check of a fraction of a second; an incomplete one is installed under a lock, by one process at a time. The

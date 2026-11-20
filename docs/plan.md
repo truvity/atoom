@@ -214,13 +214,13 @@ The card driver is never cross-compiled: sluis already builds it natively per ar
 | Practice in sluis | In atoom |
 | --- | --- |
 | The maintainer makes and signs the release tag by hand; the workflow never makes one; a tag ruleset lets only the owner create `v2.*.*` and nobody update or delete it | Same, for `v*` and `*/v*`: owner-created, immutable |
-| A candidate workflow builds everything with no write permission; the release workflow builds nothing, only promotes the candidate's bytes after a gate (tag on `main`, green CI, green candidate) | Same two workflows, same gate |
-| GoReleaser v2 for Go and Rust binaries, cargo-zigbuild static musl Rust binaries except those that link C, packages with `nfpm`, images with `dockers_v2` on distroless bases pinned by digest | Same, one build definition |
+| A candidate workflow builds everything with no write permission; the release workflow builds nothing, only promotes the candidate's bytes after a gate (tag on `main`, green CI, green candidate) | Same two workflows, same gate (G2: `candidate.yaml` and `release.yaml`, the gate is `tools/release/gate.sh` and `candidate-run.sh`) |
+| GoReleaser v2 for Go and Rust binaries, cargo-zigbuild static musl Rust binaries except those that link C, packages with `nfpm`, images with `dockers_v2` on distroless bases pinned by digest | cargo-zigbuild static musl, `nfpm` and distroless bases pinned by digest as in sluis; **plain scripts driven by one table instead of GoReleaser and `dockers_v2`** (G2, [packages](packages.md), "Why not GoReleaser") |
 | Per-file `.sha256`, a `SHA256SUMS` list, SPDX SBOM per tarball and image (syft; `cargo auditable` for Rust) | Same |
 | Release is a draft pre-release until every check passes; immutable releases on; the job fails closed if immutability cannot be established | Same, except that the immutability check is made after publishing, on the `immutable` field of the release, because a `GITHUB_TOKEN` cannot read the repository setting (changed 2026-11-19, after the first run) |
 | Images on `ghcr.io/truvity/<name>`; the release pulls every image by digest without a credential and fails for a package that is not public (new packages come out public in practice, observed, not guaranteed) | Images on `ghcr.io/truvity/atoom-<port>-<driver>`; same public check; `release-images.txt` lists digests |
-| Packages named for the driver: `sluis-driver-<owner>-<name>`, with the system dependencies on the narrowest package (the card driver depends on pcscd, a CCID driver, libpcsclite and polkit, no other package does) | `atoom-driver-<port>-<name>`; the same narrow-dependency rule |
-| No release artifact is signed in the first versions (decided 2026-11-07); keyless Sigstore attestations and OpenPGP signatures wait | Same: checksums, SBOMs and a signed tag now; artifact signing and provenance attestations follow when sluis turns them on, so the two repositories change together |
+| Packages named for the driver: `sluis-driver-<owner>-<name>`, with the system dependencies on the narrowest package (the card driver depends on pcscd, a CCID driver, libpcsclite and polkit, no other package does) | `atoom-driver-<port>-<name>`; the same narrow-dependency rule (pcscd and libpcsclite, the CCID driver recommended; no polkit rule, a user's business) |
+| No release artifact is signed in the first versions (decided 2026-11-07); keyless Sigstore attestations and OpenPGP signatures wait | Checksums, SBOMs and a signed tag; **provenance attestations are in** from G2 (a GitHub keyless attestation of `SHA256SUMS`, a BuildKit attestation in every image index), ahead of sluis, and are one step to drop; OpenPGP signatures wait for sluis |
 | Reproducibility: sluis builds once in the candidate and promotes by hash; toolchains are pinned, Go builds use `-trimpath`, dependencies are locked. It does not claim bit-for-bit reproducible builds (UNVERIFIED either way; no such claim found) | Same: build once, promote by hash, pinned toolchains, `-trimpath`, locked deps; no bit-for-bit claim until measured |
 
 Not copied: sluis's Lambda layers and zips, the apt and dnf repository trees, the console bundle, the Helm chart. **No charts in atoom (R10, coordinator's call 2026-11-18, for review):** consumers (the sluis chart, the session chart) run drivers as sidecars from atoom's images; the images are the unit that charts reference by digest.
@@ -309,7 +309,7 @@ The reason is the seam. Until now sluis wrapped each atoom driver in a thin host
 | Step | Where | What | State |
 | --- | --- | --- | --- |
 | **G1** | atoom | **The caller guard in every thin main**, in Rust and in Go: the socket admits only the allowed uids and refuses the others with the refusal reason `caller`; `--socket-gid` and `--socket-mode`; the version stamp; the peer handed to the handler (the spool names its emitters from it). Generic: no sluis names, no registry. | **Built (2026-11-19)**, below |
-| **G2** | atoom | Each driver as its own deb and rpm package and OCI image in atoom's release, under the one version (decision [0007](decisions/0007-release-management.md)), beside the library for in-process and Lambda use. | planned |
+| **G2** | atoom | Each driver as its own deb and rpm package and OCI image in atoom's release, under the one version (decision [0007](decisions/0007-release-management.md)), beside the library for in-process and Lambda use. | **Built (2026-11-20)**, below; first released in 0.2.0 |
 | **G3** | sluis | The sluis packages depend on atoom's driver packages (and the images on atoom's images) instead of building the driver themselves; the unit files run atoom's program with the guard flags of the deployment. | planned |
 | **G4** | sluis | The driver hosts of sluis (`drivers/**`, and the part of `kits/rust/sluis-kit` and `kits/go/rpc` that only they used) are deleted. | planned |
 
@@ -324,6 +324,16 @@ The reason is the seam. Until now sluis wrapped each atoom driver in a thin host
 - **The version is on the command line, not on the wire.** Every main answers `version`; sluis does not put the version on the wire either, so nothing was added to the calls.
 - **The card driver's admin socket is unchanged**; it has its own rule (`--admin-uid`).
 - **The kits did not change.** They run as the uid of the main and pass against the default guard.
+
+**G2, as built.** Thirteen drivers, one table ([`tools/release/drivers.tsv`](../tools/release/drivers.tsv)); [packages, images and tarballs](packages.md) is the reference and [releasing](release.md) the flow. The calls made while building it:
+
+- **One naming rule.** The executable is `atoom-<port>-<driver>` at `/usr/bin` in the tarball, the package and the image (the thin mains' own names, `software` and `store-rqlite`, are two rules); the package is `atoom-driver-<port>-<driver>` (so a sluis package can depend on it, as sluis names its own), the image `ghcr.io/truvity/atoom-<port>-<driver>:<version>`, the tarball `atoom-<port>-<driver>_<version>_<os>_<arch>.tar.gz`.
+- **No unit, no user, no state in a package.** "Deployment is sluis's": a unit and a user are the consumer's choices, and the packages carry the executable, the README, the socket guard page and the licence only. The release refuses a package with anything else, or a script. The flags are documented.
+- **Dependencies.** Only the card driver has any: `pcscd` and `libpcsclite1` (`pcsc-lite`, `pcsc-lite-libs`), `libc6 >= 2.34`, and the CCID driver recommended. The rest are static.
+- **The card driver is built natively in Ubuntu 22.04,** on a runner of each architecture, with a check that no symbol is newer than `GLIBC_2.34`; the build is not cross-compiled and runs no emulation. Its image has `libpcsclite1` taken from Debian 12 in a stage that runs on the build platform.
+- **Tarballs for darwin** only for the pure-Go drivers (`key/software`, `key/awskms`, `store/dynamodb`).
+- **Scripts driven by the table, not GoReleaser.** The card driver cannot go through a single GoReleaser build stage, and the table of thirteen rows drives plain scripts for the build, the archives, nfpm and the images with nothing generated to drift. The practice is sluis's: the candidate builds once, the tag run holds every file to the evidence by digest and publishes the same bytes; SBOMs (syft) and sums; draft first, then public, then the immutability check; the images checked public by pulling with no credential. Provenance: a GitHub attestation of `SHA256SUMS` and a BuildKit attestation in every image index, which sluis does not have yet.
+- **`--version` in every Go main** (it was only `version`), so one smoke runs every driver the same way.
 
 ### D4: what atoom proves and what sluis proves
 

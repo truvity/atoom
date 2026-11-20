@@ -1,0 +1,5 @@
+# The Go toolchain of the native build (tools/release/native-build.sh): the SHA-256 of the archive that go.dev publishes for the release of
+# the `toolchain` line of go.work, for each architecture. A release with no line here fails the build, so a bump of the toolchain adds its
+# lines in the same change (`just check-versions` holds this file to versions.yaml). Taken from https://go.dev/dl/?mode=json, 2026-11-20.
+go1.27.4.linux-amd64.tar.gz 7226736c2339719cda28fbf3a54d71aa63bcefe376e98cef00034268dab24840
+go1.27.4.linux-arm64.tar.gz 3392582988a273a87ab5043ee1b2c9c17a2c3c00580bf9326c47a2e0aaaeac92

@@ -5,7 +5,7 @@
 //	software serve --socket PATH --state-dir DIR [--environment development|staging|production] [--refuse-production]
 //	               [--allow-uid UID]... [--allow-any-uid] [--socket-gid GID] [--socket-mode MODE]
 //	software check --state-dir DIR
-//	software version
+//	software version  (also --version)
 //
 // The socket is guarded (github.com/truvity/atoom/socket, docs/socket-guard.md): mode 0600 and the uid of the process by default, so
 // that no other process may use the keys; --allow-uid names the callers, and a caller outside the set is refused with the reason
@@ -41,7 +41,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return 2
 	}
 	switch args[0] {
-	case "version":
+	case "version", "--version":
 		_, _ = fmt.Fprintln(stdout, versionString())
 		return 0
 	case "serve":
