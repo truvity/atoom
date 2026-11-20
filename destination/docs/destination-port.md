@@ -39,6 +39,10 @@ Every refusal is a Connect error with the `Refusal` detail of [common](../../com
 | [destination/dir](../dir/README.md) | a local directory | a host whose public documents are static files served by a forwarder or a file server |
 | `destination-memory` (in the [kit](../conformance/README.md)) | memory | the reference driver; plays a public address and an edge, to try the kit against every branch |
 
+## Every call carries the deadline and the correlation id
+
+Every call of the port carries what is left of the caller's deadline (`Connect-Timeout-Ms`) and the correlation id of the request (`Sluis-Correlation-Id`, 1 to 64 characters of letters, digits, `-` and `_`), and the thin main of every driver reads both and hands them to its handler, which hands them down to the calls it makes. A callee never extends its caller's deadline, and an id of another shape is dropped. The Rust client of the port is `rpc::Client`, the `Destination` that a consumer calls a driver's socket with: all five calls carry them, from the call being served or from a `call::scope`. A Go client is `destinationv1alpha1connect.NewDestinationServiceClient(hc, url, call.ClientOptions()...)`. The rules and how a caller outside a handler states them are on [the call context](../../docs/call-context.md).
+
 ## A driver of your own
 
 Rust: implement the `Destination` trait of the crate `atoom-destination` (the port crate, `std` only; `atoom-destination-conformance` re-exports it) and serve it with `rpc::Service(Arc::new(driver)).router()`; any language: serve `DestinationService` (Go: implement `destinationv1alpha1connect.DestinationServiceHandler`). Serve it on a socket or mount it in a process, and run the kit against it: `destination-conformance --socket PATH` (with `--public-base URL` when it has a public address and `--edge` when a cache sits in front of it). A driver passes the suite or it is not a driver. The kit speaks the contract only, so the driver may be written in any language.

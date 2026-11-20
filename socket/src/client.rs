@@ -14,6 +14,9 @@ const BASE_URI: &str = "http://unix";
 
 /// A Connect client of one UNIX socket. Hand it to a generated client:
 /// `ItemServiceClient::new(client.transport(), client.config())`.
+///
+/// Every call made through it carries the deadline left and the correlation id of the call being served, when it is made inside a handler
+/// of a server built by [`serve`](crate::serve) or inside [`call::scope`](crate::call::scope) (`docs/call-context.md`).
 #[derive(Clone)]
 pub struct Client {
     transport: Transport,
@@ -64,8 +67,9 @@ impl ClientTransport for Transport {
 
     fn send(
         &self,
-        request: Request<ClientBody>,
+        mut request: Request<ClientBody>,
     ) -> BoxFuture<'static, Result<Response<Self::ResponseBody>, Self::Error>> {
+        crate::call::pass_on(&mut request);
         // `shared` starts a worker task, so the connection is made here, inside the runtime.
         let conn = self
             .conn

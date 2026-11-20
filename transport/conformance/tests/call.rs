@@ -1,0 +1,36 @@
+//! The client of this port carries the call: the deadline left and the correlation id of the call being served go out on every call made
+//! through a client of `atoom-socket` (`docs/call-context.md`). The generated client takes the transport of `atoom_socket::dial`, so
+//! this proves it for each of the port's calls, unary and streaming, against a server that records what arrived.
+
+#![allow(clippy::unwrap_used, clippy::expect_used)] // a failed unwrap in a test is the failure
+
+use std::time::Duration;
+
+use atoom_socket::call::{self, Call};
+use atoom_socket::testing::Recorder;
+use atoom_transport::atoom::transport::v1alpha1::{
+    AckRequest, EmitRequest, ReceiveRequest, TransportServiceClient,
+};
+
+#[tokio::test]
+async fn every_call_of_the_client_carries_the_deadline_and_the_correlation_id() {
+    let dir = tempfile::tempdir().unwrap();
+    let rec = Recorder::start(dir.path().join("r.sock"));
+    let c = rec.client();
+    let client = TransportServiceClient::new(c.transport(), c.config());
+    let scoped = Call::new()
+        .with_correlation("transport-1")
+        .with_timeout(Duration::from_secs(5));
+
+    let _ = call::scope(scoped.clone(), client.emit(EmitRequest::default())).await;
+    rec.assert_carried("transport-1", 5_000);
+    let _ = call::scope(scoped.clone(), client.receive(ReceiveRequest::default())).await;
+    rec.assert_carried("transport-1", 5_000);
+    let _ = call::scope(scoped.clone(), client.ack(AckRequest::default())).await;
+    rec.assert_carried("transport-1", 5_000);
+    assert_eq!(rec.sent().len(), 3, "a call did not reach the recorder");
+
+    // Outside a scope nothing is sent: the client invents no id and no deadline.
+    let _ = client.emit(EmitRequest::default()).await;
+    rec.assert_bare();
+}

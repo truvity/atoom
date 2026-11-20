@@ -270,10 +270,12 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "atoom-common",
+ "bytes",
  "clap",
  "connectrpc",
  "futures",
  "http",
+ "http-body-util",
  "hyper",
  "hyper-util",
  "rustix",
@@ -369,6 +371,7 @@ dependencies = [
  "clap",
  "connectrpc",
  "futures",
+ "tempfile",
  "tokio",
 ]
 
