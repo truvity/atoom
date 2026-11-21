@@ -1,18 +1,10 @@
 # How a YubiKey holds keys
 
-*Copied from [truvity/ritueel](https://github.com/truvity/ritueel) `main` at commit `a569f9366c0bef69e376db2ae25db8808336a875`, file `docs/learn/how-a-yubikey-holds-keys.mdx`, with the site markup removed (the front matter became the title, the figures are left out). ritueel keeps its copy until it is restarted. Links that start with a slash point to ritueel's own site and are not part of this repository.*
-
-*Design phase: ritueel has no release. Its OpenPGP-card store is planned for M3 and its PIV store for M6 ([roadmap](/roadmap/)); nothing on this page is built. The facts were read on 2026-11-10 in Yubico's documentation, in the FIDO and WebAuthn standards and in tool source; measurements on cards are in the [research notes](../research/index.md). The pictures show what Yubico documents, not a ritueel tool. Firmware numbers matter: older firmware does less.*
-
-You are told the root is "on a YubiKey". What is in that card, what can wipe it, and what can it prove? This page opens a YubiKey 5 and shows what it holds, what limits it and how a signature happens.
-
-This page assumes the [basics](/learn/what-is-a-root/#keys-from-zero) and [the custody chain](/learn/custody-chain/). It is link 1 of that chain, the card that holds a root, and [how a KMS key works](/learn/how-a-kms-key-works/) asks the same questions of a cloud key.
+How a YubiKey 5 stores keys, what limits it, and what each part means for the `key/yubikeypiv` driver. The facts were read in Yubico's documentation, in the FIDO and WebAuthn standards and in tool source on 2026-11-10. Firmware numbers matter: older firmware does less.
 
 ## What is inside
 
-A YubiKey 5 carries several applications: one-time codes, OATH and U2F among them. Three hold keys that matter here: PIV, OpenPGP and FIDO2. PIV (Personal Identity Verification) is the smart-card part. Yubico describes the applications as separate, with separate storage for keys (YubiKey 5 applications page). A PIV reset has no effect on other applications such as FIDO (Yubico PIV PIN page).
-
-> *Figure (in ritueel's site): Each application has its own keys and its own lock. Yubico, read 2026-11-10 (see Sources).*
+A YubiKey 5 carries several applications: one-time codes, OATH and U2F among them. Three hold keys: PIV, OpenPGP and FIDO2. PIV (Personal Identity Verification) is the smart-card part. Yubico describes the applications as separate, with separate storage for keys (YubiKey 5 applications page). A PIV reset has no effect on other applications such as FIDO (Yubico PIV PIN page).
 
 | Application | Holds | Its lock |
 |---|---|---|
@@ -22,77 +14,62 @@ A YubiKey 5 carries several applications: one-time codes, OATH and U2F among the
 
 PIV and OpenPGP use the smart-card interface of the card, and only one program can hold it at a time. FIDO2 has its own interface, HID.
 
-**PIV: tries and wipes.**
-
-- Three wrong PINs block the PIN. The PUK unblocks it, and three wrong PUKs block the PUK.
-- The counters can be set from 1 to 255, for PIN and PUK together. Setting them resets both to their defaults.
-- If both are blocked, only a PIV reset is left. It is possible only then, and it deletes the key in every slot.
-
-**FIDO2: tries and wipes.**
-
-- Three wrong PINs in a row need the card unplugged and plugged in again. Eight in a row lock the FIDO2 application.
-- A FIDO reset needs no PIN. Plug the card in, ask within about ten seconds, and touch. It removes the FIDO2 PIN and every passkey, and it resets U2F too.
-- The FIDO2 PIN is separate from the PIV PIN on a YubiKey 5.
+**The two applets are independent (measured 2026-10-31 on two cards, firmware 5.8.0).** Generating keys in six PIV slots, signing, and one wrong PIV PIN changed nothing in the OpenPGP applet: its data, PIN counters and signature counter were identical before and after. The driver uses PIV only; it never selects the OpenPGP applet ([card-slot-map.md](card-slot-map.md)). A `scdaemon` that holds the smart-card interface still locks the driver out, and the driver locks `scdaemon` out ([pcsc-and-cards-on-boards.md](pcsc-and-cards-on-boards.md)).
 
 ## One PIV slot, up close
 
 A slot is a numbered place for one private key. Four things belong to it.
 
-> *Figure (in ritueel's site): A slot holds one private key, an optional certificate, and two rules fixed at birth. Yubico, read 2026-11-10 (see Sources).*
-
-- **The private key** is generated on the card or imported, and can never be read out. A key born on a card has no copy.
+- **The private key** is generated on the card or imported, and can never be read out. A key born on a card has no copy. The driver only adopts keys that were generated on the card.
 - **Certificates:** all of them share about 50,000 bytes.
-- **The PIN rule and the touch rule** are chosen when the key is made or loaded and can never be changed after. "Once" means once per session: until the card is unplugged or another application is used. "Always" means the PIN is asked right before every use. "Cached" touch means a touch counts for 15 seconds.
-- **The kind of key:** sign, or agree on a shared secret (for decryption). P-256, P-384 and RSA-2048 are on every YubiKey 5. RSA-3072, RSA-4096, Ed25519 and X25519 need firmware 5.7 or later (ykman checks 5.7.0). Ed25519 signs the whole message.
+- **The PIN rule and the touch rule** are chosen when the key is made or loaded and can never be changed after. "Once" means once per session: until the card is unplugged or another application is used. "Always" means the PIN is asked right before every use. "Cached" touch means a touch counts for 15 seconds. The slot plan makes every key PIN once and touch never, except `pin-release` (PIN never, touch never), so a host can sign without a person at the card.
+- **The kind of key:** sign, or agree on a shared secret (for decryption). P-256, P-384 and RSA-2048 are on every YubiKey 5. RSA-3072, RSA-4096, Ed25519 and X25519 need firmware 5.7 or later (ykman checks 5.7.0). Ed25519 signs the whole message. The driver's plan uses P-384, P-256 and RSA-2048.
 
 | Slot | Standard name | Asks for the PIN by default | Note |
 |---|---|---|---|
 | 9a | authentication | once per session | Meant for signing in. |
 | 9c | digital signature | every time | Meant for signing as an authority. |
 | 9d | key management | once per session | Meant for decryption. |
-| 9e | card authentication | never | Signs with no PIN by default. Keep it empty unless that is wanted. |
-| 82 to 95 | retired key management (20 slots) | once per session | Extra slots, with no special meaning of their own. |
-| f9 | attestation | not applicable | The factory key that vouches for the others. Never replace it. |
+| 9e | card authentication | never | Signs with no PIN by default. The driver does not use it. |
+| 82 to 95 | retired key management (20 slots) | once per session | Extra slots, with no special meaning of their own. The driver uses them for the rest of its plan. |
+| f9 | attestation | not applicable | The factory key that vouches for the others. The driver never touches it. |
 
-The default only applies when a key is made without stating a rule. The numbers are hexadecimal: 82 to 95 is twenty slots.
+The default only applies when a key is made without stating a rule. The numbers are hexadecimal: 82 to 95 is twenty slots. Which purpose has which slot: [card-slot-map.md](card-slot-map.md).
+
+## PIN, PUK and management key
+
+- **PIN.** Three wrong PINs block it. The counters can be set from 1 to 255, for PIN and PUK together; setting them resets both to their defaults. The driver sends the PIN once, never retries, and sends none to a card with one attempt left; the PIN lives in locked memory ([slots-pin-touch.md](slots-pin-touch.md)).
+- **PUK.** It unblocks the PIN; three wrong PUKs block it. The driver never uses the PUK. A card that is blocked is for a person to recover.
+- **Management key.** It authorises writing slots. From firmware 5.7 it is AES-192 (3DES before), with the same octets. When it is stored PIN-protected (a convention of ykman and other tools, not a firmware feature), whoever knows the PIN can authenticate as manager and overwrite or delete any slot. The authority is all-or-nothing, not scoped per slot (Yubico PIV admin access page). The slots are one area of trust, not twenty-four. The driver uses the management key only to make a key in development.
+- **One PIN for all 24 slots.** That is why a host gives one driver the whole card.
 
 ## How a PIV signature happens
 
-> *Figure (in ritueel's site): The five steps of a PIV signature, the last one drawn as two. The PIN and the touch happen only if the slot's rule asks for them.*
+The card receives a digest (Ed25519: the whole message), checks the PIN and the touch if the slot's rule asks for them, and returns a signature. Three things follow:
 
-Three things follow:
-
-- The card sees a digest (Ed25519: the whole message). It cannot show what it signs, so trust the program that builds it.
+- The card cannot show what it signs, so the program that builds the digest must be trusted. The driver is that program, and its host decides who may call it.
 - A touch says that someone is at the card. It does not say which slot, or what for.
-- Only one program can hold the smart-card side at a time. A card that `gpg` is using is closed to a PIV tool, and the other way round.
+- Only one program can hold the smart-card side at a time. The driver connects exclusively; piv-go queues callers fairly and a second program makes the driver fail closed ([research/s4-piv-go-or-pkcs11.md](research/s4-piv-go-or-pkcs11.md), [research/yubikey-piv-speed-and-sharing-2026-11-13.md](research/yubikey-piv-speed-and-sharing-2026-11-13.md)).
 
-## The limits that shape a design
+## What the card can vouch for
 
-- **One PIN for all 24 slots.** When the management key is stored PIN-protected (a convention of ykman and other tools, not a firmware feature), whoever knows the PIN can authenticate as manager and overwrite or delete any slot. The management key authority is all-or-nothing, not scoped per slot (Yubico PIV admin access page). The slots are one area of trust, not twenty-four.
-- **A blocked card can lose everything.** Three wrong PINs block the PIN. The PUK unblocks it. If both are blocked, only a reset is left, and it deletes every key.
-- **Nothing can be changed after birth:** not the PIN rule, not the touch rule, not the firmware. Cards older than firmware 5.7 have a known weakness in ECDSA signing (CVE-2024-45678, Yubico advisory YSA-2024-03).
-- **No key leaves the card.** So two cards, each with a key born on it, hold two different keys.
-- **The card can vouch for a key.** For a key generated on it, the card issues a certificate that states: made on this card, with this serial, this firmware, this PIN rule and touch rule. Anyone can ask for it without the PIN. An imported key cannot get one.
-- **The card can describe itself.** From firmware 5.3 it reports, per slot, the kind of key, the rules, whether it was generated or imported, and the public key.
-- **One key can be deleted or moved** to another slot from firmware 5.7 (ykman checks 5.7.0). Before that, a slot could only be overwritten, or wiped by a PIV reset.
+- **Attestation.** For a key generated on it, the card issues a certificate that states: made on this card, with this serial, this firmware, this PIN rule and touch rule. Anyone can ask for it without the PIN. An imported key cannot get one. The driver verifies it against Yubico's roots for every key it adopts, and compares serial, slot, firmware and both policies with the plan. piv-go v2.6.0 does not embed the intermediate of cards made since August 2025, so the driver embeds the roots and intermediates itself.
+- **Metadata.** From firmware 5.3 the card reports, per slot, the kind of key, the rules, whether it was generated or imported, and the public key.
+- **Delete and move.** One key can be deleted or moved to another slot from firmware 5.7 (ykman checks 5.7.0). Before that, a slot could only be overwritten, or wiped by a PIV reset. The driver does neither.
+- **Nothing is changed after birth:** not the PIN rule, not the touch rule, not the firmware. Cards older than firmware 5.7 have a known weakness in ECDSA signing (CVE-2024-45678, Yubico advisory YSA-2024-03), which is why 5.7.0 is the driver's floor.
+- **No key leaves the card.** Two cards, each with a key born on it, hold two different keys.
+
+## What a reset does
+
+- **PIV reset.** Possible only when both the PIN and the PUK are blocked. It deletes the key in every slot. The driver never calls it. Measurements of what a reset puts back, and what "the card is clean" can prove, are in [research/yubikey-piv-pin-touch-and-reset-2026-11-13.md](research/yubikey-piv-pin-touch-and-reset-2026-11-13.md).
+- **Session reset.** A warm reset at the PC/SC layer ends the PIN verification and touches nothing else. The driver does it at start and exit so that a card another process left PIN-verified is never trusted ([restart-and-session-reset.md](restart-and-session-reset.md)).
+- **FIDO reset.** It needs no PIN: plug the card in, ask within about ten seconds, and touch. It removes the FIDO2 PIN and every passkey, and resets U2F too. The FIDO2 PIN is separate from the PIV PIN. FIDO2 locks after eight wrong PINs in a row (three need the card unplugged and plugged in again).
 
 ## The other two applications
 
-**OpenPGP.** Three keys and no more: sign, decrypt, authenticate. So one identity per card. `gpg`, `git` and SSH through `gpg-agent` use it directly, without a PKCS#11 module, which a key in a PIV slot needs. Each key has its own touch setting. A key made on the card can be vouched for, as in PIV. Kinds: RSA up to 4096, P-256, P-384, P-521, Ed25519 (to sign and authenticate) and X25519 (to decrypt).
+**OpenPGP.** Three keys and no more: sign, decrypt, authenticate. `gpg`, `git` and SSH through `gpg-agent` use it directly, without a PKCS#11 module, which a key in a PIV slot needs. Each key has its own touch setting. A key made on the card can be vouched for, as in PIV. Kinds: RSA up to 4096, P-256, P-384, P-521, Ed25519 (to sign and authenticate) and X25519 (to decrypt). The driver does not serve this applet.
 
-**FIDO2 (passkeys).** Passkeys have their own page: [How passkeys work](/learn/how-passkeys-work/).
-
-## What each place is good for
-
-| Job | Where | Why there |
-|---|---|---|
-| A root key (X.509 root or OpenPGP primary) | The bundle's row of the slot map: an X.509 root key slot and an OpenPGP primary slot; PIN always, touch always | The card can vouch for the key, and the rules hold at every use ([record 0003](../decisions/0003-root-cards.md)) |
-| Daily git signing and SSH sign-in | The OpenPGP application: a signing subkey and an authentication subkey | `gpg`, `git` and `ssh` use it without extra tools ([record 0008](../decisions/0008-a-persons-own-key.md)) |
-| Opening the key file of a software key | A passkey (the next page explains the kinds) of the kind the card does not keep, on each card named as a way to open the file | The holder types a PIN and touches the card. The file also has a recovery key, an age identity in a passphrase-protected file kept apart from the cards, so a lost card does not lock the file; a holder without cards uses a passphrase ([record 0002](../decisions/0002-where-a-key-lives.md), rules 19 to 22); decided, not yet proven; [how a passkey opens a key file](/learn/a-key-in-a-file/#a-passkey-that-opens-a-key-file) |
-
-All three are designs, not built tools. For the same question asked of a cloud key, read [how a KMS key works](/learn/how-a-kms-key-works/).
-
-Next: [how passkeys work](/learn/how-passkeys-work/).
+**FIDO2.** Passkeys for web sign-in. They are outside the key port.
 
 ## Sources
 

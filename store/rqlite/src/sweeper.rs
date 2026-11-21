@@ -1,9 +1,9 @@
-//! The sweeper (store/docs/item-port.md "Time to live"): on rqlite's leader only, it frees the space of expired items
+//! The sweeper (store/docs/store-port.md "Time to live"): on rqlite's leader only, it frees the space of expired items
 //! and trims the change log. Correctness never depends on it: a read checks the expiry itself.
 //!
-//! An item with no `expires_at` is never swept, which is what a lease or a session record relies on (store/docs/item-port.md "Time to live").
+//! An item with no `expires_at` is never swept, which is what a lease or a session record relies on (store/docs/store-port.md "Time to live").
 //! An item that was written with a log row leaves a delete row when it is swept, so a watcher sees
-//! its expiry as a delete (store/docs/item-port.md "The change log"); the read hid it from the expiry on.
+//! its expiry as a delete (store/docs/store-port.md "The change log"); the read hid it from the expiry on.
 
 use std::time::Duration;
 

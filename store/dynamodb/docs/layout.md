@@ -1,6 +1,6 @@
-# How the item port maps to DynamoDB
+# How the store port maps to DynamoDB
 
-The driver ([README](../README.md)) keeps the items of the [item port](../../docs/item-port.md) in one DynamoDB table. This page says the table, how each call maps, what the driver does not offer, and the limits it adds to the contract. The research behind the choices is in [research/dynamodb-as-an-item-store-2026-11-19.md](research/dynamodb-as-an-item-store-2026-11-19.md).
+The driver ([README](../README.md)) keeps the items of the [store port](../../docs/store-port.md) in one DynamoDB table. This page says the table, how each call maps, what the driver does not offer, and the limits it adds to the contract. The research behind the choices is in [research/dynamodb-as-an-item-store-2026-11-19.md](research/dynamodb-as-an-item-store-2026-11-19.md).
 
 ## The table
 
@@ -46,7 +46,7 @@ One table, on-demand billing, no secondary index, two binary key attributes.
 
 The driver keeps none. `Capabilities` says `tail_log: false`, `TailLog` answers `unimplemented`, `QueryResponse.log_head` and `log_epoch` are 0, and a put or a delete with `log: true` is refused with `unimplemented` (reason `log`, field `puts[i].log` or `deletes[i].log`) and writes nothing: a driver that accepted the flag and wrote no row would lose the change without a word. The kit skips the cases that need the log and runs `no_log_is_refused` instead.
 
-Why: the contract's log is ordered by a sequence, has an epoch, is trimmed by a floor, and writes the row in the transaction of the change; DynamoDB Streams has no global order (it is ordered per shard), keeps records for a bounded time, delivers the records of one transaction at different times, and records a time-to-live deletion as a service delete that a log would have to turn into a row. An in-table log (a counter item that every logged write raises, rows with a time to live) is possible and is the road to take if a consumer needs `TailLog` here; it would make every logged write contend on the counter. Decide it with its consumer ([research](research/dynamodb-as-an-item-store-2026-11-19.md)).
+Why: the contract's log is ordered by a sequence, has an epoch, is trimmed by a floor, and writes the row in the transaction of the change; DynamoDB Streams has no global order (it is ordered per shard), keeps records for a bounded time, delivers the records of one transaction at different times, and records a time-to-live deletion as a service delete that a log would have to turn into a row. An in-table log (a counter item that every logged write raises, rows with a time to live) is possible and is the road to take if a consumer needs `TailLog` here; it would make every logged write contend on the counter. The road is taken when a consumer needs `TailLog` here ([research](research/dynamodb-as-an-item-store-2026-11-19.md)).
 
 ## Limits the driver adds to the contract
 
@@ -73,7 +73,7 @@ The consumer sets every timestamp. `exp` is compared with the driver's clock at 
 
 | Code | Reason | When |
 | --- | --- | --- |
-| as the item port | | the refusals of [the item port](../../docs/item-port.md) |
+| as the store port | | the refusals of [the store port](../../docs/store-port.md) |
 | `unimplemented` | `log` | a put or a delete asked for a log row |
 | `invalid_argument` | `batch` | more writes, or a longer value, than this engine takes; a request DynamoDB refuses as malformed (the journal says which) |
 | `unavailable` | `engine` | DynamoDB throttles, times out, is not reachable, or the driver may not use the table; a `Transact` that lost its race eight times |

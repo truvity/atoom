@@ -1,4 +1,4 @@
-# The continuous integration of atoom (decision 0004, docs/plan.md step 0). It judges pull requests and master, and never publishes.
+# The continuous integration of atoom (decision 0004, docs/archive/extraction-plan.md step 0). It judges pull requests and master, and never publishes.
 #
 # `check` is the one aggregate job and the required status check of the repository: it fails when any other job fails, is cancelled or
 # is skipped, so that adding a job here (or a library to the matrix) needs no change in the branch rules.

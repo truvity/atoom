@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# The rehearsal of the release flow (docs/plan.md, step 0 acceptance): `just release-prepare`, `just release-tag --dry-run`, its
+# The rehearsal of the release flow (docs/archive/extraction-plan.md, step 0 acceptance): `just release-prepare`, `just release-tag --dry-run`, its
 # refusals, the consumption check as a listing, and the isolation check on a deliberately wrong dependency, on a throw-away copy of
 # the working tree with fixture libraries (fixture, fixture/software, fixture/awskms: a port and two drivers, named so as not to meet a real library) added. It makes
 # no tag in this repository, pushes nothing and needs no network.

@@ -1,5 +1,5 @@
 version: v2
-# One module per port, listed explicitly (docs/plan.md, section 5): a port's contract is <port>/proto/atoom/<port>/v1alpha1/*.proto.
+# One module per port, listed explicitly (docs/archive/extraction-plan.md, section 5): a port's contract is <port>/proto/atoom/<port>/v1alpha1/*.proto.
 # The generated code of a port is committed next to it (<port>/gen), made by <port>/buf.gen.yaml (`just gen`).
 modules:
   - path: blob/proto
@@ -31,7 +31,7 @@ lint:
     ENUM_VALUE_PREFIX:
       - source/proto/atoom/source/v1alpha1/source.proto
 # `just proto-breaking` compares with the last release; while the contracts are v1alpha1 they may break, and the PR carries the
-# `breaking:<library>` label (docs/plan.md, section 8).
+# `breaking:<library>` label (docs/archive/extraction-plan.md, section 8).
 breaking:
   use:
     - FILE

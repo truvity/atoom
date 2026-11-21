@@ -49,7 +49,7 @@ func (fake) Get(_ context.Context, req *connect.Request[blobv1alpha1.BlobGetRequ
 }
 
 // A Go consumer mounts a driver's handler on an in-memory server and calls it through the client, which is how a library is linked in
-// process (docs/plan.md, section 1).
+// process (docs/archive/extraction-plan.md, section 1).
 func TestTheClientCallsTheHandler(t *testing.T) {
 	mux := http.NewServeMux()
 	mux.Handle(blobv1alpha1connect.NewBlobServiceHandler(fake{}))

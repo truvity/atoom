@@ -1,46 +1,41 @@
 # A key in a file
 
-*Copied from [truvity/ritueel](https://github.com/truvity/ritueel) `main` at commit `a569f9366c0bef69e376db2ae25db8808336a875`, file `docs/learn/a-key-in-a-file.mdx`, with the site markup removed (the front matter became the title, the figures are left out). ritueel keeps its copy until it is restarted. Links that start with a slash point to ritueel's own site and are not part of this repository.*
+What a key in a file is, what it is good for, and how it could be protected.
 
-*Design phase: ritueel is in design and has no release ([roadmap](/roadmap/)); nothing on this page is built, and the picture shows the design, not a program. What the page says about ritueel is what [record 0002](../decisions/0002-where-a-key-lives.md) says. The facts about passkeys were read on 2026-11-11 and nothing was measured on a card.*
-
-This page assumes you know what a key pair is ([keys from zero](/learn/what-is-a-root/#keys-from-zero)) and what a passkey is ([how passkeys work](/learn/how-passkeys-work/)).
+This page assumes you know what a key pair is: a private key that signs or agrees on a secret, and a public key that others use to check the result.
 
 ## What a key file is
 
-A key file is a file that holds a private key, encrypted with age, a small file-encryption format. The key is generated in memory and written straight into the file, never to a plain file on disk. A test root is the one exception. It has no passphrase, so its files are plain and marked TEST ONLY. No real root shares a trust set with it. The encrypted file is the default home of a software key ([record 0002](../decisions/0002-where-a-key-lives.md), rules 4, 9 and 11; [record 0005](../decisions/0005-a-ceremony-and-where-it-runs.md), rule 26).
+A key file is a file that holds a private key. The `key/software` driver keeps one PKCS#8 file for each purpose in a state directory that only the driver's user can reach ([the software store](software-store.md) has the files and the rules). The key is generated in memory and written straight into the file.
 
-A key file is a copy by nature. It can be copied and read without a trace, it gives no evidence of where it lives, and a backup of it is another copy, which is exactly the danger.
+A key file is a copy by nature. It can be copied and read without a trace. It gives no evidence of where it lives, and a backup of it is another copy, which is exactly the danger. A hardware token or a cloud key service can say where a key was made; a file cannot ([what a store can prove](../../docs/what-a-store-can-prove.md)).
 
 ## What it is for
 
-A key file is the home of drills, tests and development, and of a person's own OpenPGP primary, kept offline. No root that others rely on lives in a key file, and a software root never anchors a signed release. A key that can be copied is replaced after three years at the latest ([record 0002](../decisions/0002-where-a-key-lives.md), rules 7, 8, 11 and 15).
+A key file is the home of development, tests, CI and a local installation. The volume is the boundary, and the people and programs that can read it are the ones trusted with the key.
 
-## How a key file is opened
+It is not for a key that others rely on and that must be tied to one place. For that use a store that cannot be copied: [a YubiKey or a cloud key](../../docs/key-stores.md). Whether the driver may run in production at all is a choice of the host: it can turn the [production floor](software-store.md#the-production-floor) on.
 
-Two kinds of key file exist. A key file for a holder with root cards has two ways in: a passkey on each root card named for the file, any one of which is enough, and a recovery key kept apart from the cards ([record 0002](../decisions/0002-where-a-key-lives.md), rules 19, 20 and 21). A key file for a holder without cards is opened by a passphrase alone, and it holds only the passphrase recipient, because age v1 requires such a recipient to be the only one ([record 0002](../decisions/0002-where-a-key-lives.md), rule 22). So one file never has both a passkey and a passphrase. [Question 4 of "Choosing where a root lives"](/learn/choosing-where-a-root-lives/#4-how-will-the-key-file-be-opened) says when to use which. The rest of this page follows the file for root cards, which is the default.
+## How a key file could be protected
 
-## A passkey that opens a key file
+The driver today does not protect the file beyond its mode and the volume. These are the ways that are known. They are candidates, not built, and the facts come from the research pages.
 
-This is the use that ritueel's design rests on ([record 0002](../decisions/0002-where-a-key-lives.md)). There is no site and no signature. A program, not a browser, talks to the card over USB, and asks it for the secret of a passkey (see "A secret from a passkey" under [Passkeys in brief](/learn/how-passkeys-work/#passkeys-in-brief)).
+- **A passphrase, through age.** age is a small file-encryption format. A file can be locked to several recipients, each of which can open it alone, and a passphrase is one kind of recipient (scrypt). The age specification says that an scrypt stanza, if present, must be the only stanza in the header, so a passphrase file has only that recipient (age v1, read 2026-11-11; [research](research/age-or-jwe-for-the-key-file-2026-11-13.md)).
+- **A secret held by a hardware token.** A FIDO2 token with the `hmac-secret` extension returns a secret that only that token can compute. Other programs use it to unlock a file or a volume: `systemd-cryptenroll` accepts FIDO2 tokens "that implement the 'hmac-secret' extension" to unlock a disk volume, and an age plug-in reuses a passkey on a hardware token outside the browser (age project note, published 2025-07-14). The secret does not open the file directly. It can unwrap a second key, so that locking a new file needs no token. Nothing was measured on a card for this page.
+- **Another store as the home of the key.** A password manager or the operating system's key store can hold the bytes between runs. What each protects against is in [software key backends](research/software-key-backends-2026-11-01.md).
 
-ritueel locks key files with age, a small file-encryption format. A file can be locked to several recipients, each of which can open it alone. The key file has two: an **unlock key** and a recovery key. The private half of the unlock key is wrapped, and a passkey on each card named as a way to open the file unwraps it. Any one of those cards is enough, and a file may name more than two. The secret is not used on the file itself. It unwraps a second key, the unlock key, so that locking a new file needs no card.
+Each way trades a risk for another. A passphrase can be guessed, and a copy of the file is still a copy that an attacker can try against. A token protects against a copied file and fails when the token is lost.
 
-> *Figure (in ritueel's site): A passkey on a root card opens a key file. There is no site and no signature. Decided in [record 0002](../decisions/0002-where-a-key-lives.md), not yet proven.*
+## What a reset or a loss means
 
-The passkey is of the [second kind](/learn/how-passkeys-work/#passkeys-in-brief), so a key handle has to be given to the card; where it is kept is not decided. The record says the unlock key's private half is in memory at each unlock.
-
-Writing a new key file needs no card, because the public half of the unlock key is a recipient. Browsers can do the same with the same standard, which they call PRF. ritueel does not unlock in its browser page, which runs on your own machine, because the browser would hand the secret to the page's script.
-
-Other programs already use the extension this way. `systemd-cryptenroll` accepts FIDO2 tokens "that implement the ‘hmac-secret’ extension" to unlock a disk volume (systemd documentation). The age project's note describes a plug-in that reuses a passkey on a hardware token outside the browser, and a stanza that holds the file key wrapped with a key derived from the PRF output (published 2025-07-14). ritueel's own way (PIN and touch over USB from a static binary) is the part still to be proven.
-
-**Decided, not yet proven.** [record 0002](../decisions/0002-where-a-key-lives.md) and [record 0007](../decisions/0007-changing-and-losing-a-root.md) word it so: a passkey secret with PIN and touch over USB from a static binary, and the offline system reaching the card's passkey side, are tried on a rehearsal card before anything is built (milestone M1). If the proof fails, a key-agreement key in PIV slot 9d of each root card opens the file instead, and nothing else in record 0002 changes. This page does not give the format of the wrapped key.
-
-**What the passkey does not remove.** A reset ends every passkey on the card, so the key file must also open another way. The record keeps a recovery key for this. If you lose the recovery key and every card named to open the file, the key files cannot be opened. Without its key handle a card cannot rebuild the passkey, so the key handle is as important as the card; where it is kept is not decided.
+- **A reset of a token ends its secret.** A FIDO reset removes every passkey on the card, and a token that cannot rebuild a secret (without its key handle, for a passkey of the kind that stores nothing on the card) cannot open the file again. A key file that a token opens needs another way in, such as a passphrase file kept apart.
+- **A lost way in is a lost file.** If every way to open a protected key file is lost, the key is lost.
+- **A lost state directory is a new key.** The driver makes a key when `Ensure` finds none, so a driver started on an empty directory makes a new key with a new public key. Whoever relied on the old public key has to learn the new one.
 
 ## Sources
 
 Read 2026-11-11.
 
-- The age project, [Encrypting Files with Passkeys and age](https://words.filippo.io/passkey-encryption/) (published 2025-07-14), read 2026-11-11: a token that returns the credential's state in the credential id, and an age plug-in that reuses a passkey on a hardware token outside the browser.
-- systemd, [systemd-cryptenroll](https://www.freedesktop.org/software/systemd/man/latest/systemd-cryptenroll.html), read 2026-11-11: FIDO2 tokens with the hmac-secret extension.
+- The age project, [Encrypting Files with Passkeys and age](https://words.filippo.io/passkey-encryption/) (published 2025-07-14): a token that returns the credential's state in the credential id, and an age plug-in that reuses a passkey on a hardware token outside the browser.
+- systemd, [systemd-cryptenroll](https://www.freedesktop.org/software/systemd/man/latest/systemd-cryptenroll.html): FIDO2 tokens with the hmac-secret extension.
+- age, [age v1](https://age-encryption.org/v1): the scrypt stanza.

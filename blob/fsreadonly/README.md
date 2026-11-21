@@ -9,9 +9,9 @@ The read-only fs driver of the [blob port](../docs/blob-port.md): `Get` and `Lis
 | Guard flags | `--allow-uid UID` (repeatable; without it only this process's uid may call), `--allow-any-uid`, `--socket-gid GID`, `--socket-mode MODE` (`--owner-uid` is the owner of the directory, not a caller: it is not the guard): the [socket guard](../../docs/socket-guard.md) |
 | Feature | `cli` (default): the flags and the socket (`clap`, `atoom-socket`, `tracing-subscriber`). A consumer that mounts `router()` in a host of its own turns the default features off |
 
-How the directory works is in [../fsdir/docs/fsdir.md](../fsdir/docs/fsdir.md); what this driver adds is in [docs/fsreadonly.md](docs/fsreadonly.md). Where the code came from is in [../PROVENANCE.md](../PROVENANCE.md).
+How the directory works is in [../fsdir/docs/fsdir.md](../fsdir/docs/fsdir.md); what this driver adds is in [docs/fsreadonly.md](docs/fsreadonly.md). Where the code came from is in [provenance](../../docs/provenance.md#blob).
 
-It does not require `blob/fs`: both build on the shared library `blob/fsdir`, so that no driver requires another (the isolation check, `docs/plan.md` section 5).
+It does not require `blob/fs`: both build on the shared library `blob/fsdir`, so that no driver requires another (the isolation check, [architecture](../../docs/architecture.md#dependency-rules)).
 
 The macOS jobs of CI leave this crate out (`[package.metadata.atoom] os = ["linux"]`; `tools/scripts/rust-skip.sh`), and say so in their log.
 

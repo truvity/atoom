@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# `just release-prepare X.Y.Z`: the release PR's change (docs/plan.md, "Library release flow", step 2).
+# `just release-prepare X.Y.Z`: the release PR's change (docs/archive/extraction-plan.md, "Library release flow", step 2).
 #
 #   tools/release/prepare.sh [--allow-dirty] X.Y.Z
 #

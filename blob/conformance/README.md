@@ -16,6 +16,6 @@ target/debug/blob-fs serve --socket /tmp/blob.sock --root /tmp/blob-root &
 target/debug/blob-conformance --socket /tmp/blob.sock
 ```
 
-`just conformance` (CI runs it on Linux, on every architecture) builds the kit once and runs it against the thin main of both drivers in this repository (`tools/scripts/conformance-blob.sh`). The cases and what they fix beyond the contract's comments are in [docs/suite.md](docs/suite.md). The kit has a test of its own that a driver that is wrong in each way the suite looks for fails the case that looks for it. Where the code came from is in [../PROVENANCE.md](../PROVENANCE.md).
+`just conformance` (CI runs it on Linux, on every architecture) builds the kit once and runs it against the thin main of both drivers in this repository (`tools/scripts/conformance-blob.sh`). The cases and what they fix beyond the contract's comments are in [docs/suite.md](docs/suite.md). The kit has a test of its own that a driver that is wrong in each way the suite looks for fails the case that looks for it. Where the code came from is in [provenance](../../docs/provenance.md#blob).
 
 Dependencies: the port ([`atoom-blob`](../README.md)), [`atoom-common`](../../common/README.md) for the refusal helper, [`atoom-socket`](../../socket/README.md) for the client, and `clap`, `tokio` and `anyhow`.

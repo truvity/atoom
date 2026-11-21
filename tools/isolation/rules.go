@@ -15,7 +15,7 @@ const modulePrefix = "github.com/truvity/atoom/"
 const cratePrefix = "atoom-"
 
 // portExternal lists what a port (a library one level below the root) may require besides atoom libraries: the ConnectRPC and
-// Protobuf runtimes and what their generated code needs, and nothing else (docs/plan.md, section 5). A driver may require its own backend
+// Protobuf runtimes and what their generated code needs, and nothing else (docs/archive/extraction-plan.md, section 5). A driver may require its own backend
 // SDK, so it is not listed.
 var portExternal = map[string]map[string]bool{
 	"go": {

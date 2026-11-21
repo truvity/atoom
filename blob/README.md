@@ -1,6 +1,6 @@
 # blob
 
-The blob port: a store of named objects with a write-once create and a conditional overwrite of a pointer. It is what a transparency log keeps its tiles and its checkpoint in. As a ConnectRPC contract (`atoom.blob.v1alpha1.BlobService`: `Create`, `Put`, `Get`, `List`), its stubs in Go and Rust, its documentation, and a conformance kit.
+The blob port: a store of named objects with a write-once create and a conditional overwrite of a pointer. It suits an append-only log that keeps immutable tiles and a pointer at its head. As a ConnectRPC contract (`atoom.blob.v1alpha1.BlobService`: `Create`, `Put`, `Get`, `List`), its stubs in Go and Rust, its documentation, and a conformance kit.
 
 | | Go | Rust |
 | --- | --- | --- |
@@ -8,7 +8,7 @@ The blob port: a store of named objects with a write-once create and a condition
 | Conformance kit | the binary below runs against any driver | crate [`atoom-blob-conformance`](conformance/README.md), binary `blob-conformance --socket PATH [--read-only --present PATH --bytes FILE]` |
 | Drivers | none in Go | [`atoom-blob-fs`](fs/README.md) (a local directory), [`atoom-blob-fsreadonly`](fsreadonly/README.md) (the same directory, read only); both are built on the shared library [`atoom-blob-fsdir`](fsdir/README.md) |
 
-The contract is [proto/atoom/blob/v1alpha1/blob.proto](proto/atoom/blob/v1alpha1/blob.proto). Its rules in prose are in [docs/blob-port.md](docs/blob-port.md). Where the code came from is in [PROVENANCE.md](PROVENANCE.md).
+The contract is [proto/atoom/blob/v1alpha1/blob.proto](proto/atoom/blob/v1alpha1/blob.proto). Its rules in prose are in [docs/blob-port.md](docs/blob-port.md). Where the code came from is in [provenance](../docs/provenance.md#blob).
 
 A Go consumer links a driver in process by mounting its `blobv1alpha1connect` handler on an in-memory transport, or dials one that serves on a socket; a Rust consumer registers the driver's `router()` on its own server, or runs the thin main as a sidecar.
 

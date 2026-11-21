@@ -1,5 +1,5 @@
 //! The item-port suite: the cases every engine behind `atoom.store.v1alpha1.ItemService` must
-//! pass (docs/item-port.md "The contract" and "The command line and the suite").
+//! pass (docs/store-port.md "The contract" and "The command line and the suite").
 //!
 //! The suite speaks the contract and nothing else, over a client the caller dials. It writes under
 //! a prefix of its own, `conformance-<run>/`, and removes what it wrote at the end, so it can run
@@ -966,7 +966,7 @@ impl Suite {
         Ok(())
     }
 
-    /// A query that asks for `linearizable` sees every write that was acknowledged before it (docs/item-port.md "The
+    /// A query that asks for `linearizable` sees every write that was acknowledged before it (docs/store-port.md "The
     /// contract"): after each of fifty acknowledged writes the listing holds all of them, in order. An engine that
     /// cannot answer at that level refuses the query; one that answers must have this property, whatever it does for
     /// a query that does not ask. (A one-node cluster cannot tell the two levels apart, so this case holds an engine
@@ -1197,7 +1197,7 @@ impl Suite {
         }
     }
 
-    /// The epoch of the change log (docs/item-port.md "The contract"): every query names one, never 0, the same one while
+    /// The epoch of the change log (docs/store-port.md "The contract"): every query names one, never 0, the same one while
     /// the log lasts; a position is only good under it. A tail from a sequence the log holds is given under that epoch and
     /// refused under any other, an absent one (0) included, because after a restore or a reset the same number names
     /// another position. From "now" there is no position to mistake, and the epoch is not looked at. (That a log made

@@ -9,7 +9,7 @@ The dir driver of the [destination port](../docs/destination-port.md): the desti
 | Guard flags | `--allow-uid UID` (repeatable; without it only this process's uid may call), `--allow-any-uid`, `--socket-gid GID`, `--socket-mode MODE`: the [socket guard](../../docs/socket-guard.md) |
 | Feature | `cli` (default): the flags and the socket (`clap`, `atoom-socket`, `tracing-subscriber`). A consumer that mounts the router in a host of its own turns the default features off |
 
-How it works is in [docs/dir.md](docs/dir.md). Where the code came from is in [../PROVENANCE.md](../PROVENANCE.md).
+How it works is in [docs/dir.md](docs/dir.md). Where the code came from is in [provenance](../../docs/provenance.md#destination).
 
 A host with a guard of its own (peer credentials, an owner check, its own command line) does not use the thin main: it opens the `Directory`, registers the router on its own server, and may call `suite::run_temp()` from a `conformance` command of its own. That is the seam: the driver knows nothing of who calls it.
 

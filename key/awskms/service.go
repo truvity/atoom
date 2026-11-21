@@ -16,7 +16,7 @@ import (
 	keyv1alpha1 "github.com/truvity/atoom/key/gen/atoom/key/v1alpha1"
 )
 
-// The reasons of the refusals of the port (a closed list; docs/contract.md of the key port).
+// The reasons of the refusals of the port (a closed list; docs/key-port.md of the key port).
 const (
 	reasonPurpose   = "purpose"
 	reasonAlgorithm = "algorithm"

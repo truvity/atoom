@@ -9,7 +9,7 @@ The spool driver of the [transport port](../docs/transport-port.md): the transpo
 | Guard flags | `--allow-uid UID` (repeatable; without it only this process's uid may call), `--allow-any-uid`, `--socket-gid GID`, `--socket-mode MODE` (the group and the mode are for both sockets; `--allow-uid` is for the emit socket), and `--receive-allow-uid UID` for the callers of the receive socket (the callers of `--allow-uid` when it is not given): the [socket guard](../../docs/socket-guard.md) |
 | Feature | `cli` (default): the flags and the sockets (`clap`, `atoom-socket`, `tracing-subscriber`). A consumer that mounts the routers in a host of its own turns the default features off |
 
-How it works is in [docs/spool.md](docs/spool.md). Where the code came from is in [../PROVENANCE.md](../PROVENANCE.md).
+How it works is in [docs/spool.md](docs/spool.md). Where the code came from is in [provenance](../../docs/provenance.md#transport).
 
 **The seam: who the emitter is.** The library knows nothing of who calls it. `Emit` asks an `Identify` function (`Fn(&RequestContext) -> Option<String>`) for the name of the caller of each emit, and refuses the call (`permission_denied`/`caller`) when it answers `None`. The thin main gives every message the one `--emitter` name; with `--emitter-name UID=NAME` it names the caller from the peer credentials of the socket (the guard hands the peer to `Identify`), as `NAME@EMITTER`, and a caller it did not name as `uid<N>@EMITTER`. A host that tells its emitters apart in another way (sluis, until its hosts are deleted: as `<actor>@<boundary>`, from its registry) mounts `Emit::new(spool, identify).router()` behind its own guard, and `Consume(spool).router()` on a socket of its own that only the consumer may reach.
 

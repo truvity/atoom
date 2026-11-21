@@ -16,6 +16,6 @@ target/debug/index-sqlite serve --socket /tmp/index.sock --read-socket /tmp/inde
 target/debug/index-conformance --socket /tmp/index.sock --read-socket /tmp/index-ro.sock
 ```
 
-`just conformance` (CI runs it on every architecture) builds the kit once and runs it against the thin main of the sqlite driver (`tools/scripts/conformance-index.sh`). The cases and what they fix beyond the contract's comments are in [docs/suite.md](docs/suite.md). The kit has a test of its own that a driver that is wrong in each way the suite looks for fails the case that looks for it. Where the code came from is in [../PROVENANCE.md](../PROVENANCE.md).
+`just conformance` (CI runs it on every architecture) builds the kit once and runs it against the thin main of the sqlite driver (`tools/scripts/conformance-index.sh`). The cases and what they fix beyond the contract's comments are in [docs/suite.md](docs/suite.md). The kit has a test of its own that a driver that is wrong in each way the suite looks for fails the case that looks for it. Where the code came from is in [provenance](../../docs/provenance.md#index).
 
 Dependencies: the port ([`atoom-index`](../README.md)), [`atoom-common`](../../common/README.md) for the refusal helper, [`atoom-socket`](../../socket/README.md) for the client, `buffa` for the message fields, and `clap`, `tokio` and `anyhow`.

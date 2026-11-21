@@ -1,31 +1,32 @@
-# The kinds of card (ritueel's design)
+# Cards
 
-*Copied from [truvity/ritueel](https://github.com/truvity/ritueel) `main` at commit `a569f9366c0bef69e376db2ae25db8808336a875`, file `docs/how-it-works/cards.mdx`, with the site markup removed (the front matter became the title, the figures are left out). ritueel keeps its copy until it is restarted. Links that start with a slash point to ritueel's own site and are not part of this repository.*
+What the `key/yubikeypiv` driver needs from a card, what a card in use looks like, and what the driver never does to it.
 
-ritueel is in its design phase: only [a part is built](/reference/cli/#built-so-far), and the pictures show how its cards are designed to be used ([how a YubiKey holds keys](/learn/how-a-yubikey-holds-keys/)). A fourth kind, the rehearsal card, is for practice and tests: it never holds a real key and may be reset.
+## What the driver needs
 
-## Root card
+- **A YubiKey 5 with the PIV application.** The driver talks PIV over PC/SC, through piv-go and pcsc-lite ([README](../README.md)). Other devices are not served; see [which-keys-to-buy.md](which-keys-to-buy.md) for what was tried.
+- **Firmware 5.7.0 or newer.** The floor fixes the EUCLEAK flaw in ECDSA signing (Yubico advisory YSA-2024-03) and adds Ed25519 in PIV. The driver refuses a card below it, both by what the card reports and by what the attestation of each key reports (`FirmwareFloor` in `plan.go`).
+- **One card for each host.** A host runs one driver and the driver holds one card, exclusively. It opens the one reader it is told to open (`--reader`), and outside development it checks the card's serial against the one it was given (`--serial`). Which reader it opens is in [the README](../README.md#which-card-it-opens).
+- **PIV slots from the slot plan.** Each purpose has a slot, an algorithm, and a policy for PIN and touch. Keys are PIN once and touch never, except the `pin-release` key in slot `87`, which is PIN never. The rows the driver serves are in `plan.go`; the whole map and the reasons are in [card-slot-map.md](card-slot-map.md) and [slots-pin-touch.md](slots-pin-touch.md). Slot `9e` is not used, because it signs without a PIN by default, and slot `f9` (the Yubico attestation key) is never touched.
+- **Keys born on the card.** The driver adopts a key only after it checks the key's attestation against Yubico's roots. It refuses an imported key and a key whose policy is not the plan's.
+- **A PC/SC stack that it alone uses.** `pcscd`, a CCID driver and `libpcsclite` ([runtime-dependencies.md](runtime-dependencies.md), [pcsc-and-cards-on-boards.md](pcsc-and-cards-on-boards.md)). Any other program that holds the card makes the driver fail closed.
 
-A root card holds keys of roots, and a few jobs of its own: row 1, and the passkey that opens a key file ([record 0003](../decisions/0003-root-cards.md), [record 0002](../decisions/0002-where-a-key-lives.md)). You keep two root cards. Each makes its own keys; they are never copies. A root has key A on one card and key B on the other, so if one is lost the other still holds a key of each root; the bundle names here are made up.
+## A card in use
 
-A root card may be used on your own workstation, under four conditions: a touch for every signature, the number of signatures stated in the plan, no retry of a failed touch, and the result checked against the plan on a second device. It may also be used in the offline system, which stays available ([record 0005](../decisions/0005-a-ceremony-and-where-it-runs.md)).
+A card that a host uses holds its keys in the slots of the plan and nothing else the driver cares about. It starts locked: the driver has no PIN until an administrator delivers it on the admin socket, and a key that needs the PIN is refused with the reason `locked` until then. The card keeps its PIN, PUK and management key as they were set when it was provisioned. A person who looks at it with a PIV tool sees keys in the slots of the plan that its host has enabled (`9a`, `9d` and `82` to `88`, and `9c` when the host turns the certificate on), each with an attestation certificate, and an untouched `f9`.
 
-> *Figure (in ritueel's site): Six rows of four PIV slots. Row 1 is the card’s own jobs; each other row holds the keys of one bundle, the same key kind in each column. A break-glass key is an SSH CA key that ritueel holds offline.*
+## What the driver never does
 
-One pair of cards serves up to four bundles. Each card has one PIN, one PUK and one management key, for all the bundles on it. Each bundle has its own card files and its own sealed copy of the card’s secrets. A second bundle gets its copy by a request to the first bundle, which wraps the secrets for it. A row that belongs to another bundle is declared in the card’s file in the bundle ([record 0003](../decisions/0003-root-cards.md)).
+- **It holds no root.** A root key is not a key of this driver. A root that certifies the keys of a card lives outside the driver and outside the card the driver holds.
+- **It never resets the card.** It never calls piv-go's `Reset`, which blocks the PIN and the PUK and wipes every key. What it does at start and exit is a reset of the card's *session* (a warm reset at the PC/SC layer): the card forgets a PIN verification, and no key, PIN, PUK, management key or counter changes ([restart-and-session-reset.md](restart-and-session-reset.md)).
+- **It never changes a PIN, a PUK or a management key**, never uses the PUK, never deletes or moves a key, and never retries a wrong PIN. It sends a PIN once, and not at all to a card with one attempt left.
+- **It makes a key only in development**, with the factory management key. A staging or production card is provisioned by its owners, and the driver only adopts and verifies what it finds.
 
-> *Figure (in ritueel's site): Two bundles on one pair of root cards. Each keeps its own card files and its own sealed copy of the card’s secrets.*
+## A card for tests and a card for production
 
-A key file opens with a passkey on each root card named for it (a file may name more than two): the passkey unlocks the key, and a recovery key is kept apart in case the cards are lost. Each bundle has its own unlock key and its own recovery key. This is decided and not yet proven on hardware; if the proof fails, the spare key in 9d is the way ([record 0002](../decisions/0002-where-a-key-lives.md)).
+The difference that matters to the driver is the environment it is started in.
 
-## Day-to-day card
+- **A test card** is in factory state (PIN `123456`, PUK `12345678`, the default management key) and can be thrown away. In `development` the driver makes the keys of the plan on it. `just card-bench` runs the driver and the key conformance kit against such a card. Its rules, and what it writes to the card, are in [bench.md](bench.md). The keys stay on the card, and the next run adopts them.
+- **A production card** (and a staging card) is provisioned before the driver sees it, with its own PIN, PUK and management key. The driver is started with the card's serial, makes no key, and refuses a card whose keys do not verify. Never run the bench on such a card.
 
-A day-to-day card carries a person’s own subkeys and passkeys. Signing and authentication keys are born on each card; the decryption key is made in software, so a lost card does not lose the mail it decrypted ([record 0008](../decisions/0008-a-persons-own-key.md)).
-
-> *Figure (in ritueel's site): One day-to-day card holds one set of OpenPGP subkeys and your passkeys, and nothing in PIV. A second card gets its own set.*
-
-## Server card
-
-A server card stays plugged into a server of a requester system, such as [sluis](https://github.com/truvity/sluis), and signs for its services. ritueel lists it and only ever reads it ([record 0003](../decisions/0003-root-cards.md)).
-
-> *Figure (in ritueel's site): The slots follow the requester’s own plan, here sluis’s; another requester’s plan will differ. The root signs the intermediate key in 9c; the rest are the requester’s own keys. Source: [sluis key registry](https://sluis.id/reference/keys/#board-slot-plan), its own heading “Board slot plan”, read 2026-11-11; same text in truvity/sluis, branch main, docs/reference/keys.md, commit bc1b3729b840c8d4ea0309db4b420d0182c83ad9.*
+A card goes from one use to the other only by being reset and provisioned again with a tool outside the driver. What a reset does is in [how-a-yubikey-holds-keys.md](how-a-yubikey-holds-keys.md#what-a-reset-does).

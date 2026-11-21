@@ -8,7 +8,7 @@ The destination port: where a published document goes. A destination writes a do
 | Conformance kit | the binary below runs against any driver | crate [`atoom-destination-conformance`](conformance/README.md): the suite, the ConnectRPC service of any `Destination` (the trait and the client are the port crate's, re-exported here), the in-memory reference driver, `sha256_hex`; binaries `destination-conformance --socket PATH [--public-base URL] [--edge]` and `destination-memory` |
 | Drivers | none in Go | [`atoom-destination-dir`](dir/README.md) (a local directory that a forwarder serves), and the reference driver `destination-memory` of the kit |
 
-The contract is [proto/atoom/destination/v1alpha1/destination.proto](proto/atoom/destination/v1alpha1/destination.proto). Its rules in prose are in [docs/destination-port.md](docs/destination-port.md). Where the code came from is in [PROVENANCE.md](PROVENANCE.md).
+The contract is [proto/atoom/destination/v1alpha1/destination.proto](proto/atoom/destination/v1alpha1/destination.proto). Its rules in prose are in [docs/destination-port.md](docs/destination-port.md). Where the code came from is in [provenance](../docs/provenance.md#destination).
 
 A Go consumer links a driver in process by mounting its `destinationv1alpha1connect` handler on an in-memory transport, or dials one that serves on a socket; a Rust consumer registers the driver's `router()` on its own server, or runs the thin main as a sidecar.
 

@@ -56,7 +56,7 @@ func (read) Search(_ context.Context, req *connect.Request[indexv1alpha1.SearchR
 }
 
 // A Go consumer mounts a driver's handlers on an in-memory server and calls them through the clients, which is how a library is linked
-// in process (docs/plan.md, section 1). The two sides are two services, so a host can put them on two servers.
+// in process (docs/archive/extraction-plan.md, section 1). The two sides are two services, so a host can put them on two servers.
 func TestTheClientsCallTheHandlers(t *testing.T) {
 	mux := http.NewServeMux()
 	mux.Handle(indexv1alpha1connect.NewIndexServiceHandler(write{}))

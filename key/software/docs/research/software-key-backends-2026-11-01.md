@@ -1,27 +1,27 @@
-# Software key backends, 1Password and the OS keyring (2026-11-01)
+# Where a software key could live besides a file: 1Password and the OS key store (2026-11-01)
 
-*Copied from [truvity/ritueel](https://github.com/truvity/ritueel) `main` at commit `a569f9366c0bef69e376db2ae25db8808336a875`, file `docs/research/software-key-backends-2026-11-01.md`, with the site markup removed (the front matter became the title, the figures are left out). ritueel keeps its copy until it is restarted. Links that start with a slash point to ritueel's own site and are not part of this repository.*
+Research for the `key/software` driver: how a password manager (1Password) and the operating system's key store hold a secret, what each protects against, and what that means if the driver ever keeps a key somewhere other than a file.
 
 ## Question
 
-Where may a software key live between ceremonies, if not in a file on one disk: in 1Password, or in the operating system's keyring? What does each protect against, what does each cost, and what must ritueel do about it? It feeds [ADR 0003](https://github.com/truvity/ritueel/blob/d0ae12da2432d5ae95cf95d68fb85ba3dda6cfee/docs/decisions/0003-key-stores-and-the-card-layer.md#the-software-store) (now [record 0002](../decisions/0002-where-a-key-lives.md), rules 7, 8 and 10 to 13) and [the software store](../reference/software-store.md).
+Where may a software key live between runs, if not in a file on one disk: in 1Password, or in the operating system's key store? What does each protect against, what does each cost, and what would a driver have to do about it? The driver today keeps PKCS#8 files ([the software store](../software-store.md)).
 
 ## When
 
 Read on 2026-11-01. The rows marked *rechecked* were read again on 2026-11-02, against the document or the source and not a summary.
 
-## Verdict
+## Finding
 
-**1Password through its `op` command line, for the keys of test roots, intermediates and subkeys; the keyring only with a warning, for a throwaway key.** `op` takes a JSON item template on standard input, so a key never reaches disk or a command line, and it needs no CGO and no pre-1.0 library. The Go SDK's desktop sign-in needs CGO on Linux and macOS, and its service accounts cannot reach personal vaults. Neither store is a place for a root that others rely on: whoever unlocks the vault, or any program of the user once the keyring is unlocked, can read the key.
+**1Password through its `op` command line can take a key without the key touching a disk or a command line; the OS key store is the weakest of the three homes (file, 1Password, key store).** `op` takes a JSON item template on standard input, and it needs no CGO and no pre-1.0 library. The Go SDK's desktop sign-in needs CGO on Linux and macOS, and its service accounts cannot reach personal vaults. Neither store is a place for a key that others rely on: whoever unlocks the vault, or any program of the user once the key store is unlocked, can read the key.
 
 ## Method
 
-Read the vendor documents and the library source named below. Nothing was written to a vault or a keyring. The facts about what a program of the same user can do are the vendors' own statements, not tests.
+Read the vendor documents and the library source named below. Nothing was written to a vault or a key store. The facts about what a program of the same user can do are the vendors' own statements, not tests.
 
 ## What the setup over- and under-counts
 
-- No vault or keyring was exercised, so size limits are the documented ones, not measured; they are measured by the tests of [issue #59](https://github.com/truvity/ritueel/issues/59) and [issue #60](https://github.com/truvity/ritueel/issues/60) before either backend is called supported.
-- macOS and Windows keyring behaviour was read from source only.
+- No vault or key store was exercised, so size limits are the documented ones, not measured.
+- macOS and Windows key store behaviour was read from source only.
 
 ## Numbers
 
@@ -39,33 +39,30 @@ Read the vendor documents and the library source named below. Nothing was writte
 | Removing a member of a shared vault does not change its keys; recovery needs the account password and the Secret Key, which 1Password cannot recover. | The 1Password security white paper, dated 2024-12-10, sections 1 and 10. | READ |
 | Per-item and per-field size limits. | No official figure found. | UNVERIFIED |
 
-### The operating system keyring (`github.com/zalando/go-keyring`)
+### The operating system key store (`github.com/zalando/go-keyring`)
 
 | Fact | Source | Label |
 |---|---|---|
 | The latest tag is v0.2.8 (2026-03-23). | GitHub, 2026-11-01. | READ |
 | On Linux it uses the Secret Service over the D-Bus session bus, and opens the session with `"plain"`, so the secret crosses the bus unencrypted. | `secret_service/secret_service.go`, master (*rechecked* 2026-11-02). | READ |
 | Size: on macOS the combination of service, user and secret "should not exceed ~3000 bytes"; on Windows the password is limited to 2560 bytes; on Linux there is no limit but "performance suffers with big values (>100KiB)". | The `ErrSetDataTooBig` comment in `keyring.go` and `keyring_windows.go` (*rechecked*). | READ |
-| Without a D-Bus session bus there is no keyring on Linux: the library fails to find one. | `godbus` source, 2026-11-01. | READ |
+| Without a D-Bus session bus there is no key store on Linux: the library fails to find one. | `godbus` source, 2026-11-01. | READ |
 | Whether another program of the same user can read an entry without a prompt. | Linux: any program on the session bus can use the Secret Service API of an unlocked collection (secondary sources). macOS and Windows: not confirmed from an authoritative source. | READ for Linux; UNVERIFIED for macOS and Windows |
 
-An armoured OpenPGP secret key is about 1 KB and a P-384 PKCS#8 key under 200 bytes, so all three limits are above them.
+A P-384 PKCS#8 key is under 200 bytes and an RSA-2048 PKCS#8 key about 1220 bytes, the two kinds the driver keeps, so all three limits are above them.
 
-## Roads not taken
+## Other routes read
 
 - **The 1Password Go SDK.** In-process, but a version 0 with breaking changes allowed between minors, and a sign-in that needs CGO or a service account that cannot reach personal vaults.
 - **An SSH Key item for the key.** The native type, but it refuses P-384.
 - **A Document item with the key as a file.** Fits any key, but `op` attaches a file by path, so the key would be written to disk first.
 - **The Connect server.** Self-hosted, but it cannot create the item types needed and its file endpoints only read.
-- **The keyring as the default.** No account, but it is the weakest store, so it is offered with a warning and not chosen for the person ([ADR 0007](https://github.com/truvity/ritueel/blob/d0ae12da2432d5ae95cf95d68fb85ba3dda6cfee/docs/decisions/0007-ritueel-teaches-and-its-tools-simplify-the-ceremonies.md#software-keys-three-backends-all-born-in-the-store), now rule 13 of [record 0002](../decisions/0002-where-a-key-lives.md)).
 
-## Open questions
+## What it means for key/software
 
-None.
+Both are candidates, not built. A driver that kept its key in 1Password would give a lost disk no loss of the key, and would add nothing against compromise: the vault syncs between devices, so the sync is redundancy against loss, not against theft. A driver that kept its key in the OS key store would add no account and no file, and would be readable by any program of the same user once the store is unlocked, with no copy: a dead disk is a dead key. Neither is a place for a key that others rely on. The password-manager route would use `op` and never the SDK, for the reasons in the table above. The way to protect the file itself is in [Age or JWE for the key file](age-or-jwe-for-the-key-file-2026-11-13.md) and [A key in a file](../a-key-in-a-file.md).
 
-## Changes made
-
-None.
+Open: whether either home is wanted, and the size limits on each platform, which would be measured before any use.
 
 ## Raw logs
 

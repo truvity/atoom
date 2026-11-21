@@ -1,6 +1,6 @@
 # index
 
-The index port: a search index of audit records. A **write side** keeps, for each log, the cursor of the last checkpoint that was verified and indexed, and takes the rows of a batch together with the next cursor in one step; a **read side** searches. As a ConnectRPC contract (`atoom.index.v1alpha1`: `IndexService` with `GetCursor` and `Apply`, `IndexReadService` with `Search`), its stubs in Go and Rust, its documentation, and a conformance kit.
+The index port: a search index of the records of an append-only log. A **write side** keeps, for each log, the cursor of the last checkpoint that was verified and indexed, and takes the rows of a batch together with the next cursor in one step; a **read side** searches. As a ConnectRPC contract (`atoom.index.v1alpha1`: `IndexService` with `GetCursor` and `Apply`, `IndexReadService` with `Search`), its stubs in Go and Rust, its documentation, and a conformance kit.
 
 | | Go | Rust |
 | --- | --- | --- |
@@ -8,7 +8,7 @@ The index port: a search index of audit records. A **write side** keeps, for eac
 | Conformance kit | the binary below runs against any driver | crate [`atoom-index-conformance`](conformance/README.md), binary `index-conformance --socket PATH --read-socket PATH` |
 | Drivers | none in Go | [`atoom-index-sqlite`](sqlite/README.md) (one SQLite file with FTS5) |
 
-The contract is [proto/atoom/index/v1alpha1/index.proto](proto/atoom/index/v1alpha1/index.proto). Its rules in prose are in [docs/index-port.md](docs/index-port.md). Where the code came from is in [PROVENANCE.md](PROVENANCE.md).
+The contract is [proto/atoom/index/v1alpha1/index.proto](proto/atoom/index/v1alpha1/index.proto). Its rules in prose are in [docs/index-port.md](docs/index-port.md). Where the code came from is in [provenance](../docs/provenance.md#index).
 
 A Go consumer links a driver in process by mounting its `indexv1alpha1connect` handlers on an in-memory transport, or dials one that serves on a socket; a Rust consumer registers the driver's `router()` of each side on its own server, or runs the thin main as a sidecar.
 

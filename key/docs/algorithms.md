@@ -1,92 +1,72 @@
-# Algorithms and what each is for
+# Algorithms
 
-*Copied from [truvity/sluis](https://github.com/truvity/sluis) `main` at commit `3f0afea8773b3d85205a5fb7d521282bbdcff598`, file `docs/reference/keys.md` (the sections Algorithms and Purposes per algorithm). The text stays there as it is (decision records are append-only); sluis links here for the card behaviour. Names such as `key@` are sluis's key service, the first consumer of this driver; the links that point into sluis's own pages are not part of this repository.*
+The algorithms the key port names, which driver supports which, the formats of what they take and return, and the timings that were measured.
 
-## Algorithms
+## The algorithms of the contract
 
-The FIPS-approved set is the default; an exception says why ([algorithms](/decisions/0006-keys-and-sealing/#algorithms), [named exceptions](/decisions/0006-keys-and-sealing/#named-exceptions)).
+The contract names four algorithms. The three drivers ([`key/software`](../software/README.md), [`key/yubikeypiv`](../yubikeypiv/README.md), [`key/awskms`](../awskms/README.md)) support all four, and each says so in `Capabilities`.
 
-| Algorithm | Family | Curve | Status | Purposes | Note |
+| Algorithm | What it is | `Sign` takes | The answer is | KMS key spec (`awskms`) |
+|---|---|---|---|---|
+| `ES384` | ECDSA over P-384 with SHA-384 (RFC 7518, section 3.4) | a SHA-384 digest, 48 octets | the signature, ASN.1 DER | `ECC_NIST_P384`, `ECDSA_SHA_384` |
+| `ES256` | ECDSA over P-256 with SHA-256 (RFC 7518, section 3.4) | a SHA-256 digest, 32 octets | the signature, ASN.1 DER | `ECC_NIST_P256`, `ECDSA_SHA_256` |
+| `RS256` | RSASSA-PKCS1-v1_5 over SHA-256 with an RSA-2048 key and the public exponent 65537 (RFC 7518, section 3.3) | a SHA-256 digest, 32 octets | the signature as the octet string of RFC 8017, section 8.2.1: 256 octets, no DER form | `RSA_2048`, `RSASSA_PKCS1_V1_5_SHA_256` |
+| `ECDH-P384` | ECDH over P-384 (NIST SP 800-56A), no `Sign` | the peer's public key, SEC1 uncompressed, in `Ecdh` | the raw shared secret, with no key-derivation function | `ECC_NIST_P384`, key usage `KEY_AGREEMENT` |
+
+- A key is made inside the store, never leaves it, and keeps its algorithm for life. `Ensure` with another algorithm than the key has is refused, and a key is never replaced.
+- `Sign` takes a digest, not a message. A digest of another length is refused (`invalid_argument`, reason `digest`). The refusals are in the [contract](key-port.md).
+- A public key is returned as SubjectPublicKeyInfo in DER.
+- Each driver checks a peer's point before it uses it. A point that is not on P-384 is refused (`peer_public`).
+- The software driver generates RSA keys with Go's `crypto/rsa`. The card makes the RSA key on the card. KMS makes it in KMS.
+
+## Algorithms the contract does not name
+
+A host may want more than the four. The contract has no call for them and no driver serves them.
+
+| Algorithm | What is known |
+|---|---|
+| `PS256` (RSASSA-PSS) | It is the same RSA operation on a card as `RS256`, which takes about 0.17 s on a YubiKey 5 with firmware 5.8 (measured, see below). PS256 itself was not measured, so expect about that. |
+| `EdDSA` (Ed25519) | Ed25519 in PIV needs firmware 5.7 or newer. Ed25519 and X25519 worked on a card with firmware 5.8.0, with attestation ([speed and sharing research](../yubikeypiv/docs/research/yubikey-piv-speed-and-sharing-2026-11-13.md)). KMS has `ECC_NIST_EDWARDS25519`. |
+| `ML-DSA-44` | A signature format that the C2SP tlog-cosignature specification allows for witnesses. Nothing here holds such a key. |
+| AES-256-GCM, HMAC-SHA384 | Symmetric operations. The key port has no call for them: a host does them with its own library, under data keys that it wraps (for example by `Ecdh`). |
+
+## What each driver holds, today
+
+The purposes of the code are a closed list today, and each purpose has one algorithm. The port is meant to take any purpose that a host declares. That change is planned and not built. Purposes belong to the host (in atoom, to the `seal` block that uses the keys), so the table below is what the drivers hold now and not a list that the port prescribes.
+
+| Class | Purposes held today | Algorithm | `software` | `yubikeypiv` | `awskms` |
 |---|---|---|---|---|---|
-| [`ES384`](#es384) | signature | P-384 | default | [`token-signing`](#token-signing), [`x509-intermediate`](#x509-intermediate), [`ssh-user`](#ssh-user), [`ssh-host`](#ssh-host), [`issuance-log`](#issuance-log), [`release-signing`](#release-signing), [`workload-issuer`](#workload-issuer), [`pin-release`](#pin-release) | ECDSA over P-384 with SHA-384, the default of everything sluis signs for itself, the checkpoints of the issuance log included. The audit checkpoints are the one exception (ES256). |
-| [`ECDH-P-384`](#ecdh-p-384) | key-agreement | P-384 | default | [`enrolment`](#enrolment) | ECDH over P-384 with HKDF-SHA384 and AES key wrap; the wrap of a data key on a board, the wrap of a backup archive key for each board and for the backup recovery key, and the HPKE enrolment key. |
-| [`AES-256-GCM`](#aes-256-gcm) | aead | — | default | [`wrapping`](#wrapping), [`backup-archive`](#backup-archive) | The nonce comes from the cryptographic library. On AWS the symmetric key of the cloud key service; in software the data keys and the encryption of a backup archive. |
-| `HMAC-SHA384` | mac | — | default | — | The keyed hash behind key's Mac: pseudonyms, link ids and the hashed index entries of sealed kinds. |
-| [`PS256`](#ps256) | signature | — | exception | [`token-signing-ps256`](#token-signing-ps256) | FAPI 2.0. A dedicated key; PS256 on a card was not measured; it is the same RSA operation as RS256, which takes about 0.17 s on a YubiKey 5 with firmware 5.8 (measured 2026-11-08), so expect about that. |
-| [`ES256`](#es256) | signature | P-256 | exception | [`audit-log`](#audit-log), [`audit-log-second`](#audit-log-second), [`token-signing-es256`](#token-signing-es256) | FAPI 2.0, cloud federation for GCP and the checkpoints of the audit logs (ECDSA over P-256 with SHA-256, the C2SP signature type 0x02 that generic witnesses verify). A dedicated key. |
-| [`EdDSA`](#eddsa) | signature | Ed25519 | exception | [`witness`](#witness), [`token-signing-eddsa`](#token-signing-eddsa), [`nats`](#nats) | FAPI 2.0, the NATS keys (nkeys fix Ed25519) and the C2SP witness keys. A dedicated key per purpose; Ed25519 in PIV needs firmware 5.7. |
-| [`RS256`](#rs256) | signature | — | exception | [`token-signing-rs256`](#token-signing-rs256) | RSA-2048: an audience configured to need RS256, and cloud federation for Azure Entra. A dedicated key; published beside the EC keys. |
-| `ML-DSA-44` | signature | — | exception | — | A witness format that the C2SP tlog-cosignature specification allows; a witness key authorises nothing. |
+| Signing | `token-signing`, `x509-intermediate`, `ssh-user`, `ssh-host`, `workload-issuer`, `release-signing` | `ES384` | yes | yes, PIN once, touch never | yes |
+| Signing | `issuance-log` | `ES384` | yes | no (no row in the card's plan) | yes |
+| Signing | `audit-log` | `ES256` | yes | yes, P-256, PIN once, touch never | yes |
+| Signing | `token-signing-rs256` | `RS256` | yes | yes, RSA-2048, PIN once, touch never; optional | yes |
+| Key agreement | `wrapping` | `ECDH-P384` | yes | yes, PIN once, touch never | yes |
+| Signing of the PIN release | `pin-release` | `ES384` | yes, but it holds no PIN and refuses the release calls | yes, PIN never, touch never | no (a KMS key has no PIN) |
 
+- **Optional on the card.** A card whose slot for `token-signing-rs256` holds a key that is not the plan's still starts, with that purpose absent. Every other key of the plan refuses the start.
+- **The card's slots** are in the [slot plan](../slotplan/docs/slot-plan.md). The software driver holds each key in a file and ignores slots.
+- **`pin-release`** signs only the texts of the PIN release, which the driver writes itself. The card driver's `Sign` refuses its purpose ([pinrelease](../pinrelease/docs/README.md)).
 
-## Purposes per algorithm
+## Timings
 
-One key per purpose and algorithm, never shared across purposes ([key purposes](/decisions/0006-keys-and-sealing/#key-purposes)).
+These were measured on a YubiKey 5 (firmware 5.8) through the card driver. They are the cost of the card, not of the host.
 
-### ES384
+| What | Value | Measured |
+|---|---|---|
+| One RSA-2048 signature (`RS256`) | median 173 ms of 50 | 2026-11-08 |
+| One P-384 signature (`ES384`), same card | 148 ms | 2026-11-08 |
+| One P-384 signature, raw card with piv-go | median 147.9 ms (slot 9c), 6.8 a second | 2026-10-30 |
+| One P-256 signature, raw card with piv-go | median 80.9 ms, 12.4 a second | 2026-10-30 |
+| One ECDH P-384, raw card with piv-go | median 144.5 ms, 6.9 a second | 2026-10-30 |
+| One P-384 signature through the driver | 161 to 166 ms, median of 50 on each of three boards, about 6 a second | 2026-11-04 |
 
-ECDSA over P-384 with SHA-384, the default of everything sluis signs for itself, the checkpoints of the issuance log included. The audit checkpoints are the one exception (ES256).
+The driver adds piv-go's command handling, one connect call and a check of each signature with the public key. [The speed and sharing research](../yubikeypiv/docs/research/yubikey-piv-speed-and-sharing-2026-11-13.md) has the method of the other runs.
 
-| Purpose | Kind | Ops | AWS key | Board | Used by | Notes |
-|---|---|---|---|---|---|---|
-| <a id="token-signing"></a>`token-signing` | signing | `sign`, `public-key` | `ECC_NIST_P384`, one per boundary | slot `9a` | [`signer`](/reference/actors/#signer) | Signs tokens. Its certificate is a non-CA certificate that allows digital signatures only, issued by the node's intermediate when the installation turns the token certificate on (off in the core, decision X1 A); the published key set then carries the x5c chain. Never the intermediate itself. |
-| <a id="x509-intermediate"></a>`x509-intermediate` | signing | `sign`, `public-key`, `certify` | `ECC_NIST_P384`, one per trust domain | slot `9c` | [`ca`](/reference/actors/#ca) | The X.509 intermediate of a trust domain, certified by a root that root custody holds; sluis holds intermediates only. The core needs none: the key is generated only when the PKI add-on turns the token certificate on (decision X1 A of 2026-11-18). |
-| <a id="ssh-user"></a>`ssh-user` | signing | `sign`, `public-key` | `ECC_NIST_P384`, one per boundary | slot `82` | [`ssh-ca`](/reference/actors/#ssh-ca) | The SSH user certificate authority. |
-| <a id="ssh-host"></a>`ssh-host` | signing | `sign`, `public-key` | `ECC_NIST_P384`, one per boundary | slot `83` | [`ssh-ca`](/reference/actors/#ssh-ca) | The SSH host certificate authority. |
-| <a id="issuance-log"></a>`issuance-log` | signing | `sign`, `public-key` | `ECC_NIST_P384`, one per boundary | slot `89` | [`writer`](/reference/actors/#writer) | Signs the checkpoints of the issuance log, a third log kind of the audit writer; ca emits the entries. |
-| <a id="release-signing"></a>`release-signing` | signing | `sign`, `public-key` | `ECC_NIST_P384`, one per boundary | slot `85` | [`signer`](/reference/actors/#signer) | The OpenPGP release subkey, reached through key; in the release boundary only. The primary's certification of the subkey is the kind OpenPgpBinding. |
-| <a id="workload-issuer"></a>`workload-issuer` | signing | `sign`, `public-key` | `ECC_NIST_P384`, one per boundary | slot `86`; on bare-metal | [`sluis-node`](/reference/actors/#sluis-node) | Boards only. Signs the workload tokens of the node's actors, through key; never shared with token-signing, because its callers and its blast radius differ. |
-| <a id="pin-release"></a>`pin-release` | signing | `sign`, `public-key` | `ECC_NIST_P384`, one per boundary | slot `87`; on bare-metal | [`key`](/reference/actors/#key) | Boards only. The locked key signs its PinReleaseRequest with it, and the unlocked peer's key signs its PinRelease answer. The slot is generated with PIN policy never and touch policy never, so it signs while the board is locked, and the KeyPlan's slot map records its public key and attestation. Each side verifies the other's signature with the key of the slot map, after its own card driver verified the slot's attestation, before the PIN is sealed or opened. Used for nothing else. |
+An RSA signature holds the card for about 0.17 s, and the driver holds one conversation with the card at a time. So:
 
-### ECDH-P-384
+- The card driver admits four `RS256` signatures at once (the option `RSAQueue`, default `RSAQueueDefault` = 4) and signs them one at a time. It refuses the rest at once as `busy`, without touching the card.
+- A call of another key (an `ES384` signature, an `Ecdh`) waits for about one to two RSA signatures. One sample took up to 0.47 s. The bound is the four admitted, about 0.7 s.
+- A caller that is cancelled while its signature is queued keeps its place until the signature gets the lock, at most about 0.7 s, so a fifth request that comes meanwhile can be refused as `busy`.
+- The host decides how many `RS256` signatures it lets through. A host that wants no `busy` refusals holds its own limit at or below `RSAQueueDefault`. A host such as sluis limits the purpose to 2 a second with a burst of 4, so that the card keeps a third of its time for other keys.
 
-ECDH over P-384 with HKDF-SHA384 and AES key wrap; the wrap of a data key on a board, the wrap of a backup archive key for each board and for the backup recovery key, and the HPKE enrolment key.
-
-| Purpose | Kind | Ops | AWS key | Board | Used by | Notes |
-|---|---|---|---|---|---|---|
-| <a id="enrolment"></a>`enrolment` | key-agreement | `open`, `public-key` | `ECC_NIST_P384`, one per boundary | slot `8a` | [`exchange`](/reference/actors/#exchange) | The HPKE key that a host's enrolment request is sealed to. |
-
-### AES-256-GCM
-
-The nonce comes from the cryptographic library. On AWS the symmetric key of the cloud key service; in software the data keys and the encryption of a backup archive.
-
-| Purpose | Kind | Ops | AWS key | Board | Used by | Notes |
-|---|---|---|---|---|---|---|
-| <a id="wrapping"></a>`wrapping` | wrapping | `wrap`, `unwrap`, `public-key` | `SYMMETRIC_DEFAULT`, one per boundary | slot `9d`; algorithm `ECDH-P-384` | [`key`](/reference/actors/#key) | Protects the data keys. On AWS the boundary's one symmetric key, with the encryption context {boundary, tenant, purpose}. On a board the key-agreement key in slot 9d; a data key is wrapped for it and for the backup recovery key. Grants use the boundary data key `grant`, not this key. |
-| <a id="backup-archive"></a>`backup-archive` | wrapping | `wrap`, `unwrap` | `SYMMETRIC_DEFAULT`, one per boundary | no slot; algorithm `ECDH-P-384` | [`exporter`](/reference/actors/#exporter), [`store`](/reference/actors/#store) | The key of a backup archive: the tar is encrypted as a whole with AES-256-GCM under a key made for that archive, enabled on use. On AWS key calls GenerateDataKey for exporter under a dedicated KMS key that may live in another account and whose policy lets only the restore role decrypt; exporter encrypts the tar and writes the wrapped copy in the archive header, and the restore of store opens it. On a board exporter wraps the archive key by ECDH P-384 with public keys only, for the key-agreement keys named in the plan and for the backup recovery key; the restore asks key for the card's ECDH. No card slot of its own. |
-
-### PS256
-
-FAPI 2.0. A dedicated key; PS256 on a card was not measured; it is the same RSA operation as RS256, which takes about 0.17 s on a YubiKey 5 with firmware 5.8 (measured 2026-11-08), so expect about that.
-
-| Purpose | Kind | Ops | AWS key | Board | Used by | Notes |
-|---|---|---|---|---|---|---|
-| <a id="token-signing-ps256"></a>`token-signing-ps256` | signing | `sign`, `public-key` | `RSA_2048`, one per boundary | slot `8b` | [`signer`](/reference/actors/#signer) | Tokens for a client that declares the FAPI 2.0 profile with PS256. |
-
-### ES256
-
-FAPI 2.0, cloud federation for GCP and the checkpoints of the audit logs (ECDSA over P-256 with SHA-256, the C2SP signature type 0x02 that generic witnesses verify). A dedicated key.
-
-| Purpose | Kind | Ops | AWS key | Board | Used by | Notes |
-|---|---|---|---|---|---|---|
-| <a id="audit-log"></a>`audit-log` | signing | `sign`, `public-key` | `ECC_NIST_P256`, one per writer instance | slot `84` | [`writer`](/reference/actors/#writer) | Signs the checkpoints of a project's audit log and usage log with ECDSA over P-256 and SHA-256 (KMS ECDSA_SHA_256), the standard C2SP signed note, so that a generic witness verifies it. One key per writer instance (one per project, and per node on boards); only that writer may use it. |
-| <a id="audit-log-second"></a>`audit-log-second` | signing | `sign`, `public-key` | `ECC_NIST_P256`, one per writer instance | slot `8f`; on bare-metal | [`writer`](/reference/actors/#writer) | Boards only. The log key of a second audit writer instance on a node's card, which holds the first one's key in slot 84 as `audit-log`: P-256, signing the checkpoints of that instance's audit log and usage log like `audit-log`, and used only by that instance. On AWS a second writer instance has a key of its own under `audit-log` and needs no purpose of this name. A third instance has no pinned slot: it is named in the KeyPlan with a slot of the rotation spares. |
-| <a id="token-signing-es256"></a>`token-signing-es256` | signing | `sign`, `public-key` | `ECC_NIST_P256`, one per boundary | slot `8c` | [`signer`](/reference/actors/#signer) | Tokens for FAPI 2.0 with ES256, and workload tokens for a GCP federation. On a board the key of slot 8c is the FAPI key; the key of a GCP federation is a key of the key service and never a card key. |
-
-### EdDSA
-
-FAPI 2.0, the NATS keys (nkeys fix Ed25519) and the C2SP witness keys. A dedicated key per purpose; Ed25519 in PIV needs firmware 5.7.
-
-| Purpose | Kind | Ops | AWS key | Board | Used by | Notes |
-|---|---|---|---|---|---|---|
-| <a id="witness"></a>`witness` | signing | `sign`, `public-key` | `ECC_NIST_EDWARDS25519`, one per boundary | slot `8e` | [`witness`](/reference/actors/#witness) | The key of the witness, in the format the cosignature specification requires (Ed25519, or ML-DSA-44 where the witness uses that). The witness signs its cosignatures through key, like every other signer; on a board the Ed25519 key sits in slot 8e. |
-| <a id="token-signing-eddsa"></a>`token-signing-eddsa` | signing | `sign`, `public-key` | `ECC_NIST_EDWARDS25519`, one per boundary | slot `8d` | [`signer`](/reference/actors/#signer) | Tokens for FAPI 2.0 with EdDSA. On a board an Ed25519 key in slot 8d, which needs firmware 5.7. |
-| <a id="nats"></a>`nats` | signing | `sign`, `public-key` | `ECC_NIST_EDWARDS25519`, one per boundary | no slot | `adapter-<vendor>` | The NATS operator, signing and account keys: one Ed25519 key per purpose, used only by the adapter that mints NATS credentials. Never a card key: the keys of NATS live in the key service, outside the board installation. |
-
-### RS256
-
-RSA-2048: an audience configured to need RS256, and cloud federation for Azure Entra. A dedicated key; published beside the EC keys.
-
-| Purpose | Kind | Ops | AWS key | Board | Used by | Notes |
-|---|---|---|---|---|---|---|
-| <a id="token-signing-rs256"></a>`token-signing-rs256` | signing | `sign`, `public-key` | `RSA_2048`, one per boundary | slot `88` | [`signer`](/reference/actors/#signer) | The ID tokens of an audience that declares `signing_alg: RS256` (its access tokens stay ES384), and workload tokens for an Azure Entra federation. The audience, not the caller, decides. The key set carries no `x5c` for it. On a board the key is an RSA-2048 key in slot 88 (a fixed row of the default map; it serves the audiences, and the key of an Azure federation is a key of the key service, never a card key), PIN once and touch never, born on the card and attested like the others. One private-key operation of the card takes about 0.17 s and holds the card meanwhile (measured 2026-11-08 on a YubiKey 5 with firmware 5.8: median 173 ms, an ES384 signature 148 ms), so the card driver admits four at once (the burst), signs them one at a time and refuses the rest as busy (a call of another key waits for about one to two RSA signatures, up to 0.47 s in one sample; the bound is the four admitted, about 0.7 s), and key@ limits the purpose more tightly on a card than on a software store: one bucket for the purpose, a burst of 4 and 2 signatures a second (a third of the card), shared by every RS256 audience of the board, so a flood of sign-ins to one RS256 audience also refuses the ID tokens of the others (ES384 audiences are not affected). Both refusals reach signer as a failed call, and signer answers its caller with a refusal that it audits as `signer.refused`; key@ audits its own limit refusal (reason `rate`), and a `busy` of the driver is a counted refusal of key@ with the reason `busy` (and a line of the driver's journal once a minute with a count). A key in slot 88 that is not the plan's leaves the purpose absent and does not stop the driver. The software driver holds the key in a file and ignores the slot. Discovery and the key set are built from the ring, and signer reads the KeyPlan: for up to the cache of the key set (5 s), and for the hour of grace after a KeyPlan stops listing the purpose, discovery may list RS256 while signer already refuses it. That is the safe direction (a relying party is told of a key that is there and gets a refusal, never a token of another algorithm). The first RS256 key of an installation that has served for a while, and the first of each further board, is published for the lead time before it signs, like any new key. signer keeps the time a KeyPlan has omitted the purpose in memory: a restart of signer begins its hour of grace again, and the key stays in the ring and the key set meanwhile, with nothing signing with it. |
+The software driver and `awskms` were not timed. The AWS KMS quotas that bound `awskms` are in [its research page](../awskms/docs/research/aws-kms-as-a-key-store-2026-11-19.md).

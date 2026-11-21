@@ -4,7 +4,7 @@
 
 Two kinds of source use the one contract:
 
-- **A config source** returns a signed configuration document by the name of its kind (`boundary`, `upstream`). The caller checks the signature; the driver returns the bytes. A config source may be watched.
+- **A config source** returns a document, often a signed one, by its name. The caller checks the signature; the driver returns the bytes. A config source may be watched.
 - **A secret source** returns the value of a named secret. The caller keeps it in memory; a driver never writes it to disk, a log line or an error, and its version label is never a hash of the value.
 
 The port has three calls:
@@ -20,7 +20,12 @@ The port has three calls:
 - **A name** is a string the source's backend can hold: a kebab-case document name for the file driver, a credential name for the credential driver. A name that cannot leave the backend (empty, with a `/`, a `..`, a NUL) is never served.
 - **`Read`** returns the bytes exactly as the backend holds them, and the **version label**: a string, not a number (a file's digest, a credential's modification time and inode, an AppConfig version). The label is the same for the same content and moves when the content does.
 - **`if_none_match`** is the label the caller holds. A read at that label is answered `unchanged: true`, with no bytes and the same label; a read at any other label, or at none, gets the bytes. A caller that holds a label asks again cheaply.
-- **`Capabilities.watch`** says how a caller learns that a newer version exists:
+
+## Capabilities
+
+`Capabilities` says how a caller learns that a newer version of a name exists (`watch`). A caller asks once, at start.
+
+- **`watch`** is one of:
   - `NONE`: never. `Watch` is `unimplemented`. A credential cannot change under a running service; a Lambda layer cannot either.
   - `NOTIFY`: the driver pushes. `Watch` is a stream of `(name, version)`: it says nothing while nothing changes, and says the new label (the empty label for a name that went away) when the content changes. The first look sets what the watcher already holds without telling it: a watcher asks for the version it holds with `Read`, and `Watch` says what changed after it began.
   - `POLL`: the caller asks again. Every `Read` says in `poll_after` when. No driver in this repository polls yet.
@@ -44,13 +49,14 @@ Every refusal is a Connect error with the `Refusal` detail of [common](../../com
 | --- | --- | --- | --- |
 | [source/file](../file/README.md) | a directory of `<name>.jws` documents | `NOTIFY` | a host with its signed configuration in a directory, or a mounted ConfigMap |
 | [source/credential](../credential/README.md) | systemd credentials (`$CREDENTIALS_DIRECTORY`) or a directory of them | `NONE` | a service that gets its secrets from systemd |
-| `source/appconfig`, `source/ssm` | AWS AppConfig, SSM Parameter Store | `POLL`, `NONE` | named in sluis's design; not in this repository yet |
+| `source/file` in Go | the same directory, linked into a Go process | `NOTIFY` | a Go consumer that reads its documents in-process (planned, step B2) |
+| `source/appconfig`, `source/ssm` | AWS AppConfig, SSM Parameter Store | `POLL`, `NONE` | Lambda and Kubernetes (planned, step B9) |
 
-Both drivers are Linux only (they open files with `openat2`), and say so in their manifests; the macOS jobs of CI leave them out.
+Both built drivers are Linux only (they open files with `openat2`), and say so in their manifests; the macOS jobs of CI leave them out.
 
-## Every call carries the deadline and the correlation id
+## The call context
 
-Every call of the port carries what is left of the caller's deadline (`Connect-Timeout-Ms`) and the correlation id of the request (`Sluis-Correlation-Id`, 1 to 64 characters of letters, digits, `-` and `_`), and the thin main of every driver reads both and hands them to its handler, which hands them down to the calls it makes. A callee never extends its caller's deadline, and an id of another shape is dropped. A client of the source port: `SourceServiceClient`, Rust over `atoom_socket::dial`, Go `sourcev1alpha1connect.NewSourceServiceClient(hc, url, call.ClientOptions()...)`. `Watch` carries them too. The rules and how a caller outside a handler states them are on [the call context](../../docs/call-context.md).
+Every call carries the deadline and the correlation id of the request it is part of, `Watch` included. The rules are on [the call context](../../docs/call-context.md). A Rust client: `SourceServiceClient` over `atoom_socket::dial`; a Go client: `sourcev1alpha1connect.NewSourceServiceClient(hc, url, call.ClientOptions()...)`.
 
 ## A driver of your own
 

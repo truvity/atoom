@@ -8,7 +8,7 @@ The source port: the bytes of a named value, and a label that tells when they ch
 | Conformance kit | the binary below runs against any driver | crate [`atoom-source-conformance`](conformance/README.md), binary `source-conformance --socket PATH --present NAME --bytes FILE` |
 | Drivers | none in Go | [`atoom-source-file`](file/README.md) (a directory of signed config documents), [`atoom-source-credential`](credential/README.md) (systemd credentials) |
 
-The contract is [proto/atoom/source/v1alpha1/source.proto](proto/atoom/source/v1alpha1/source.proto). Its rules in prose are in [docs/source-port.md](docs/source-port.md). Where the code came from is in [PROVENANCE.md](PROVENANCE.md).
+The contract is [proto/atoom/source/v1alpha1/source.proto](proto/atoom/source/v1alpha1/source.proto). Its rules in prose are in [docs/source-port.md](docs/source-port.md). Where the code came from is in [provenance](../docs/provenance.md#source).
 
 A Go consumer links a driver in process by mounting its `sourcev1alpha1connect` handler on an in-memory transport, or dials one that serves on a socket; a Rust consumer registers the driver's `router()` on its own server, or runs the thin main as a sidecar.
 

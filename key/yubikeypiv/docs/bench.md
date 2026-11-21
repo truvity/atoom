@@ -1,6 +1,6 @@
 # The card bench: the driver against a real YubiKey
 
-`just card-bench` runs the YubiKey PIV driver (`key/yubikeypiv`) against a **real card**, by hand, and checks what the fake card cannot: that the driver and the kit pass on the hardware, and that the rules of [which card it opens](../README.md#which-card-it-opens) (decision D12 C) hold with a real PC/SC stack. The tests of `just go-card` (and so CI) use the fake card in `internal/card/cardtest` and need no card; the bench is for a person with a card in a reader and is never run in CI.
+`just card-bench` runs the YubiKey PIV driver (`key/yubikeypiv`) against a **real card**, by hand, and checks what the fake card cannot: that the driver and the kit pass on the hardware, and that the rules of [which card it opens](../README.md#which-card-it-opens) hold with a real PC/SC stack. The tests of `just go-card` (and so CI) use the fake card in `internal/card/cardtest` and need no card; the bench is for a person with a card in a reader and is never run in CI.
 
 ```
 just card-bench READER="<reader>" SERIAL=<serial>
@@ -16,8 +16,8 @@ The bench is a test of a card that can be thrown away. Read these before the fir
 
 1. **Factory credentials only.** The card must be in factory state: PIN `123456`, PUK `12345678`, the default management key. The bench sends the factory PIN and makes keys with the default management key, and nothing else. Do not run it on a card that holds anything that matters, or whose PIN, PUK or management key was changed.
 2. **Never slot `f9`.** The Yubico attestation slot is not touched by the bench or by the driver.
-3. **Name the reader, so that no other card is opened.** The driver connects to the named reader only. A machine with a daily card, a root card or any other card in another reader is safe because of the name; leave such cards out of the machine anyway when you can. (The several-readers cases below prove that the driver refuses to choose; if the driver were wrong, those are the cases that would touch another reader, with a PIV applet selection and nothing more.)
-4. **Stop before a retry counter reaches 0.** The helper (`cardbench unlock`) sends the PIN only to a card that reports all three attempts, sends it once and never retries; a card with fewer attempts is left alone and the run fails. A card whose PIN is not the factory one is therefore refused after at most one wrong attempt (2 left), and the run says so. If a counter is below 3, stop and look at the card: the PUK procedure is the owners', not the bench's.
+3. **Name the reader, so that no other card is opened.** The driver connects to the named reader only. A machine with a card in use elsewhere in another reader is safe because of the name; leave such cards out of the machine anyway when you can. (The several-readers cases below prove that the driver refuses to choose; if the driver were wrong, those are the cases that would touch another reader, with a PIV applet selection and nothing more.)
+4. **Stop before a retry counter reaches 0.** The helper (`cardbench unlock`) sends the PIN only to a card that reports all three attempts, sends it once and never retries; a card with fewer attempts is left alone and the run fails. A card whose PIN is not the factory one is therefore refused after at most one wrong attempt (2 left), and the run says so. If a counter is below 3, stop and look at the card: the PUK procedure is the card owner's, not the bench's.
 5. **The recipe never changes a PIN, a PUK or a management key, and never resets a card** (no `ykman piv reset`, no change-PIN, no set-management-key, no PUK use). The driver does reset the *session* of the card, as it does at every start and exit (a log-out: no key, PIN or counter changes; see [restart-and-session-reset.md](restart-and-session-reset.md)).
 6. **One holder of the card at a time.** The driver holds the card exclusively. Stop `scdaemon`, `ykman`, a browser with a WebAuthn prompt or anything else that talks to the card before the run; the busy-reader case relies on the recipe being the only holder.
 
@@ -32,7 +32,7 @@ Nothing is written to the card before step 3. Each step stops the run at its fir
    - a reader name that does not exist: "is not there";
    - `--environment staging` without `--serial`: "serial is required", exit status 2, before any card is opened.
 3. **Serve and run the kit.** `yubikeypiv serve` on UNIX sockets in the temporary directory, with the socket guard defaults (mode 0600, this uid) and the admin socket open to this uid; `cardbench unlock` delivers the **factory PIN** over the admin socket; `key-conformance --socket <path>` runs and every case must be `ok` (none failed, none skipped). The driver is then stopped, because the card is exclusive.
-4. **The D12 C cases.**
+4. **The reader cases.**
    - With more than one reader present: several readers and none named is refused ("more than one reader and none named", "no card was opened"), and so is a serial alone. With one reader the run says `SKIP` and goes on; a second reader (empty is enough) makes the cases run.
    - A **busy reader**: `cardbench hold` connects to the named reader exclusively and keeps it for up to 30 seconds; `check` against it must be refused with "is in use by another process", naming the reader. The holder is then stopped and lets the reader go without a reset.
 5. **`yubikeypiv check --environment staging`** (with the serial): verifies the attestation of the keys that step 3 made, against Yubico's roots. This is the check that proves the keys were born on the card.
@@ -41,9 +41,9 @@ The run ends with `card-bench: PASSED`, or `FAILED` and the log of the driver.
 
 ## What it writes to the card
 
-Step 3 runs the kit against a driver in `development`, where `Ensure` makes the keys of the slot plan on the card with the factory management key. The kit makes the keys of the purposes it uses, today `token-signing` (slot `9a`), `wrapping` (`9d`), `audit-log` (`84`), `pin-release` (`87`) and `token-signing-rs256` (`88`), in the slots of the [slot plan](card-slot-map.md) (`plan.go` has the table), generated on the card with the policies of the plan (PIN once, touch never; `87` PIN never). Nothing else is written: no certificate, no PIN, no PUK, no management key, no data object.
+Step 3 runs the kit against a driver in `development`, where `Ensure` makes the keys of the slot plan on the card with the factory management key. The kit makes the keys of the purposes it uses, today `token-signing` (slot `9a`), `wrapping` (`9d`), `audit-log` (`84`), `pin-release` (`87`) and `token-signing-rs256` (`88`), in the slots of [the slot map](card-slot-map.md) (`plan.go` has the table; the slots of the table are the reference map, which is sluis's), generated on the card with the policies of the plan (PIN once, touch never; `87` PIN never). Nothing else is written: no certificate, no PIN, no PUK, no management key, no data object.
 
-The keys stay on the card. The **next run adopts them**: `Ensure` finds a key in its slot, verifies its attestation and uses it, so the kit passes again and step 1 verifies them already. A card with keys in these slots that were not made by the driver (imported keys, a different algorithm) is refused by the driver, as it should be. To start from an empty card again the keys have to be deleted with a tool outside this recipe, which is the owner's decision for a bench card; the recipe has no reset.
+The keys stay on the card. The **next run adopts them**: `Ensure` finds a key in its slot, verifies its attestation and uses it, so the kit passes again and step 1 verifies them already. A card with keys in these slots that were not made by the driver (imported keys, a different algorithm) is refused by the driver, as it should be. To start from an empty card again the keys have to be deleted with a tool outside this recipe, which is the decision of whoever owns the bench card; the recipe has no reset.
 
 ## Build prerequisites
 

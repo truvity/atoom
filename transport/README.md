@@ -1,6 +1,6 @@
 # transport
 
-The transport port: a durable queue that carries audit messages from emitters to one consumer, in order and at least once. As a ConnectRPC contract (`atoom.transport.v1alpha1.TransportService`: `Emit`, `Receive`, `Ack`), its stubs in Go and Rust, its documentation, and a conformance kit.
+The transport port: a durable queue that carries messages from many emitters to one consumer, in order and at least once. As a ConnectRPC contract (`atoom.transport.v1alpha1.TransportService`: `Emit`, `Receive`, `Ack`), its stubs in Go and Rust, its documentation, and a conformance kit.
 
 | | Go | Rust |
 | --- | --- | --- |
@@ -8,7 +8,7 @@ The transport port: a durable queue that carries audit messages from emitters to
 | Conformance kit | the binary below runs against any driver | crate [`atoom-transport-conformance`](conformance/README.md), binary `transport-conformance --emit-socket PATH --receive-socket PATH` |
 | Drivers | none in Go | [`atoom-transport-spool`](spool/README.md) (a local, fsync'd, bounded queue of segment files) |
 
-The contract is [proto/atoom/transport/v1alpha1/transport.proto](proto/atoom/transport/v1alpha1/transport.proto). Its rules in prose are in [docs/transport-port.md](docs/transport-port.md). Where the code came from is in [PROVENANCE.md](PROVENANCE.md).
+The contract is [proto/atoom/transport/v1alpha1/transport.proto](proto/atoom/transport/v1alpha1/transport.proto). Its rules in prose are in [docs/transport-port.md](docs/transport-port.md). Where the code came from is in [provenance](../docs/provenance.md#transport).
 
 A Go consumer links a driver in process by mounting its `transportv1alpha1connect` handler on an in-memory transport, or dials one that serves on a socket; a Rust consumer registers the driver's `router()` on its own server, or runs the thin main as a sidecar.
 
