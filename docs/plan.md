@@ -456,3 +456,23 @@ The order follows the call: the key port with `slotplan`, `pinrelease`, the key 
 **R14. GitHub-hosted arm64 and macOS runners for a public repository. UNVERIFIED.** Step 0 checks that they are available before the matrix is built on them; if arm64 is not, the fallback is a self-hosted arm64 runner or a QEMU job for the pure libraries only (the card driver stays native-only).
 
 **R15. The reserved address segment and a retry on DynamoDB Local. Decided by the owner 2026-11-19, for review.** D6 B: "Rename the reserved name segment `.sluis` to `.atoom` before v0.1.0." Done in the destination port (the only place the reservation was: `check_address`, its docs and the kit's `refusals` case); no shim, since no release exists. sluis follows in its pin-bump PR and migrates its own data written under `.sluis` in v2 alpha; atoom holds none. D9 C: "Retry the DynamoDB Local case once." The case `version_never_decreases` of the item kit is retried once, only against DynamoDB Local (`ATOOM_CONFORMANCE_DYNAMODB_LOCAL=1`, set by `tools/scripts/conformance-store.sh`), and prints `RETRIED version_never_decreases: <first failure>`; issue #14 stays open for the cause.
+
+## 11. After 0.2.0: the blocks phase
+
+Decided by the maintainer on 2026-11-20 (records [0008](decisions/0008-blocks.md) to [0013](decisions/0013-what-moves-from-sluis.md)). In order, and each step is one pull request or a few:
+
+| Step | What | Why first |
+| --- | --- | --- |
+| B1 | `socket`: the in-process helper in Rust (the probe of 0009 becomes its test); the Go in-process helper documented next to it | Every block and in-process consumer uses it |
+| B2 | `source/file` in Go, passing the source kit | session reads its site file and policy bundle in-process |
+| B3 | `Capabilities` gains `durability` (0012); every store driver declares it | session and sluis choose bindings by it |
+| B4 | `keyring` block in Go, moved from sluis key@ (0006 and the storage part of 0047), with its kit over the memory drivers | session seals with it; sluis key@ becomes its host |
+| B5 | The Cedar loading rules, the signed bundle format, loaders in Go and Rust, and the decision test set (0011) | session and sluis load policies the same way |
+| B6 | `store/postgres` | sluis on Kubernetes |
+| B7 | `state` block in Rust, moved from sluis store@ (0005) | sluis store@ becomes its host |
+| B8 | `token` block in Go | session's signed client assertions and identity header; sluis signer |
+| B9 | Lambda extension zips per driver, a Lambda column in docs/packages.md, the drivers `source/appconfig`, `source/ssm`, `blob/s3`, `transport/sqs` (0010) | sluis on Lambda |
+| B10 | `store/valkey` | Valkey-backed sessions |
+| B11 | `export` block | sluis exporter@ |
+
+Audit is not here: it is the product of `truvity/audit` (created 2026-11-21), built on these ports.
