@@ -21,4 +21,4 @@ A case that needs an algorithm or the attestation takes it from `Capabilities`: 
 - **In process:** `conformance.Run(ctx, client, os.Stdout)` over a client of your handler; the drivers of this repository do that in their tests.
 - **In CI:** `just conformance` builds the kit once and runs it against every driver that has a `conformance.sh` (today `key/software`, through its thin main's socket). The card driver runs the kit in its own tests, over the fake card.
 
-The documentation of the contract is [../docs/contract.md](../docs/contract.md). Where the code came from is in [PROVENANCE.md](PROVENANCE.md).
+The documentation of the contract is [../docs/key-port.md](../docs/key-port.md). Where the code came from is in [provenance](../../docs/provenance.md#key-conformance).

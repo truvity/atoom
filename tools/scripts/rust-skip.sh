@@ -6,7 +6,7 @@
 #   os = ["linux"]
 #
 # A crate without the field builds everywhere. The recipes that build, test or lint the whole workspace add the output to their
-# `cargo ... --workspace` command (docs/plan.md, step 4: the file and credential drivers use Linux calls, so the darwin job leaves them
+# `cargo ... --workspace` command (docs/archive/extraction-plan.md, step 4: the file and credential drivers use Linux calls, so the darwin job leaves them
 # out, and says which).
 #
 #   cargo build --workspace $(tools/scripts/rust-skip.sh)

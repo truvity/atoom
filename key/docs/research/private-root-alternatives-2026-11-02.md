@@ -1,18 +1,18 @@
-# What else keeps a private root today (2026-11-02)
+# What else keeps a private key offline or in hardware (2026-11-02)
 
-*Copied from [truvity/ritueel](https://github.com/truvity/ritueel) `main` at commit `a569f9366c0bef69e376db2ae25db8808336a875`, file `docs/research/private-root-alternatives-2026-11-02.md`, with the site markup removed (the front matter became the title, the figures are left out). ritueel keeps its copy until it is restarted. Links that start with a slash point to ritueel's own site and are not part of this repository.*
+Research for the authors of key drivers: which tools and devices hold a private root key offline or in hardware today, what each does, and what that means for the key port.
 
 ## Question
 
-What does a reader who wants a private root today, or an OpenPGP primary key, have besides ritueel, and what does each option do and not do? It feeds [ritueel compared with what you can use today](../learn/compared.md).
+Besides the stores that atoom has drivers for, what can hold the private key of a root (a certificate authority root or an OpenPGP primary key), and what does each option do and not do? Which of them could become a driver of the [key port](../key-port.md), which would attest, and which only import a key that was made elsewhere?
 
 ## When
 
 Read on 2026-11-02, in the morning (UTC). Every quotation was checked against the source text, not against a summary.
 
-## Verdict
+## Finding
 
-Each option below is real, shipped and in use, and each does one part of the job well. Among the pages read, only YubiHSM 2 is described as making a key on the device and attesting it, at EUR 786.50 a device; the others import a key that was made elsewhere, keep it in software, or (AWS KMS) make it inside the service. None of the pages describes a ceremony record kept for a successor. That combination, on a card or a cloud key, is what ritueel designs; it is not built.
+Each option below is real, shipped and in use, and each does one part of the job well. Among the pages read, only YubiHSM 2 is described as making a key on the device and attesting it, at EUR 786.50 a device. The others import a key that was made elsewhere, keep it in software, or (AWS KMS) make it inside the service.
 
 ## Method
 
@@ -92,20 +92,29 @@ Fetched each page or file with `curl` (or the GitHub API), read the text, and co
 | Keys "are protected by FIPS 140-3 Security Level 3 validated hardware security modules (HSM). They never leave AWS KMS unencrypted." | [What is AWS KMS](https://docs.aws.amazon.com/kms/latest/developerguide/overview.html) | READ |
 | "Each set of related multi-Region keys has the same key material and key ID", and "You must manage each multi-Region key independently, including creating aliases and tags, setting their key policies and grants". | [Multi-Region keys](https://docs.aws.amazon.com/kms/latest/developerguide/multi-region-keys-overview.html) | READ |
 
+## What it means for the key port
+
+The key port never imports and never exports a key, and a driver that can attest refuses a key it did not make ([what a store can prove](../what-a-store-can-prove.md)). Read against that:
+
+| Option | Could it be a driver? | Attests? | Imports a key? |
+|---|---|---|---|
+| offline-pki, the Smallstep recipe | No. They are procedures that use a YubiKey. The root key is made off the card and imported (offline-pki says so; the Smallstep recipe makes it on disk and shreds it), and offline-pki copies the root to a second YubiKey. | The key is imported, so a card cannot attest it. | Yes. |
+| The drduh guide | No. It is a procedure for OpenPGP keys: made offline, backed up, then transferred to a YubiKey. | No, for the same reason. | Yes (transfer). |
+| OpenBao PKI | Not as a store of private roots: its own page says its storage is networked software and advises a root outside it. | No. | Not read. |
+| YubiHSM 2 | Possibly, as a new driver. It makes keys on the device and attests them. | Yes, for keys generated on the device. | It has a wrap key for backup between HSMs, so a key can leave the device wrapped; a driver would not use that. |
+| Sequoia `sq` | No. It works with OpenPGP artifacts. | No. | Not applicable. |
+| AWS KMS | It is one: [`key/awskms`](../../awskms/README.md). | No: the service gives no statement about where the key was made. | Not used by the driver. |
+
+What a new driver for a device such as YubiHSM 2 would have to settle is listed in [Key stores](../key-stores.md), under "Stores without a driver". The software side of the same question, how a key file could be protected, is in [software key backends](../../software/docs/research/software-key-backends-2026-11-01.md).
+
+Open: whether a driver for a hardware module other than a YubiKey is wanted, and with which interface. Nothing here decides it.
+
 ## Roads not taken
 
 - **Running each tool.** The strongest evidence, but it needs a device, an account and days, and the page only reports what each project says.
 - **Smallstep's product documentation.** The recipe is in the discussion above; the product pages describe the online CA, which is not what is compared.
-- **Vault.** OpenBao is the open fork the page cites; Vault's own page was not read, so the comparison page names OpenBao only.
-- **Prices of cards and KMS.** They change monthly; [Which keys to buy](../learn/which-keys-to-buy.md) holds the card prices with their dates.
-
-## Open questions
-
-None.
-
-## Changes made
-
-None.
+- **Vault.** OpenBao is the open fork the page cites; Vault's own page was not read, so only OpenBao is listed.
+- **Prices of cards and KMS.** They change monthly; [Which keys to buy](../../yubikeypiv/docs/which-keys-to-buy.md) holds the card prices with their dates.
 
 ## Raw logs
 

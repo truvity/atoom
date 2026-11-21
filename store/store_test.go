@@ -58,7 +58,7 @@ func (fake) Get(_ context.Context, req *connect.Request[storev1alpha1.ItemGetReq
 }
 
 // A Go consumer mounts a driver's handler on an in-memory server and calls it through the client, which is how a library is linked in
-// process (docs/plan.md, section 1).
+// process (docs/archive/extraction-plan.md, section 1).
 func TestTheClientCallsTheHandler(t *testing.T) {
 	mux := http.NewServeMux()
 	mux.Handle(storev1alpha1connect.NewItemServiceHandler(fake{}))

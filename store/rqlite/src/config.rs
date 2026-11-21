@@ -117,7 +117,7 @@ impl Settings {
     }
 }
 
-/// The longest the change log is kept (store/docs/item-port.md "The change log").
+/// The longest the change log is kept (store/docs/store-port.md "The change log").
 pub const MAX_RETENTION: Duration = Duration::from_secs(7 * 24 * 3600);
 
 /// A retention of the change log within the maximum.

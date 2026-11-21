@@ -1,6 +1,6 @@
 # Examples: how one host runs the card driver
 
-Four files that sluis generates for a board that runs the card driver, copied from [truvity/sluis](https://github.com/truvity/sluis) `main` at commit `3f0afea8773b3d85205a5fb7d521282bbdcff598`, directory `deploy/boards/units/`. They are examples of what a host does around the driver, not part of it: the originals stay in sluis, where they are generated from its registries.
+Four files that sluis, the first host of the driver, uses for a board that runs it. They are examples of what a host does around the driver, not part of it. The files are those of one host, with its own names, and the example instance is `dev`.
 
 | File | What it does |
 | --- | --- |
@@ -9,4 +9,6 @@ Four files that sluis generates for a board that runs the card driver, copied fr
 | `sluis-drv-key-yubikey-piv@.service` | the driver as a systemd service: its own user, no capabilities, `PrivateNetwork`, only `AF_UNIX`, the state directory at mode 0700, `Requires=pcscd.socket` |
 | `sluis-driver-key-yubikey-piv.sysusers` | the user and the groups of the service |
 
-The command line in the unit is sluis's wrapper (it has flags that atoom's own main does not: `--bootstrap`, `--socket-gid`). The names of the user and the groups are sluis's; the example instance is `dev`.
+- **Why the two card-service files.** [pcsc-and-cards-on-boards.md](../pcsc-and-cards-on-boards.md#closing-the-card-service-to-everyone-else) says when each lock is needed.
+- **The command line in the unit is sluis's own wrapper.** It has a flag that atoom's thin main does not (`--bootstrap`). atoom's `yubikeypiv serve` takes `--socket-gid` and the other [socket guard](../../../../docs/socket-guard.md) flags, `--admin-socket`, `--admin-uid`, `--state-dir`, `--serial` and `--reader` ([README](../../README.md)).
+- **The user and group names, the paths and the unit's hardening are the host's choice.** The unit shows that the driver runs with no capabilities and no network, with only UNIX sockets.

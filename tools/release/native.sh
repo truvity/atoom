@@ -4,7 +4,7 @@
 #
 #   tools/release/native.sh <version>
 #
-# A driver that links libpcsclite is never cross-compiled (docs/plan.md, section 5): CI runs this on a runner of each architecture, so no
+# A driver that links libpcsclite is never cross-compiled (docs/archive/extraction-plan.md, section 5): CI runs this on a runner of each architecture, so no
 # QEMU is needed. The build userland is older than every system the packages support, so the executable asks for no glibc symbol newer than
 # GLIBC_2.34 (the glibc of Amazon Linux 2023): tools/release/native-build.sh checks that. It needs docker, and it holds no credential.
 set -euo pipefail

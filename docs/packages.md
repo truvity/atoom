@@ -4,21 +4,36 @@ Every driver of atoom is released three ways, under the one version of the repos
 
 The table of what is released is [`tools/release/drivers.tsv`](../tools/release/drivers.tsv), one row for each driver; every script reads it, and `just release-check-table` fails when a thin main of the tree is neither a row nor one of the programs that are not drivers (the conformance kits, the bench of the card driver).
 
-| Driver | Executable (`/usr/bin`) | Package | Image `ghcr.io/truvity/…` | Tarballs |
-| --- | --- | --- | --- | --- |
-| `key/software` | `atoom-key-software` | `atoom-driver-key-software` | `atoom-key-software` | linux, darwin |
-| `key/yubikeypiv` | `atoom-key-yubikeypiv` | `atoom-driver-key-yubikeypiv` | `atoom-key-yubikeypiv` | linux |
-| `key/awskms` | `atoom-key-awskms` | `atoom-driver-key-awskms` | `atoom-key-awskms` | linux, darwin |
-| `store/dynamodb` | `atoom-store-dynamodb` | `atoom-driver-store-dynamodb` | `atoom-store-dynamodb` | linux, darwin |
-| `store/rqlite` | `atoom-store-rqlite` | `atoom-driver-store-rqlite` | `atoom-store-rqlite` | linux |
-| `store/memory` | `atoom-store-memory` | `atoom-driver-store-memory` | `atoom-store-memory` | linux |
-| `source/file` | `atoom-source-file` | `atoom-driver-source-file` | `atoom-source-file` | linux |
-| `source/credential` | `atoom-source-credential` | `atoom-driver-source-credential` | `atoom-source-credential` | linux |
-| `blob/fs` | `atoom-blob-fs` | `atoom-driver-blob-fs` | `atoom-blob-fs` | linux |
-| `blob/fsreadonly` | `atoom-blob-fsreadonly` | `atoom-driver-blob-fsreadonly` | `atoom-blob-fsreadonly` | linux |
-| `transport/spool` | `atoom-transport-spool` | `atoom-driver-transport-spool` | `atoom-transport-spool` | linux |
-| `index/sqlite` | `atoom-index-sqlite` | `atoom-driver-index-sqlite` | `atoom-index-sqlite` | linux |
-| `destination/dir` | `atoom-destination-dir` | `atoom-driver-destination-dir` | `atoom-destination-dir` | linux |
+| Driver | Executable (`/usr/bin`) | Package | Image `ghcr.io/truvity/…` | Tarballs | Lambda extension zip |
+| --- | --- | --- | --- | --- | --- |
+| `key/software` | `atoom-key-software` | `atoom-driver-key-software` | `atoom-key-software` | linux, darwin | extension zip; a Go function links the library instead |
+| `key/yubikeypiv` | `atoom-key-yubikeypiv` | `atoom-driver-key-yubikeypiv` | `atoom-key-yubikeypiv` | linux | no: Lambda has no hardware |
+| `key/awskms` | `atoom-key-awskms` | `atoom-driver-key-awskms` | `atoom-key-awskms` | linux, darwin | extension zip; a Go function links the library instead |
+| `store/dynamodb` | `atoom-store-dynamodb` | `atoom-driver-store-dynamodb` | `atoom-store-dynamodb` | linux, darwin | extension zip; a Go function links the library instead |
+| `store/rqlite` | `atoom-store-rqlite` | `atoom-driver-store-rqlite` | `atoom-store-rqlite` | linux | no: Lambda runs no rqlite |
+| `store/memory` | `atoom-store-memory` | `atoom-driver-store-memory` | `atoom-store-memory` | linux | extension zip, for tests |
+| `source/file` | `atoom-source-file` | `atoom-driver-source-file` | `atoom-source-file` | linux | extension zip; a Go version is planned for in-process use |
+| `source/credential` | `atoom-source-credential` | `atoom-driver-source-credential` | `atoom-source-credential` | linux | no: Lambda has no systemd credentials |
+| `blob/fs` | `atoom-blob-fs` | `atoom-driver-blob-fs` | `atoom-blob-fs` | linux | no: Lambda has no lasting local disk |
+| `blob/fsreadonly` | `atoom-blob-fsreadonly` | `atoom-driver-blob-fsreadonly` | `atoom-blob-fsreadonly` | linux | no: Lambda has no lasting local disk |
+| `transport/spool` | `atoom-transport-spool` | `atoom-driver-transport-spool` | `atoom-transport-spool` | linux | no: Lambda has no lasting local disk |
+| `index/sqlite` | `atoom-index-sqlite` | `atoom-driver-index-sqlite` | `atoom-index-sqlite` | linux | no: Lambda has no lasting local disk |
+| `destination/dir` | `atoom-destination-dir` | `atoom-driver-destination-dir` | `atoom-destination-dir` | linux | no: Lambda has no lasting local disk |
+
+The **Lambda** column is the form of [record 0010](decisions/0010-distribution-per-driver-and-lambda.md): an extension zip for amd64 and arm64, merged with the other extensions a function needs into one layer. **No Lambda zip is built yet**: the column says which drivers will have one (step B9 of the [plan](plan.md)) and why the others cannot. A Go driver used by a Go function needs no extension: the function links the library and mounts its handler in-process.
+
+Planned drivers, each released in every form it can run in once it is built:
+
+| Driver | Backend | Lambda | Step |
+| --- | --- | --- | --- |
+| `source/file` (Go) | a directory, in-process | linked, no zip | B2 |
+| `store/postgres` | PostgreSQL | extension zip | B6 |
+| `store/valkey` | Valkey | extension zip | B10 |
+| `source/appconfig`, `source/ssm` | AWS AppConfig, SSM Parameter Store | extension zip | B9 |
+| `blob/s3` | an S3 bucket | extension zip | B9 |
+| `transport/sqs` | an Amazon SQS queue | extension zip | B9 |
+| `transport/nats` | NATS JetStream | extension zip | B15 |
+| `index/rqlite`, `index/postgres` | rqlite; PostgreSQL with row-level security | `index/postgres`: extension zip | B15 |
 
 ## The naming rules
 
@@ -35,14 +50,14 @@ The packages come out as `atoom-driver-<id>_<version>-1_<amd64|arm64>.deb` and `
 
 ## What runs where
 
-- **Architectures.** linux/amd64 and linux/arm64 for every driver, packages and images alike (the images are multi-architecture manifests). **darwin/amd64 and darwin/arm64 tarballs** only for the Go drivers that are pure Go: `key/software`, `key/awskms`, `store/dynamodb`. The Rust drivers are Linux only or have no consumer on macOS; the card driver is not built for macOS (its PC/SC build there is unverified, [plan](plan.md) section 5).
+- **Architectures.** linux/amd64 and linux/arm64 for every driver, packages and images alike (the images are multi-architecture manifests). **darwin/amd64 and darwin/arm64 tarballs** only for the Go drivers that are pure Go: `key/software`, `key/awskms`, `store/dynamodb`. The Rust drivers are Linux only or have no consumer on macOS; the card driver is not built for macOS (its PC/SC build there is unverified, [record 0004](decisions/0004-multi-architecture.md)).
 - **Static executables.** Go with CGO off, Rust through cargo-zigbuild to static musl: no C library is needed at run time, and one executable runs on any Linux. The one exception is the card driver.
 - **The card driver, `key/yubikeypiv`,** links libpcsclite with cgo. It is never cross-compiled: it is built on a runner of each architecture, in an Ubuntu 22.04 userland whose glibc (2.35) is older than every system the packages support, and the build fails if the executable asks for a symbol newer than `GLIBC_2.34`, the glibc of Amazon Linux 2023. Its package depends on **`pcscd`** and **`libpcsclite1`** (`pcsc-lite` and `pcsc-lite-libs` on Rocky and Amazon Linux) and recommends the CCID driver (`libccid`, `pcsc-lite-ccid`). No other package has a dependency.
 
 ## The packages
 
 - The executable in `/usr/bin`, the README of the driver and [the socket guard](socket-guard.md) in `/usr/share/doc/<package>/`, the licence in `copyright` (deb) or `/usr/share/licenses/<package>/` (rpm). Nothing else.
-- **No systemd unit, no user, no directory of state, no configuration, no maintainer script.** How a driver is run, as which user, with which callers and where its state lives, is the deployment's: per the plan, "deployment is sluis's". A package that created a user or a unit would take that decision from the consumer, and two consumers want different ones. The flags are in each driver's README and in [the socket guard](socket-guard.md); the checks of the release refuse a package that holds a file outside `/usr/bin` and `/usr/share/{doc,licenses}` or has a script.
+- **No systemd unit, no user, no directory of state, no configuration, no maintainer script.** How a driver is run, as which user, with which callers and where its state lives, is the deployment's, and so the consumer's. A package that created a user or a unit would take that decision from the consumer, and two consumers want different ones. The flags are in each driver's README and in [the socket guard](socket-guard.md); the checks of the release refuse a package that holds a file outside `/usr/bin` and `/usr/share/{doc,licenses}` or has a script.
 - A unit of a consumer starts it like this (the card driver adds `--admin-socket`, see its README):
 
   ```text

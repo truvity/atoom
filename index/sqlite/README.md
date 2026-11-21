@@ -9,7 +9,7 @@ The sqlite driver of the [index port](../docs/index-port.md): the write side and
 | Guard flags | `--allow-uid UID` (repeatable; without it only this process's uid may call), `--allow-any-uid`, `--socket-gid GID`, `--socket-mode MODE` (the group and the mode are for both sockets; `--allow-uid` is for the write socket), and `--read-allow-uid UID` for the callers of the read socket (the callers of `--allow-uid` when it is not given): the [socket guard](../../docs/socket-guard.md) |
 | Feature | `cli` (default): the flags and the sockets (`clap`, `atoom-socket`, `tracing-subscriber`). A consumer that mounts the routers in a host of its own turns the default features off |
 
-How it works is in [docs/sqlite.md](docs/sqlite.md). Where the code came from is in [../PROVENANCE.md](../PROVENANCE.md).
+How it works is in [docs/sqlite.md](docs/sqlite.md). Where the code came from is in [provenance](../../docs/provenance.md#index).
 
 A host with a guard of its own (peer credentials, one socket for each caller) does not use the thin main: it opens the `Index`, registers `Write(index.clone()).router()` on the socket of the indexer and `Read(index).router()` on the socket of the reader, and may call `suite::run_temp()` from a `conformance` command of its own. That is the seam: the driver knows nothing of who calls it.
 

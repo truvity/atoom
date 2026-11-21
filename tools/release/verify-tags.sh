@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# The release workflow's check of the tags (docs/plan.md, "Library release flow", step 4): the tag vX.Y.Z names this commit, the tree at
+# The release workflow's check of the tags (docs/archive/extraction-plan.md, "Library release flow", step 4): the tag vX.Y.Z names this commit, the tree at
 # it is a prepared release of X.Y.Z (the Cargo version, the sibling requires, the changelog, no replace), and every Go library has its
 # tag <dir>/vX.Y.Z on the same commit. A missing or misplaced tag refuses the release; a wrong set is repaired with the next patch version.
 #

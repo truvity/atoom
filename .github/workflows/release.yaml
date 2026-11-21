@@ -1,4 +1,4 @@
-# The release of atoom (decision 0007, docs/plan.md "Release management" and "Library release flow"). It starts on the root tag vX.Y.Z only,
+# The release of atoom (decision 0007, docs/archive/extraction-plan.md "Release management" and "Library release flow"). It starts on the root tag vX.Y.Z only,
 # which the maintainer makes and signs by hand (`just release-tag X.Y.Z`); this workflow never makes a tag. The tags of the Go libraries
 # (key/vX.Y.Z, ...) have a slash and do not match the trigger: they are pushed first, the root tag alone last.
 #

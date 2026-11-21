@@ -4,7 +4,7 @@ Status: accepted, 2026-11-20
 
 ## Context
 
-sluis, session and ritueel decide with Cedar. Cedar is a library by design, with no loader and no network API:
+sluis, session, audit and ritueel decide with Cedar. Cedar is a library by design, with no loader and no network API:
 - `cedar-policy` (Rust) is the reference;
 - `cedar-go` is a separate native implementation, which lags in places (entity tags);
 - Java and WebAssembly bindings wrap the Rust engine.
@@ -28,9 +28,15 @@ A ConnectRPC port would have restated Cedar's model in proto: 10 value kinds and
   3. **A loader library in Go and in Rust** that follows those rules over `source` and the local engine.
   4. **A decision test set:** policies, entities, requests and expected decisions, run in CI against both engines. A difference fails the build, or is listed as a known gap of one engine.
 - **The caller gives the entities.** The engine fetches nothing. A consumer gathers the entities one request touches (the principal, the resource, their ancestors), as Cedar and AWS Verified Permissions expect.
-- A different engine (OPA, Casbin) is a separate design, not a second implementation of this one.
+- **Each consumer has its own schema.** sluis keeps its layers, grants and policy actor on its own schema. session decides in-process on every request, with no hop. audit uses the shared library and bundle with its own schema.
 
 ## Consequences
 
-- sluis keeps its layers, grants and the policy actor. session decides in-process on every request, with no hop.
 - Verified Permissions can come later as a mode of the loader, if a consumer needs it.
+- The loaders and the test set are planned (step B5 of the [plan](../plan.md)).
+
+## Roads not taken
+
+- **A policy engine port.** It would restate Cedar's model in proto and lag behind it.
+- **A different engine (OPA, Casbin).** That is a separate design, not a second implementation of this one.
+- **One policy actor for every product.** It would make audit and session depend on sluis.

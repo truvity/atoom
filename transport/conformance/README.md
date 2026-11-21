@@ -16,6 +16,6 @@ target/debug/transport-spool serve --socket-dir /tmp/socks --root /tmp/spool &
 target/debug/transport-conformance --emit-socket /tmp/socks/emit.sock --receive-socket /tmp/socks/receive.sock
 ```
 
-`just conformance` (CI runs it on every architecture) builds the kit once and runs it against the thin main of the spool driver (`tools/scripts/conformance-transport.sh`). The cases and what they fix beyond the contract's comments are in [docs/suite.md](docs/suite.md). The kit has a test of its own that a driver that is wrong in each way the suite looks for fails the case that looks for it. Where the code came from is in [../PROVENANCE.md](../PROVENANCE.md).
+`just conformance` (CI runs it on every architecture) builds the kit once and runs it against the thin main of the spool driver (`tools/scripts/conformance-transport.sh`). The cases and what they fix beyond the contract's comments are in [docs/suite.md](docs/suite.md). The kit has a test of its own that a driver that is wrong in each way the suite looks for fails the case that looks for it. Where the code came from is in [provenance](../../docs/provenance.md#transport).
 
 Dependencies: the port ([`atoom-transport`](../README.md)), [`atoom-common`](../../common/README.md) for the refusal helper, [`atoom-socket`](../../socket/README.md) for the client, and `clap`, `tokio` and `anyhow`.

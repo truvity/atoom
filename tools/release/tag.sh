@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# `just release-tag X.Y.Z`: the tags of one release (docs/plan.md, "Library release flow", step 3; decision 0005).
+# `just release-tag X.Y.Z`: the tags of one release (docs/archive/extraction-plan.md, "Library release flow", step 3; decision 0005).
 #
 #   tools/release/tag.sh [--dry-run [--allow-off-master]] X.Y.Z
 #

@@ -9,7 +9,7 @@ The software key driver of atoom: the [key port](../README.md) over P-384 keys h
 | Thin main | `cmd/software`: `software serve --socket PATH --state-dir DIR [--environment E] [--refuse-production]` (a socket of mode 0600 that admits this process's uid), `software check --state-dir DIR`, `software version` |
 | Guard flags | `--allow-uid UID` (repeatable; without it only this process's uid may call), `--allow-any-uid`, `--socket-gid GID`, `--socket-mode MODE`: the [socket guard](../../docs/socket-guard.md) |
 | Documentation | [docs/](docs/): [the software store](docs/software-store.md), [a key in a file](docs/a-key-in-a-file.md), [research](docs/research) |
-| Where it came from | [PROVENANCE.md](PROVENANCE.md) |
+| Where it came from | [provenance](../../docs/provenance.md#key-software) |
 
 A software key can be read by anyone who can read its volume. That is the accepted risk of a local installation, a CI run or a smoke installation: the volume is the boundary, so the driver adds no passphrase, no import and no export. It supports `ES384`, `ES256`, `RS256` and `ECDH-P384` and does not attest.
 

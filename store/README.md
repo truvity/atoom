@@ -8,10 +8,10 @@ The item port: a store of versioned items with expiry, indexes and a change log,
 | Conformance kit | the binary below runs against any driver | crate [`atoom-store-conformance`](conformance/README.md), binary `store-conformance --socket PATH` |
 | Drivers | [`store/dynamodb`](dynamodb/README.md) (DynamoDB; a library that links into a Lambda function, and a thin main) | [`atoom-store-rqlite`](rqlite/README.md) (rqlite), [`atoom-store-memory`](memory/README.md) (memory) |
 
-The contract is [proto/atoom/store/v1alpha1/item.proto](proto/atoom/store/v1alpha1/item.proto). Its rules in prose are in [docs/item-port.md](docs/item-port.md). Where the code came from is in [PROVENANCE.md](PROVENANCE.md).
+The contract is [proto/atoom/store/v1alpha1/item.proto](proto/atoom/store/v1alpha1/item.proto). Its rules in prose are in [docs/store-port.md](docs/store-port.md). Where the code came from is in [provenance](../docs/provenance.md#store).
 
 A Go consumer links a driver in process by mounting its `storev1alpha1connect` handler on an in-memory transport, or dials one that serves on a socket; a Rust consumer registers the driver's `router()` on its own server, or runs the thin main as a sidecar. The index entries an item carries are [common](../common/README.md)'s `IndexEntry`.
 
-Dependencies are the ConnectRPC and Protobuf runtimes and nothing else: the isolation check holds it to that. The Rust crate generates its own wire-identical copy of `IndexEntry` (see [common/PROVENANCE.md](../common/PROVENANCE.md)).
+Dependencies are the ConnectRPC and Protobuf runtimes and nothing else: the isolation check holds it to that. The Rust crate generates its own wire-identical copy of `IndexEntry` (see [provenance](../docs/provenance.md#common)).
 
 Status: v1alpha1. A field may change until the contract becomes v1beta1; a breaking change raises the minor version of the repository.

@@ -1,4 +1,4 @@
-# One Cargo workspace for every Rust library. The member list is explicit, with no globs (docs/plan.md, section 5): a directory
+# One Cargo workspace for every Rust library. The member list is explicit, with no globs (docs/archive/extraction-plan.md, section 5): a directory
 # that holds only a Go library is not a member, and a new crate is added here by the change that adds it.
 [workspace]
 resolver = "3"

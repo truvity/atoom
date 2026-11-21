@@ -37,7 +37,7 @@ rqlite is its own service, one cluster of 1, 3 or 5 nodes (an even number adds a
 
 ## Errors
 
-A failure of rqlite is `unavailable` with the reason `engine`; the reason is logged, never sent, so the refusal shows nothing of rqlite's text. A condition that fails is `aborted/version`. See [the item port](../../docs/item-port.md#refusals).
+A failure of rqlite is `unavailable` with the reason `engine`; the reason is logged, never sent, so the refusal shows nothing of rqlite's text. A condition that fails is `aborted/version`. See [the item port](../../docs/store-port.md#refusals).
 
 ## Testing
 

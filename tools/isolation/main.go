@@ -1,4 +1,4 @@
-// Command isolation holds the repository to its dependency rules (docs/plan.md, section 5; decision 0003).
+// Command isolation holds the repository to its dependency rules (docs/archive/extraction-plan.md, section 5; decision 0003).
 //
 //	go run ./tools/isolation [-root .] [-shared tools/isolation/shared.txt]
 //

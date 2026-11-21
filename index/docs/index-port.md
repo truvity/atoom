@@ -1,6 +1,6 @@
-# The index port
+`atoom.index.v1alpha1`: an **index** makes the records of an append-only log searchable. It is derived data: whatever it holds can be rebuilt from the log. The index does not know what a record means. The audit model that first used this port (which columns a record has, which logs have an index) lives in [truvity/audit](https://github.com/truvity/audit), not here.
 
-`atoom.index.v1alpha1`: an **index** makes the records of an append-only audit log searchable. It is derived data: whatever it holds can be rebuilt from the log. The contract is [index.proto](../proto/atoom/index/v1alpha1/index.proto); this page is its rules in prose, and the conformance kit ([README](../conformance/README.md), [the suite](../conformance/docs/suite.md)) holds every driver to them.
+The contract is [index.proto](../proto/atoom/index/v1alpha1/index.proto); this page is its rules in prose, and the conformance kit ([README](../conformance/README.md), [the suite](../conformance/docs/suite.md)) holds every driver to them.
 
 Two services, which a host puts on two sockets, so that a driver serves the read side with no way to write:
 
@@ -10,18 +10,24 @@ Two services, which a host puts on two sockets, so that a driver serves the read
 | `IndexService` | `Apply` | the indexer | the rows of one batch of one log and, in the same step, the next cursor |
 | `IndexReadService` | `Search` | the reader | rows of named partitions and tenants, newest first |
 
-A **log** is named by a project, a log kind and the log's id (`LogRef`); a **partition** of the index is a project and a log kind. A **row** is one indexed record: the fixed columns (tenant, hash, sequence number, times, boundary, action, class, activity, status, actor, trace id, record id, product) and the record itself, once, as its canonical bytes.
+A **log** is named by a project, a log kind and the log's id (`LogRef`); a **partition** of the index is a project and a log kind; a **tenant** is the owner of a row. A **row** is one indexed record: a few fixed columns and the record itself, once, as its canonical bytes. Today the fixed columns are tenant, hash, sequence number, times, boundary, action, class, activity, status, actor, trace id, record id and product. They are audit's columns, and the contract spells them as fields.
+
+Planned (step B12 of the [plan](../../docs/plan.md)): the contract becomes generic. The fixed columns shrink to what any log has (tenant, hash, sequence number, time, record id), and a host declares further columns and which of them are searchable when it starts the driver. Field names that carry audit terms are renamed in that step, and the contract is v1alpha1, so the rename may break callers.
 
 ## The contract
 
 - **The cursor** of a log is the last checkpoint the indexer verified and indexed to: the tree size, the root hash (32 bytes) and a state that is opaque to the index. A log that was never indexed has size 0 and no root.
 - **`Apply` moves the cursor forward only, and only from where the caller read it.** `expect_size` is the size of the cursor the caller read; the write is refused (`aborted`, reason `version`, field `expect_size`) when the cursor has moved, so that a second indexer during a deploy cannot move it back. The next cursor must be larger than `expect_size` and have a root of 32 bytes. The rows and the cursor are one transaction. A request with no cursor only adds rows.
 - **A row is idempotent**: one whose tenant and hash (SHA-384 of the record's canonical bytes) are already in the log is a repeat, counted in `duplicates` and stored once.
-- **Which log kinds have an index**: `audit` and `issuance`. The usage log has none: a write to it is `permission_denied` / `rule`, and a query that names it is `invalid_argument`.
+- **Which log kinds have an index** is set by the contract today: `audit` and `issuance`. Another kind has none: a write to it is `permission_denied` / `rule`, and a query that names it is `invalid_argument`. Planned (step B12): the host declares the kinds.
 - **A query names its partitions and its tenants.** Both are mandatory: they are the grant of the reader, a filter that no query can leave out. `*` as a tenant means every tenant and stands alone. A row of another partition or tenant is never returned.
 - **A page** is newest first (`time_ms`, then the order of arrival), at most `page_size` rows (0 is 50 for the sqlite driver, at most 200), and the token of the next page is empty on the last page. The time range is `from_ms` at or after and `to_ms` before.
 - **Exact filters** for the action, the status code, the status id, the actor, the trace id and the record id.
-- **A word search** (`q`) reaches only the fields that the catalogue of the records says are searchable (today: the action, the status code and the product). Words are the alphanumeric runs of a field, folded for case and diacritics, with no stemming and no substring search; all the words of a query are required; a trailing `*` makes a prefix.
+- **A word search** (`q`) reaches only the fields that the host's catalogue of the records says are searchable (today: the action, the status code and the product; the catalogue is the host's). Words are the alphanumeric runs of a field, folded for case and diacritics, with no stemming and no substring search; all the words of a query are required; a trailing `*` makes a prefix.
+
+## Capabilities
+
+The port has no `Capabilities` call. Every driver serves both services in full; the two services let a host expose the read side alone. Open: a driver with a smaller feature set (no word search, no prefix match) would need to declare it, and whether that is a `Capabilities` call is decided with the first such driver.
 
 ## Refusals
 
@@ -38,11 +44,13 @@ Every refusal is a Connect error with the `Refusal` detail of [common](../../com
 
 | Driver | Backend | Where it fits |
 | --- | --- | --- |
-| [index/sqlite](../sqlite/README.md) | one SQLite file with FTS5 | a boundary whose index fits on one disk |
+| [index/sqlite](../sqlite/README.md) | one SQLite file with FTS5 | an index that fits on one disk |
+| `index/rqlite` | rqlite, replicated SQLite | an index that several nodes serve (planned, step B15) |
+| `index/postgres` | PostgreSQL, with row-level security per tenant | a Kubernetes installation (planned, step B15) |
 
-## Every call carries the deadline and the correlation id
+## The call context
 
-Every call of the port carries what is left of the caller's deadline (`Connect-Timeout-Ms`) and the correlation id of the request (`Sluis-Correlation-Id`, 1 to 64 characters of letters, digits, `-` and `_`), and the thin main of every driver reads both and hands them to its handler, which hands them down to the calls it makes. A callee never extends its caller's deadline, and an id of another shape is dropped. A client of the index port: `IndexServiceClient` and `IndexReadServiceClient`, Rust over `atoom_socket::dial`, Go `indexv1alpha1connect.NewIndexServiceClient(hc, url, call.ClientOptions()...)` (and the same for `NewIndexReadServiceClient`). The rules and how a caller outside a handler states them are on [the call context](../../docs/call-context.md).
+Every call carries the deadline and the correlation id of the request it is part of. The rules are on [the call context](../../docs/call-context.md). A Rust client: `IndexServiceClient` and `IndexReadServiceClient` over `atoom_socket::dial`; a Go client: `indexv1alpha1connect.NewIndexServiceClient(hc, url, call.ClientOptions()...)` (and `NewIndexReadServiceClient`).
 
 ## A driver of your own
 

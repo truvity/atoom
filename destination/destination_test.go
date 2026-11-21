@@ -53,7 +53,7 @@ func (fake) Put(_ context.Context, req *connect.Request[destinationv1alpha1.PutR
 }
 
 // A Go consumer mounts a driver's handler on an in-memory server and calls it through the client, which is how a library is linked in
-// process (docs/plan.md, section 1).
+// process (docs/archive/extraction-plan.md, section 1).
 func TestTheClientCallsTheHandler(t *testing.T) {
 	mux := http.NewServeMux()
 	mux.Handle(destinationv1alpha1connect.NewDestinationServiceHandler(fake{}))

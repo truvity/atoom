@@ -2,28 +2,57 @@
 
 > **The name.** *atoom* is Dutch for "atom" (plural *atomen*): the small building block each library here is. Pronounced /aːˈtoːm/, roughly "ah-TOHM". [Hear it](https://commons.wikimedia.org/wiki/File:Nl-atoom.ogg) · [Wiktionary](https://en.wiktionary.org/wiki/atoom)
 
-Ports, drivers and conformance kits shared by sluis, session and ritueel.
+Ports, drivers, blocks and kits shared by [sluis](https://github.com/truvity/sluis), [session](https://github.com/truvity/session), [audit](https://github.com/truvity/audit) and [ritueel](https://github.com/truvity/ritueel).
 
-- **Ports:** abstract interfaces. A port is a Protobuf contract, its ConnectRPC stubs (Go, Rust), its documentation and a conformance kit. Planned ports: key, store (items), source, blob, transport, index, destination; policy later.
-- **Drivers:** implementations of one port, each a library (the ConnectRPC handler and its logic) plus a thin main that serves it on a socket. Examples: AWS KMS, YubiKey PIV and software keys; rqlite and DynamoDB; files and systemd credentials.
-- **Conformance kits:** the tests every driver of a port must pass, run through the driver's ConnectRPC endpoint in any language.
+- **Ports** are abstract interfaces. A port is a Protobuf contract, its ConnectRPC stubs (Go, Rust), its documentation and a conformance kit.
+- **Drivers** are implementations of one port. A driver is a library (the ConnectRPC handler and its logic) plus a thin main that serves it on a socket. A release carries each driver in every form it can run in: library, tarball, `.deb` and `.rpm` package, OCI image and, where Lambda can run it, an extension zip.
+- **Blocks** are contracts built from other ports and blocks. A block has no backend code, declares its dependencies and gets them passed in, has no cycles, and takes its rules from its host. There is one implementation per block, in the language of its main host. A block moves into atoom at its second consumer. The first blocks are `seal`, `state`, `token` and `export`; none is built yet.
+- **Kits** are the tests every driver of a port, and every block, must pass. A kit runs through the ConnectRPC endpoint, in any language.
 
-The repository is extensible: anyone can write a driver, inside or outside it, and prove it with the port's kit. Each library has its own thin dependencies and its own documentation, and the whole repository has one version.
+A consumer calls a port or a block through its generated client, always, also when the driver runs in the same process. The one exception is Cedar, which is used as a library. Anyone can write a driver, inside or outside this repository, and prove it with the port's kit. Each library has its own thin dependencies and its own documentation, and the whole repository has one version.
 
-sluis hosts the drivers as building-block actors; session and ritueel link them in-process.
+## What atoom is not
 
-Status: being set up. The extraction plan is written, the scaffolding (build, tests, CI, release flow) is in place, and the first libraries have moved: [common](common/README.md), the types every port speaks (`Refusal`, `IndexEntry`), and the item port [store](store/README.md) with its conformance kit and two drivers, [rqlite](store/rqlite/README.md) and [memory](store/memory/README.md), over a small host with a caller guard, [socket](socket/README.md) (every thin main admits only the allowed uids, [socket guard](docs/socket-guard.md)), and the source port [source](source/README.md) (config and secret sources) with its conformance kit and two drivers, [file](source/file/README.md) and [credential](source/credential/README.md), and the first two of the audit ports: the blob port [blob](blob/README.md) (named objects, a write-once create) with its conformance kit and two drivers, [fs](blob/fs/README.md) and [fsreadonly](blob/fsreadonly/README.md), and the transport port [transport](transport/README.md) (a durable queue of audit messages) with its conformance kit and one driver, [spool](transport/spool/README.md), and the other two: the index port [index](index/README.md) (a search index of audit records) with its conformance kit and one driver, [sqlite](index/sqlite/README.md), and the destination port [destination](destination/README.md) (where a published document goes) with its conformance kit, which also holds the Rust trait for a driver and an in-memory reference driver, and one driver, [dir](destination/dir/README.md).
+atoom owns the contracts and the implementations of the parts. It does not own a product:
 
-The key port has moved: [key](key/README.md), its [conformance kit](key/conformance/README.md), the drivers [key/software](key/software/README.md) and [key/yubikeypiv](key/yubikeypiv/README.md), and the small libraries [key/slotplan](key/slotplan/README.md) and [key/pinrelease](key/pinrelease/README.md).
+- **sluis** (identity) keeps its actors, its registry, its grants and its release train. Its key and store actors are thin hosts around the `seal` and `state` blocks.
+- **session** (browser sessions) keeps its session contract, and builds its core as a block inside session first.
+- **audit** keeps its model, its records, its classes and its operations. atoom's blob, transport and index ports serve it, and are being made generic.
+- **ritueel** keeps its ceremonies and its OpenPGP keyring.
+
+What atoom proves, and what each consumer proves, is [record 0014](docs/decisions/0014-what-atoom-proves.md).
+
+## Status
+
+atoom 0.2.0 is released. Seven ports with kits and thirteen drivers are built:
+
+| Port | What it abstracts | Drivers built |
+| --- | --- | --- |
+| [key](key/README.md) | private keys: sign, agree, attest | [software](key/software/README.md), [yubikeypiv](key/yubikeypiv/README.md), [awskms](key/awskms/README.md) |
+| [store](store/README.md) | items with versions, expiry, indexes and a change log | [rqlite](store/rqlite/README.md), [memory](store/memory/README.md), [dynamodb](store/dynamodb/README.md) |
+| [source](source/README.md) | named values and their bytes | [file](source/file/README.md), [credential](source/credential/README.md) |
+| [blob](blob/README.md) | write-once objects and conditional pointers | [fs](blob/fs/README.md), [fsreadonly](blob/fsreadonly/README.md) |
+| [transport](transport/README.md) | a durable ordered queue | [spool](transport/spool/README.md) |
+| [index](index/README.md) | a search index of an append-only log | [sqlite](index/sqlite/README.md) |
+| [destination](destination/README.md) | where a published document goes | [dir](destination/dir/README.md) |
+
+The shared libraries are [common](common/README.md) (the types every port speaks), [socket](socket/README.md) (the socket host and its guard) and, for the card driver, [key/slotplan](key/slotplan/README.md) and [key/pinrelease](key/pinrelease/README.md).
+
+Planned: the blocks, Lambda extension zips, more drivers (PostgreSQL and Valkey stores, AppConfig and SSM sources, an S3 blob store, SQS and NATS JetStream transports, rqlite and PostgreSQL indexes), and generic blob, transport and index contracts. The order is the [plan](docs/plan.md).
 
 ## Documents
 
-- [The extraction plan](docs/plan.md): the design principle, what moves out of sluis and in which order, languages, versioning and releases, how session and ritueel adopt it, the research that moves here, and the open questions.
-- [The socket guard](docs/socket-guard.md): how every thin main guards its UNIX socket (the allowed uids, the group and mode, the peer handed to the handler, the version stamp), in Rust and in Go.
-- [The call context](docs/call-context.md): the deadline and the correlation id that every client of a port sends and every thin main reads and hands down, in Rust and in Go.
-- [Packages, images and tarballs](docs/packages.md): every driver as a tarball, a `.deb` and an `.rpm` package and an OCI image: the naming rules, what a package holds and depends on, the images, the checks.
-- [Releasing](docs/release.md): how a release is made, step by step (the candidate and the tag run), and what the repository owner sets before the first tag.
-- [Decision records](docs/decisions/README.md): purpose and name; ports and drivers over ConnectRPC; libraries with thin dependencies; multi-architecture; one version; research lives here; release management.
+- [Architecture](docs/architecture.md): the layout of the repository, the kinds of thing in it and the dependency rules.
+- [Decision records](docs/decisions/README.md): what was decided and why; the two newest are what atoom proves and versioning and consumption.
+- [The plan](docs/plan.md): what is built, and the steps that come next.
+- [The call context](docs/call-context.md): the deadline and the correlation id that every client of a port sends and every thin main hands down.
+- [The socket guard](docs/socket-guard.md): how every thin main guards its UNIX socket.
+- [Packages, images and tarballs](docs/packages.md): every driver in every form it is released in, Lambda included.
+- [Releasing](docs/release.md): how a release is made, step by step.
+- [Provenance](docs/provenance.md): where the code and the documents came from.
+- [Archive](docs/archive/README.md): the extraction plan, as history.
+
+Each port has a page, `<port>/docs/<port>-port.md`, linked from its README and from [architecture](docs/architecture.md#ports).
 
 ## Development
 

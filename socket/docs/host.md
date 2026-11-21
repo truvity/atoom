@@ -7,4 +7,4 @@
 - **A socket owner.** `ServerConfig::mode` and `socket_gid` set the file mode and the group; the owner of the socket is the uid the process runs as.
 - **Its own command line, version stamp and shutdown.**
 
-The driver library does not change: its `router()` is the same value either way. That is the host seam of the extraction plan ([docs/plan.md](../../docs/plan.md), section 3).
+The driver library does not change: its `router()` is the same value either way. That is the host seam: what a consumer adds around a driver is listed in [provenance](../../docs/provenance.md).

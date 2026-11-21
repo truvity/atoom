@@ -1,6 +1,6 @@
 # store/conformance
 
-The conformance kit of the [item port](../docs/item-port.md): the cases every item driver must pass, run through the driver's ConnectRPC endpoint. A driver passes the suite or it is not a driver.
+The conformance kit of the [item port](../docs/store-port.md): the cases every item driver must pass, run through the driver's ConnectRPC endpoint. A driver passes the suite or it is not a driver.
 
 | | |
 | --- | --- |
@@ -15,6 +15,6 @@ target/debug/store-conformance --socket /tmp/item.sock
 
 `just conformance` (CI runs it on every architecture) builds the kit once and runs it against the thin main of every item driver in this repository: the memory driver, and the rqlite driver on both namespaces where an `rqlited` is available.
 
-The suite writes under a prefix of its own, `conformance-<run>/`, and removes what it wrote at the end (the case `cleanup`), so it can run against a driver that serves a real namespace, and a second run finds the driver clean. The cases and what they fix beyond the contract's comments are in [docs/suite.md](docs/suite.md). Where the code came from is in [../PROVENANCE.md](../PROVENANCE.md).
+The suite writes under a prefix of its own, `conformance-<run>/`, and removes what it wrote at the end (the case `cleanup`), so it can run against a driver that serves a real namespace, and a second run finds the driver clean. The cases and what they fix beyond the contract's comments are in [docs/suite.md](docs/suite.md). Where the code came from is in [provenance](../../docs/provenance.md#store).
 
 Dependencies: the port ([`atoom-store`](../README.md)), [`atoom-common`](../../common/README.md) for the refusal helpers, [`atoom-socket`](../../socket/README.md) for the client, and `clap`, `tokio`, `anyhow` and `futures`. An engine that shares `rules` depends on this crate; the suite itself needs no engine.

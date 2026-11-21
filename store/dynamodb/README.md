@@ -1,6 +1,6 @@
 # store/dynamodb
 
-The DynamoDB item driver of atoom: the [item port](../README.md) over one DynamoDB table. Versioned items with an expiry and declared indexes, conditions and all-or-none writes through DynamoDB transactions, strongly consistent reads when the caller asks for a linearizable one, and DynamoDB's time to live for the space of expired items.
+The DynamoDB driver of atoom: the [store port](../README.md) over one DynamoDB table. Versioned items with an expiry and declared indexes, conditions and all-or-none writes through DynamoDB transactions, strongly consistent reads when the caller asks for a linearizable one, and DynamoDB's time to live for the space of expired items.
 
 | | |
 | --- | --- |
@@ -9,7 +9,7 @@ The DynamoDB item driver of atoom: the [item port](../README.md) over one Dynamo
 | Thin main | `cmd/dynamodb`: `dynamodb serve --socket PATH --table NAME [--create-table]` (a socket of mode 0600 that admits this process's uid), `dynamodb create-table`, `dynamodb check`, `dynamodb version` |
 | Guard flags | `--allow-uid UID` (repeatable; without it only this process's uid may call), `--allow-any-uid`, `--socket-gid GID`, `--socket-mode MODE`: the [socket guard](../../docs/socket-guard.md) |
 | Documentation | [docs/layout.md](docs/layout.md) (the table, how each call maps, the limits), [docs/research](docs/research) |
-| Where it came from | [PROVENANCE.md](PROVENANCE.md) |
+| Where it came from | [provenance](../../docs/provenance.md#store-dynamodb) |
 
 It serves `Get`, `Query` (by key prefix and by index entry) and `Transact` (conditions, puts, deletes). It does **not** keep the change log: `Capabilities` says `tail_log: false`, `TailLog` answers `unimplemented`, and a put or a delete that asks for a log row is refused (`unimplemented`, reason `log`) and writes nothing ([docs/layout.md](docs/layout.md), "The change log"). The conformance kit skips the cases that need the log and runs the rest.
 
@@ -41,4 +41,4 @@ The role needs `dynamodb:GetItem`, `BatchGetItem`, `Query`, `PutItem`, `DeleteIt
 
 ## Tests
 
-`just conformance` runs the item kit (`store-conformance`) against this driver's thin main, through its socket, with DynamoDB Local in a container (the multi-arch image, pinned by digest, one container at a time, removed at the end), and then the Go tests of this module against the same container. On a machine with no container runtime (the macOS CI runners) both are skipped and say so, and `go test` runs the tests that need no table: the rules, the encoding of an item. `ATOOM_REQUIRE_DYNAMODB_LOCAL=1` makes a missing runtime a failure; CI sets it on Linux. No AWS account and no network call to AWS are used. On DynamoDB Local the cases `version_never_decreases` and `expiry` of the kit are retried once (its background sweep of expired items can free a row between two steps; issue [#14](https://github.com/truvity/atoom/issues/14)), and the run prints `RETRIED <case>: ...` when it does; see the [kit's suite page](../conformance/docs/suite.md).
+`just conformance` runs the store kit (`store-conformance`) against this driver's thin main, through its socket, with DynamoDB Local in a container (the multi-arch image, pinned by digest, one container at a time, removed at the end), and then the Go tests of this module against the same container. On a machine with no container runtime (the macOS CI runners) both are skipped and say so, and `go test` runs the tests that need no table: the rules, the encoding of an item. `ATOOM_REQUIRE_DYNAMODB_LOCAL=1` makes a missing runtime a failure; CI sets it on Linux. No AWS account and no network call to AWS are used. On DynamoDB Local the cases `version_never_decreases` and `expiry` of the kit are retried once (its background sweep of expired items can free a row between two steps; issue [#14](https://github.com/truvity/atoom/issues/14)), and the run prints `RETRIED <case>: ...` when it does; see the [kit's suite page](../conformance/docs/suite.md).
