@@ -42,7 +42,7 @@ let detail = refusal::detail(&err); // the whole Refusal, with the field path
 
 ## IndexEntry
 
-`IndexEntry` is one declared index of an item, computed by the writer: the name of the declared index and the value to match under it. The item port (step 3 of the [plan](../../docs/plan.md)) and its consumers use it.
+`IndexEntry` is one declared index of an item, computed by the writer: the name of the declared index and the value to match under it. The [store port](../../store/docs/store-port.md) and its consumers use it.
 
 ## Compatibility
 

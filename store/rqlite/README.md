@@ -1,6 +1,6 @@
 # store/rqlite
 
-The rqlite driver of the [item port](../docs/item-port.md): the item contract over [rqlite](https://rqlite.io)'s HTTP API (replicated SQLite on Raft). For a board or a local installation, with one node or a cluster. It passes the [conformance suite](../conformance/docs/suite.md) on both namespaces, `durable` and `temp`, against a real rqlite.
+The rqlite driver of the [item port](../docs/store-port.md): the item contract over [rqlite](https://rqlite.io)'s HTTP API (replicated SQLite on Raft). For a board or a local installation, with one node or a cluster. It passes the [conformance suite](../conformance/docs/suite.md) on both namespaces, `durable` and `temp`, against a real rqlite.
 
 | | |
 | --- | --- |
@@ -15,6 +15,6 @@ A host that wants more than the guard of the thin main (names for its callers, a
 
 The tests start a real `rqlited` (a pinned release that `just rqlite-fetch` puts in `.cache/rqlite`; no container). A test without the binary prints `SKIP` and returns, which is "not run", never a pass; `just test` sets `ATOOM_REQUIRE_RQLITED=1` on Linux, where a missing binary is a failure. rqlite publishes no macOS build, so on macOS these tests skip and the driver's unit tests run.
 
-How it works (schema, statements, read levels, the sweeper) is in [docs/design.md](docs/design.md). Where the code came from is in [../PROVENANCE.md](../PROVENANCE.md).
+How it works (schema, statements, read levels, the sweeper) is in [docs/design.md](docs/design.md). Where the code came from is in [provenance](../../docs/provenance.md#store).
 
 Dependencies: the port, [`atoom-store-conformance`](../conformance/README.md) (the shared `rules`), [`atoom-common`](../../common/README.md), [`atoom-socket`](../../socket/README.md) (the thin main and the tests), and an HTTP client (`hyper`, `hyper-util`), `serde_json`, `tokio`, `clap` (feature `cli`).

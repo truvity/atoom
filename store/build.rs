@@ -22,7 +22,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let root = manifest.join("proto");
     // The proto this contract imports: the common library's. `connectrpc-build` cannot point a message at another crate (its unified
     // path ignores `extern_path`), so this crate generates its own wire-identical copy of those messages, as the crates of consumers
-    // do (common/PROVENANCE.md, step 1). The copy lives in the package `atoom.common.v1alpha1` of this crate.
+    // do (docs/provenance.md, step 1). The copy lives in the package `atoom.common.v1alpha1` of this crate.
     let common = manifest.join("../common/proto");
     // Cargo scans a directory recursively by mtime, so a changed .proto anywhere under it reruns this script.
     println!("cargo:rerun-if-changed={}", root.display());

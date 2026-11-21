@@ -1,7 +1,7 @@
 //! The rules of the item contract that every engine applies in the same way, written once so that
-//! the engines and the suite cannot drift apart (docs/item-port.md "The contract").
+//! the engines and the suite cannot drift apart (docs/store-port.md "The contract").
 //!
-//! The reasons are the ones of the closed list in docs/item-port.md "Refusals": a bad key or page token
+//! The reasons are the ones of the closed list in docs/store-port.md "Refusals": a bad key or page token
 //! is `invalid_argument` with `address`, a bad batch is `invalid_argument` with `batch`.
 
 use atoom_common::refusal;
@@ -12,7 +12,7 @@ use connectrpc::error::ErrorCode;
 use atoom_store::atoom::store::v1alpha1::__buffa::oneof::condition::Expect;
 use atoom_store::atoom::store::v1alpha1::TransactRequest;
 
-/// The most items one page of `Query` holds (docs/item-port.md).
+/// The most items one page of `Query` holds (docs/store-port.md).
 pub const MAX_PAGE: usize = 500;
 /// The page size of a `Query` that names none.
 pub const DEFAULT_PAGE: usize = 100;
@@ -23,7 +23,7 @@ pub const MAX_OPS: usize = 256;
 pub const MAX_KEY: usize = 512;
 
 /// A new epoch for a change log: a random nonzero value below 2^63, so it fits a signed 64-bit column and never equals
-/// the 0 that means "no epoch" (docs/item-port.md "The contract"). Two logs share one with probability 2^-63. It is read
+/// the 0 that means "no epoch" (docs/store-port.md "The contract"). Two logs share one with probability 2^-63. It is read
 /// from the operating system's random generator, which every board and the local installation have.
 ///
 /// # Errors

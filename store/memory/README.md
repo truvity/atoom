@@ -1,6 +1,6 @@
 # store/memory
 
-The memory driver of the [item port](../docs/item-port.md): the item contract over a map under a mutex. For tests, and for a consumer that needs a store without a backend. It keeps nothing across a restart. It passes the same [conformance suite](../conformance/docs/suite.md) as every other item driver.
+The memory driver of the [item port](../docs/store-port.md): the item contract over a map under a mutex. For tests, and for a consumer that needs a store without a backend. It keeps nothing across a restart. It passes the same [conformance suite](../conformance/docs/suite.md) as every other item driver.
 
 | | |
 | --- | --- |
@@ -16,4 +16,4 @@ let cases = atoom_store_conformance::item_suite(atoom_socket::dial(&socket)).awa
 
 The engine keeps items in a `BTreeMap` under a `Mutex`, a change log in a `Vec`, and an epoch minted when the log is made. Its tests run the suite over a socket, run it twice to prove that the suite removes what it wrote, and prove that a log made again by `reset` has another epoch and refuses a saved position.
 
-Dependencies: the port, [`atoom-store-conformance`](../conformance/README.md) (for the shared `rules`; the suite is a test), [`atoom-common`](../../common/README.md), [`atoom-socket`](../../socket/README.md), `tokio`, `clap`. Where the code came from is in [../PROVENANCE.md](../PROVENANCE.md).
+Dependencies: the port, [`atoom-store-conformance`](../conformance/README.md) (for the shared `rules`; the suite is a test), [`atoom-common`](../../common/README.md), [`atoom-socket`](../../socket/README.md), `tokio`, `clap`. Where the code came from is in [provenance](../../docs/provenance.md#store).

@@ -1,5 +1,5 @@
 # Recipes for atoom: what CI and people run. Run them inside the devbox shell (`devbox shell`, or `devbox run -- just <recipe>`).
-# docs/plan.md, section 6 "Step 0", says what each part is for.
+# docs/archive/extraction-plan.md, section 6 "Step 0", says what each part is for.
 
 set shell := ["bash", "-euo", "pipefail", "-c"]
 
@@ -54,7 +54,7 @@ go-lint:
         (cd "$d" && golangci-lint run --config "$root/.golangci.yaml" ./...)
     done
 
-# The card driver with its build tag atoom_card (key/yubikeypiv; docs/plan.md, section 5): cgo over libpcsclite on Linux (pkg-config and
+# The card driver with its build tag atoom_card (key/yubikeypiv; docs/archive/extraction-plan.md, section 5): cgo over libpcsclite on Linux (pkg-config and
 # libpcsclite-dev) or the PC/SC framework on macOS. The default recipes above build it without the tag, with no C code; this one builds,
 # vets, lints and tests it with the tag, on the architecture it runs on (nothing is cross-compiled). The tests use the fake card; the run
 # against a real card is `just card-bench`, by hand on a bench. tools/scripts/card-env.sh says what a machine without the C library does.
@@ -109,7 +109,7 @@ proto-lint:
 
 # Compare the contracts with the last release (`buf breaking`). Before the first release there is nothing to compare with, and it says
 # so. While the contracts are v1alpha1 a break is allowed; the pull request then carries the `breaking:<library>` label and the
-# release raises the minor version (docs/plan.md, section 8).
+# release raises the minor version (docs/archive/extraction-plan.md, section 8).
 proto-breaking:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -249,7 +249,7 @@ rqlite-fetch:
     [ -x "$dir/linux-$arch/rqlited" ] || { echo "::error::$name.tar.gz holds no rqlited" >&2; exit 1; }
     echo "rqlite-fetch: $arch fetched"
 
-# The dependency rules (docs/plan.md, section 5; decision 0003): no driver requires another driver, a port requires only the ConnectRPC
+# The dependency rules (docs/archive/extraction-plan.md, section 5; decision 0003): no driver requires another driver, a port requires only the ConnectRPC
 # and Protobuf runtimes, every go.mod is in go.work and every crate in the workspace. It fails on a deliberately wrong dependency
 # (the rehearsal proves it).
 check-isolation: rust-toolchain
@@ -291,7 +291,7 @@ shell-lint:
 workflow-lint:
     actionlint
 
-# The release (docs/plan.md, "Library release flow"). The maintainer chooses X.Y.Z, runs `release-prepare` on a branch, opens the PR
+# The release (docs/archive/extraction-plan.md, "Library release flow"). The maintainer chooses X.Y.Z, runs `release-prepare` on a branch, opens the PR
 # and, after the rebase merge, runs `release-tag` on the merge commit. Nothing here pushes.
 #
 # Set the version of the Rust workspace and the requires between Go libraries, remove their replace lines, and write the changelog

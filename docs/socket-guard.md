@@ -1,6 +1,6 @@
 # The socket guard
 
-Every thin main of atoom serves its driver on a UNIX socket, and every one of them guards that socket the same way, in Rust (the crate [`atoom-socket`](../socket/README.md)) and in Go (the module `github.com/truvity/atoom/socket`, the same directory). This page says what the guard does, what the flags are, and what it leaves to the host. It is the first step (G1) of [decision D11 A](plan.md#steps-g1-to-g4-each-driver-as-its-own-package-and-image-decision-d11-a): the guard that sluis's driver hosts added to atoom's drivers now lives in atoom, so that sluis can run atoom's own programs and delete its hosts.
+Every thin main of atoom serves its driver on a UNIX socket, and every one of them guards that socket the same way, in Rust (the crate [`atoom-socket`](../socket/README.md)) and in Go (the module `github.com/truvity/atoom/socket`, the same directory). This page says what the guard does, what the flags are, and what it leaves to the host. The guard is atoom's, so that a consumer such as sluis runs atoom's own programs and writes no host of its own around them.
 
 The guard knows no names. It knows a **uid**, which the kernel reports for each connection, and nothing of who that uid is in any registry: a host that names its callers maps the uid it is handed to a name of its own. The refusal, the flags and the defaults are the same for every driver.
 

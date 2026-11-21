@@ -1,6 +1,6 @@
 # The call context: the deadline and the correlation id
 
-A call that crosses a socket carries two things that belong to the request and not to the call: **how long it may still take** and **which request it is part of**. Every client of an atoom port sends both, every thin main of atoom reads both, and a handler that calls on hands both down. The same rules hold in Rust (the crate [`atoom-socket`](../socket/README.md), module `call`) and in Go (the module `github.com/truvity/atoom/common`, package `call`; `socket.Serve` applies it). They are the rules sluis wrote for its own kits (its contracts page, "Every call"), moved here so that a consumer's client is not a copy of atoom's.
+A call that crosses a socket carries two things that belong to the request and not to the call: **how long it may still take** and **which request it is part of**. Every client of an atoom port sends both, every thin main of atoom reads both, and a handler that calls on hands both down. The same rules hold in Rust (the crate [`atoom-socket`](../socket/README.md), module `call`) and in Go (the module `github.com/truvity/atoom/common`, package `call`; `socket.Serve` applies it). They are the rules sluis first wrote for its own kits, moved here so that a consumer's client is not a copy of atoom's. This page is their one home: each [port page](architecture.md#ports) links here and does not repeat them.
 
 ## The deadline
 
@@ -13,9 +13,11 @@ A call that crosses a socket carries two things that belong to the request and n
 
 ## The correlation id
 
-- **On the wire** it is the header **`Sluis-Correlation-Id`** (HTTP header names are not case sensitive; Rust spells it in lower case). The name is the one sluis chose first, kept so that one id runs through a chain of hosts of either kind; it is a constant of one line in each language (`call::HEADER_CORRELATION`, `call.HeaderCorrelation`).
+- **On the wire** it is the header **`Atoom-Correlation-Id`** (HTTP header names are not case sensitive; Rust spells it in lower case). It is a constant of one line in each language (`call::HEADER_CORRELATION`, `call.HeaderCorrelation`).
+  - **Built today:** the header is still named `Sluis-Correlation-Id`, the name sluis chose first.
+  - **Planned (step B14 of the [plan](plan.md), [record 0009](decisions/0009-connectrpc-in-process.md)):** the name becomes `Atoom-Correlation-Id`, a neutral name on a contract that sluis, session and audit share. A server accepts the old name for one release and reads the new name first; a client sends the new name only. A product name does not belong on a shared contract.
 - **The format** is 1 to 64 characters of `A-Z`, `a-z`, `0-9`, `-` and `_`: a UUID fits, so does a token. An id in any other shape is **dropped** by the server, never made the id of the handler, never logged, never echoed and never passed on, so a hostile header cannot reach a log line or a record. A client does the same: an id that is not valid is not set, and is not sent.
-- **Atoom makes no ids.** The first hop of a request makes it (sluis's `entry` makes a UUID version 4 for every request) and every later hop passes it on. A caller outside any handler gives its own: in Rust `call::scope(Call::new().with_correlation(id)…)`, in Go `call.WithCorrelationID(ctx, id)`.
+- **Atoom makes no ids.** The first hop of a request makes it (for example, sluis's `entry` makes a UUID version 4 for every request) and every later hop passes it on. A caller outside any handler gives its own: in Rust `call::scope(Call::new().with_correlation(id)…)`, in Go `call.WithCorrelationID(ctx, id)`.
 - **A server reads it** into the handler: Rust `call::correlation_of(ctx.extensions())` (the request) or `call::correlation()` (from any code inside the handler); Go `call.CorrelationID(ctx)`. `None` or `""` when the caller sent none or an invalid one.
 - **A client sends it.** Rust: every call made through a client of `dial` inside a handler or a `call::scope`. Go: the options `call.ClientOptions()` of a generated client (`New<Service>Client(hc, url, call.ClientOptions()...)`) put the id of the context on every call, unary and streaming. The Go clients of atoom's own kits (`key/conformance.Dial`) already carry them.
 - The server does not echo the id in a response header.

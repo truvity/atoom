@@ -21,4 +21,4 @@ The guard knows uids and no names. It is not a registry and has no call graph: a
 
 It is a shared library (listed in `tools/isolation/shared.txt`): any driver or kit may require it, and the rule that a first-level library requires only the runtimes does not apply to it, since it is plumbing and not a port. Its Rust dependencies are `connectrpc`, `hyper`, `hyper-util`, `tokio`, `tower`, `http`, `futures`, `anyhow`, `tracing`, `rustix` (the group of the socket and the uid of the process; safe wrappers, the crate forbids `unsafe`), [`atoom-common`](../common/README.md) (the refusal), with the feature `cli` `clap`, and with the feature `testing` `bytes` and `http-body-util`. Its Go dependencies are `connectrpc.com/connect`, the common module and `golang.org/x/sys` (the credentials on macOS and FreeBSD only).
 
-Where the code came from is in [PROVENANCE.md](PROVENANCE.md). The [host page](docs/host.md) says what a host adds.
+Where the code came from is in [provenance](../docs/provenance.md#socket). The [host page](docs/host.md) says what a host adds.

@@ -9,7 +9,7 @@ The fs driver of the [blob port](../docs/blob-port.md): the blob contract over a
 | Guard flags | `--allow-uid UID` (repeatable; without it only this process's uid may call), `--allow-any-uid`, `--socket-gid GID`, `--socket-mode MODE`: the [socket guard](../../docs/socket-guard.md) |
 | Feature | `cli` (default): the flags and the socket (`clap`, `atoom-socket`, `tracing-subscriber`). A consumer that mounts `router()` in a host of its own turns the default features off |
 
-How the directory works is in [../fsdir/docs/fsdir.md](../fsdir/docs/fsdir.md); what this driver adds is in [docs/fs.md](docs/fs.md). Where the code came from is in [../PROVENANCE.md](../PROVENANCE.md).
+How the directory works is in [../fsdir/docs/fsdir.md](../fsdir/docs/fsdir.md); what this driver adds is in [docs/fs.md](docs/fs.md). Where the code came from is in [provenance](../../docs/provenance.md#blob).
 
 A host that wants more than the guard of the thin main (names for its callers, a call graph, its own command line) does not use the thin main: it opens the `Fs`, registers `Service(fs).router()` on its own server, and may call `suite::run_temp()` from a `conformance` command of its own. That is the seam: the driver knows nothing of who calls it.
 

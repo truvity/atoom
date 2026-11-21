@@ -1,47 +1,38 @@
-# The card slot map, touch, PIN and exclusive access
+# The card slot map
 
-*Copied from [truvity/sluis](https://github.com/truvity/sluis) `main` at commit `3f0afea8773b3d85205a5fb7d521282bbdcff598`, file `docs/concepts/keys.md` (the sections Keys per board (with The card slot map) and Exclusive card access, touch and PIN). The text stays there as it is (decision records are append-only); sluis links here for the card behaviour. Names such as `key@` are sluis's key service, the first consumer of this driver; the links that point into sluis's own pages are not part of this repository.*
+Which PIV slot of a YubiKey holds which key, with the algorithm and the PIN and touch policy of each, as the `key/yubikeypiv` driver makes and adopts them.
 
-## Keys per board
+## The card
 
-Each board has a card of its own, a YubiKey in PIV mode with 24 slots and no symmetric keys. A card belongs to one boundary, and every key of the board is born on its card. A second card per board serves a further L1 boundary on the same engine. Data keys are not on the card: key@ wraps them for each card's key-agreement key. A lost board is replaced, not restored: a new key on a new card, a new certificate, and ritueel revokes the old one; the other boards rewrap every data key for the new card. The root cards are ritueel's and never sit in a board.
+A YubiKey in PIV mode has 24 key slots and no symmetric keys. The driver holds one card for one host, and every key it serves is born on that card ([slots-pin-touch.md](slots-pin-touch.md)). A card has no backup: a host whose card is lost makes new keys on a new card.
 
-### The card slot map
+## The rows the driver serves
 
-A documented, versioned map says which slot serves which purpose: one slot per purpose and per algorithm, and six rotation spares. This is the default map, version 2 (decided 2026-11-18; version 1 left `89` to `95` spare). Every board of a version has the same layout, so enabling a purpose later never renumbers the keys of a live card.
+The driver has a table in `plan.go`: one row for each purpose, with its slot, its algorithm and its policy. **Built today:** the table is a closed list of ten purposes, and the key port still takes only those names. **Planned:** the port takes any purpose that a host declares, and the host's `seal` block owns the purposes, so the table moves out of the driver. The slot, the algorithm and the policy of a row stay what they are below.
 
-| Slot | Purpose |
-|---|---|
-| `9c` | X.509 intermediate (generated only when the PKI add-on turns the token certificate on; the core needs no slot `9c`) |
-| `9a` | Token signing |
-| `9d` | Key agreement (ECDH): unwraps data keys, the boundary's `grant` data key among them |
-| `82` | `ssh-user` CA |
-| `83` | `ssh-host` CA |
-| `84` | Log key of an audit writer instance |
-| `85` | OpenPGP release-signing subkey (release boundary only) |
-| `86` | Workload issuer, for `sluis-node` (enabled on use) |
-| `87` | PIN release key: signs the request of a locked board (PIN policy never, touch never) |
-| `88` | RS256 token key of the per-audience exception (RSA-2048, enabled on use) |
-| `89` | Issuance log key of `ca` (P-384) |
-| `8a` | Enrolment key of `exchange` (P-384 ECDH) |
-| `8b` | FAPI PS256 token key (RSA-2048) |
-| `8c` | FAPI ES256 token key (P-256) |
-| `8d` | FAPI EdDSA token key (Ed25519, firmware 5.7 or newer) |
-| `8e` | Witness key (Ed25519) |
-| `8f` | Log key of a second audit writer instance (P-256) |
-| `90` to `95` | Rotation spares (six) |
-| `9e` | Not used: the card-authentication slot signs without a PIN by default |
+| Slot | Purpose in the table | Algorithm | PIN policy | Touch policy |
+| --- | --- | --- | --- | --- |
+| `9c` | `x509-intermediate` | ES384 (ECDSA P-384, SHA-384) | once | never |
+| `9a` | `token-signing` | ES384 | once | never |
+| `9d` | `wrapping` | ECDH-P384 (key agreement, the only such slot) | once | never |
+| `82` | `ssh-user` | ES384 | once | never |
+| `83` | `ssh-host` | ES384 | once | never |
+| `84` | `audit-log` | ES256 (ECDSA P-256, SHA-256) | once | never |
+| `85` | `release-signing` | ES384 | once | never |
+| `86` | `workload-issuer` | ES384 | once | never |
+| `87` | `pin-release` | ES384 | never | never |
+| `88` | `token-signing-rs256` | RS256 (RSA-2048, PKCS#1 v1.5, SHA-256) | once | never |
 
-A slot is generated only when its purpose is enabled; the rotation spares hold the new key of an event rotation while the old one finishes, and a purpose that the map does not hold (a further trust domain's intermediate) is named in the installation's key plan with one of them. Cloud federation keys and NATS keys are not card keys. Slot `f9`, the Yubico attestation slot, is never touched. `sluis config check`, `sluis key request` and board initialisation refuse a collision and an enabled purpose with no slot. The release subkey lives in a PIV slot like every other board key; the OpenPGP applet is not used ([ADR 0006](/decisions/0006-keys-and-sealing/#the-slot-plan)).
+- **The names are the reference map, which is sluis's.** They are the purposes of sluis, the first host of the driver. The same table is `slotplan.Default` in [key/slotplan](../../slotplan/README.md), with the other slots of the map: the table with its reasons is in [the slot plan](../../slotplan/docs/README.md) and [slot-plan.md](../../slotplan/docs/slot-plan.md). What the driver needs from a row is the slot, the algorithm and the two policies.
+- **One slot for each purpose and algorithm.** Every card of one version of the map has the same layout, so making a key for a purpose later never renumbers the keys of a card in use.
+- **`88` is optional.** A card whose slot `88` holds a key that is not the plan's (another algorithm, an imported key) still starts, and the driver serves the other purposes and leaves that one absent. Any other slot with a wrong key refuses the start.
+- **The RSA key is slow.** One private-key operation of the card takes about 0.17 s ([pcsc-and-cards-on-boards.md](pcsc-and-cards-on-boards.md#the-rsa-key-and-the-queue)).
+- **Slots `89` to `8f`** have a place in version 2 of the map (an issuance log key, an enrolment key, three FAPI token keys, a witness key and a second audit log key) and **no row in the driver**: a purpose of those slots cannot be made on a card yet. `slotplan.CheckCard` refuses a plan that enables one.
+- **Slots `90` to `95`** are rotation spares: the new key of a rotation holds one while the old one finishes. A purpose that the map does not hold takes one of them.
+- **Slot `9e` is not used,** because the card-authentication slot signs without a PIN by default. **Slot `f9`, the Yubico attestation slot, is never touched.**
+- **The OpenPGP applet is not used.** A key that a host needs for an OpenPGP signature (`release-signing`, `85`) lives in a PIV slot, and the driver only signs digests with it.
+- **Keys that are not card keys stay off the card.** The driver serves what the table lists. Cloud federation keys and message-bus keys of a host are the host's.
 
+## Keys are generated on the card
 
-## Exclusive card access, touch and PIN
-
-key@ has the card to itself. Its card driver runs as a dedicated user, the card service accepts only that user, and no other software that talks to cards runs on the board. The reason was measured on 2026-10-31 on a YubiKey 5 Nano (firmware 5.8.0): the PIN state belongs to the powered card and not to a connection, so while it is unlocked any local process can sign; any client's default disconnect resets the card; and wrong PINs from any local user block it ([ADR 0006](/decisions/0006-keys-and-sealing/#exclusive-card-access)).
-
-Board cards are touch never and PIN once, so a board signs unattended. A board starts locked, and key@ never stores the PIN in plaintext on disk:
-
-- `sluis node unlock <node>` delivers the PIN over an authenticated channel;
-- an unlocked peer releases the board's PIN through the store, sealed to a one-time key of the locked board's card driver, which covers a reboot of one board and a rolling update; the locked key@ signs its request with a card slot that needs no PIN, the peer verifies the signature and the slot's attestation first, and the locked board verifies the peer's signed answer before its card is given the PIN;
-- after a full power loss one manual unlock is needed, and the first board then unlocks the others;
-- a wrong PIN is never retried, because the card blocks after three attempts and then needs the PUK.
+A key is made on the card, with the policies of its row, in development only and with the factory management key. In any other environment the driver adopts a key it finds in the slot after it verifies the attestation (Yubico's roots, the firmware floor, the slot, the algorithm and both policies), and refuses a key that fails ([cards.md](cards.md)).

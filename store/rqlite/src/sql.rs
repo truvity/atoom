@@ -413,7 +413,7 @@ impl Ns {
 
     /// The three statements that free one batch of expired items and their index entries, and log
     /// the removal of each one that was written with a log row (expiry is delivered to a watcher as
-    /// a delete, store/docs/item-port.md "The change log"). The third one's `rows_affected` is the batch
+    /// a delete, store/docs/store-port.md "The change log"). The third one's `rows_affected` is the batch
     /// size. All three pick the same keys: they run in one transaction.
     #[must_use]
     pub fn sweep_expired(&self, now: i64, batch: i64) -> [Stmt; 3] {

@@ -1,4 +1,4 @@
-# The item port
+# The store port
 
 `atoom.store.v1alpha1.ItemService`: a store of **items**. An item is a key, a version, bytes, an optional expiry and the index entries its writer computed. A driver sees items and nothing else; it never knows what the bytes mean. The contract is [item.proto](../proto/atoom/store/v1alpha1/item.proto); this page is its rules in prose, and the conformance kit ([README](../conformance/README.md), [the suite](../conformance/docs/suite.md)) holds every driver to them.
 
@@ -23,7 +23,13 @@ The port has five calls:
 
 ## Capabilities
 
-`Capabilities` is the first call a caller makes and the one the kit makes: `store` names the engine (`memory`, `rqlite`, `dynamodb`) and `tail_log` says whether the driver keeps the change log. A call the driver does not offer answers `unimplemented` and the driver says so here (plan R4); the kit skips the cases that need it, and runs a case of its own that holds the driver to its word.
+`Capabilities` is the first call a caller makes and the one the kit makes. It says:
+
+- `store`: the name of the engine (`memory`, `rqlite`, `dynamodb`);
+- `tail_log`: whether the driver keeps the change log;
+- `durability` (planned, [record 0012](../../docs/decisions/0012-store-durability.md), step B3): `strict` (an acknowledged write survives a crash and a failover) or `lossy` (a failover can lose acknowledged writes). It is an additive field. A consumer refuses a binding that is weaker than its data needs. Until it is built, a consumer takes the durability from the driver's documentation: `store/dynamodb` and `store/rqlite` are strict, and `store/memory` is for tests.
+
+A call the driver does not offer answers `unimplemented`, and the driver says so here. The kit skips the cases that need it and runs a case of its own that holds the driver to its word.
 
 A driver with `tail_log: false`:
 
@@ -31,7 +37,7 @@ A driver with `tail_log: false`:
 - refuses a put or a delete that asks for a log row (`log: true`) with `unimplemented`, reason `log`, field `puts[i].log` or `deletes[i].log`, and writes nothing, so that no change is lost silently;
 - names no log head and no epoch in `QueryResponse` (both 0).
 
-A driver that does not serve `Capabilities` (it answers `unimplemented`) is taken to offer every call, as the drivers did before the call existed. The call is an additive change of the contract. Drivers may also be stricter than the contract in the size of a `Transact` (`store/dynamodb` takes 100 writes, not 256) and say so in their documentation.
+A driver that does not serve `Capabilities` (it answers `unimplemented`) is taken to offer every call. Drivers may also be stricter than the contract in the size of a `Transact` (`store/dynamodb` takes 100 writes, not 256) and say so in their documentation.
 
 ## Time to live
 
@@ -63,21 +69,19 @@ Every refusal is a Connect error with the `Refusal` detail of [common](../../com
 | `unimplemented` | `log` | a put or a delete asks for a log row of a driver that keeps no change log (`puts[i].log`, `deletes[i].log`) |
 | `unavailable` | `engine` | the engine is down or cannot answer at the asked level; the message is the reason only, never the engine's text |
 
-## Engines
+## Drivers
 
-A driver keeps the items in an engine. The drivers in this repository:
+| Driver | Engine | Durability | Where it fits |
+| --- | --- | --- | --- |
+| [store/rqlite](../rqlite/README.md) | rqlite (replicated SQLite on Raft) | strict | a board or a local installation, one node or a cluster |
+| [store/memory](../memory/README.md) | a map under a mutex | none: for tests | tests, and a consumer that needs no backend |
+| [store/dynamodb](../dynamodb/README.md) | DynamoDB | strict | AWS, serverless; a Go library that links into a Lambda function; no change log |
+| `store/postgres` | PostgreSQL | strict | Kubernetes (planned, step B6) |
+| `store/valkey` | Valkey | strict on one node with the append-only file synced on every write; lossy with asynchronous replication | session records and other temporary data (planned, step B10) |
 
-| Driver | Engine | Where it fits |
-| --- | --- | --- |
-| [store/rqlite](../rqlite/README.md) | rqlite (replicated SQLite on Raft) | a board or a local installation with one node or a cluster |
-| [store/memory](../memory/README.md) | a map under a mutex | tests, and a consumer that needs no backend |
-| [store/dynamodb](../dynamodb/README.md) | DynamoDB | AWS, serverless; a Go library that links into a Lambda function; no change log |
+## The call context
 
-Optional calls (`TailLog` on a driver whose engine cannot stream changes) are declared through `Capabilities` (below).
-
-## Every call carries the deadline and the correlation id
-
-Every call of the port carries what is left of the caller's deadline (`Connect-Timeout-Ms`) and the correlation id of the request (`Sluis-Correlation-Id`, 1 to 64 characters of letters, digits, `-` and `_`), and the thin main of every driver reads both and hands them to its handler, which hands them down to the calls it makes. A callee never extends its caller's deadline, and an id of another shape is dropped. A client of the item port: `ItemServiceClient`, Rust `ItemServiceClient::new(c.transport(), c.config())` over `atoom_socket::dial`, Go `storev1alpha1connect.NewItemServiceClient(hc, url, call.ClientOptions()...)`. `TailLog` carries them too. The rules and how a caller outside a handler states them are on [the call context](../../docs/call-context.md).
+Every call carries the deadline and the correlation id of the request it is part of, `TailLog` included. The rules are on [the call context](../../docs/call-context.md). A Rust client: `ItemServiceClient::new(c.transport(), c.config())` over `atoom_socket::dial`; a Go client: `storev1alpha1connect.NewItemServiceClient(hc, url, call.ClientOptions()...)`.
 
 ## A driver of your own
 

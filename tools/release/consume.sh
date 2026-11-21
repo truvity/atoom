@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# The post-tag proof of consumption (docs/plan.md, "Library release flow", step 4): in clean temporary projects, `go get` every Go
+# The post-tag proof of consumption (docs/archive/extraction-plan.md, "Library release flow", step 4): in clean temporary projects, `go get` every Go
 # library at vX.Y.Z through the public proxy and build it, and build a smoke Rust crate against the git tag.
 #
 #   tools/release/consume.sh X.Y.Z            run it (needs the tags pushed; the proxy may lag, so each `go get` is retried)

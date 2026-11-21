@@ -9,7 +9,7 @@ The AWS KMS key driver of atoom: the [key port](../README.md) over asymmetric ke
 | Thin main | `cmd/awskms`: `awskms serve --socket PATH [--alias-prefix P] [--create-keys]` (a socket of mode 0600 that admits this process's uid), `awskms version` |
 | Guard flags | `--allow-uid UID` (repeatable; without it only this process's uid may call), `--allow-any-uid`, `--socket-gid GID`, `--socket-mode MODE`: the [socket guard](../../docs/socket-guard.md) |
 | Documentation | [docs/layout.md](docs/layout.md) (how the contract maps to KMS), [docs/research](docs/research) |
-| Where it came from | [PROVENANCE.md](PROVENANCE.md) |
+| Where it came from | [provenance](../../docs/provenance.md#key-awskms) |
 
 It supports `ES384`, `ES256`, `RS256` and `ECDH-P384`. It does **not** attest (KMS cannot say where a key was born): `Capabilities` says `attests: false`, and `Attest`, `VerifyAttestation` and the three calls of the PIN release answer `unimplemented`. The contract has no call that makes a data key, so `GenerateDataKey` is not used ([docs/layout.md](docs/layout.md), "What is not here").
 

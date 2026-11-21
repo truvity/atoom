@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Holds every file that spells a pinned runtime to versions.yaml (docs/plan.md, "Pinned runtimes"): the devbox packages, the Rust
+# Holds every file that spells a pinned runtime to versions.yaml (docs/archive/extraction-plan.md, "Pinned runtimes"): the devbox packages, the Rust
 # toolchain and edition, the Go directive and toolchain of go.work and of every go.mod, the ConnectRPC and Protobuf requirements of
 # every go.mod, the exact pins of the Rust runtimes in every Cargo.toml, and the checksum of the Go toolchain of the native release build.
 #

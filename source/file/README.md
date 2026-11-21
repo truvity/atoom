@@ -10,7 +10,7 @@ The file driver of the [source port](../docs/source-port.md): the config source 
 | Feature | `cli` (default): the flags and the socket (`clap`, `atoom-socket`, `tracing-subscriber`). A consumer that mounts `router()` in a host of its own turns the default features off |
 | Watch | `NOTIFY`: it looks at the file again every 200 ms and says when the label changes, so a replaced file and the swap of a mounted ConfigMap are both seen |
 
-The version label is the SHA-384 of the file, in hex, so the same bytes give the same label whichever way they arrived. A path is opened below the directory: a symlink that stays below it is followed (a mounted ConfigMap is a tree of them), one that leaves it is refused. How it works is in [docs/file.md](docs/file.md). Where the code came from is in [../PROVENANCE.md](../PROVENANCE.md).
+The version label is the SHA-384 of the file, in hex, so the same bytes give the same label whichever way they arrived. A path is opened below the directory: a symlink that stays below it is followed (a mounted ConfigMap is a tree of them), one that leaves it is refused. How it works is in [docs/file.md](docs/file.md). Where the code came from is in [provenance](../../docs/provenance.md#source).
 
 A host that wants more than the guard of the thin main (names for its callers, a call graph, its own command line) does not use the thin main: it opens the `Dir`, registers `Service(dir).router()` on its own server, and may call `suite::run_temp()` from a `conformance` command of its own. That is the seam: the driver knows nothing of who calls it.
 

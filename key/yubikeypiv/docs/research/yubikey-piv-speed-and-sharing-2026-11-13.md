@@ -1,18 +1,12 @@
-# A YubiKey 5 Nano with firmware 5.8.0 signs about 7 times a second over PIV, and what a second program does to it (2026-11-13)
+# YubiKey 5 Nano PIV: signing speed, and what a second program does to the card
 
-*Copied from [truvity/ritueel](https://github.com/truvity/ritueel) `main` at commit `a569f9366c0bef69e376db2ae25db8808336a875`, file `docs/research/yubikey-piv-speed-and-sharing-2026-11-13.md`, with the site markup removed (the front matter became the title, the figures are left out). ritueel keeps its copy until it is restarted. Links that start with a slash point to ritueel's own site and are not part of this repository.*
+How long one operation takes on a YubiKey 5 Nano with firmware 5.8.0 in its PIV application (the smart-card part that holds keys in numbered slots), and what happens when several callers, or a second program, use the same card at once. The figures were measured on 2026-10-30 and 2026-11-02 by the sluis project and are restated here from its public issue comments. This page is research; the last section says what it means for `key/yubikeypiv`.
 
-## Question
+## Result
 
-How long does one operation take on a YubiKey 5 Nano in its PIV application (the smart-card part that holds keys in numbered slots)? What happens when several callers, or a second program, use the same card at the same time?
+**The card is the slow part, and it works on one operation at a time.** A P-384 signature takes about 147 ms (about 7 a second). A P-256 signature takes about 80 ms. RSA-3072 takes about 0.72 s. Four callers on one card get the same total rate as one caller, and each waits about four times longer.
 
-## When
-
-Measured on 2026-10-30 and again on 2026-11-02 by the sister project [sluis](https://github.com/truvity/sluis). The figures below are restated from its public issue comments, in ritueel's terms. One older ritueel note adds a figure from 2026-10-31 and 2026-11-01. This note was written on 2026-11-13. ritueel did not repeat the sluis runs.
-
-## Verdict
-
-**The card is the slow part, and it works on one operation at a time.** A P-384 signature takes about 147 ms (about 7 a second). A P-256 signature takes about 80 ms. RSA-3072 takes about 0.72 s. Four callers on one card get the same total rate as one caller, and each waits about four times longer. **In these runs, a second program disturbed the holder (the program that already uses the card) only when the holder did not hold the card exclusively.** With piv-go (a Go library for PIV) the holder lost no operation in 5 of 5 runs. With ykcs11 (Yubico's PKCS#11 module) the holder lost one or two operations in 5 of 5 runs on 2026-11-02, and failed in 3 of 5 runs on 2026-10-30, where one run did not recover.
+**In these runs, a second program disturbed the holder (the program that already uses the card) only when the holder did not hold the card exclusively.** With piv-go (a Go library for PIV) the holder lost no operation in 5 of 5 runs. With ykcs11 (Yubico's PKCS#11 module) the holder lost one or two operations in 5 of 5 runs on 2026-11-02, and failed in 3 of 5 runs on 2026-10-30, where one run did not recover.
 
 ## Method
 
@@ -41,7 +35,7 @@ In the tables, p50 is the median. p95 and p99 are the values that 95 and 99 perc
 ## What the setup over- and under-counts
 
 - **The host is a slow board.** The source says the libraries add 1 to 3 ms and "the card is the cost". On a faster host the total would be a few milliseconds lower at most. This was not measured on another host.
-- **The keys needed no touch and one PIN check per process.** A key with touch always, or PIN always, adds the time of the person and of the check for every signature. These runs do not measure that. The ritueel card note gives 14.6 s for a missed touch ([card libraries note](./card-libraries-and-tooling-2026-11-01.md)).
+- **The keys needed no touch and one PIN check per process.** A key with touch always, or PIN always, adds the time of the person and of the check for every signature. These runs do not measure that; a missed touch took about 14.3 s in [another measurement](./yubikey-piv-pin-touch-and-reset-2026-11-13.md) and 14.6 s in the [card libraries note](./card-libraries-and-tooling-2026-11-01.md).
 - **Every cell is one run.** The sources give no repeat of a cell on the same day, so the spread is only the p95 and p99 inside a cell. The 2026-11-02 run is a second look at the same cells, with a different count.
 - **The loop does nothing else.** A real program adds its own work between signatures.
 
@@ -77,7 +71,7 @@ ECDH is key agreement: the card combines its private key with a public key from 
 | RSA-3072 PS256, p50, repeat | 716.1 ms ykcs11 (digest in); 719.0 ms piv-go | 2026-11-02 |
 | Key generation | RSA-3072: 56 s. EC key: 0.35 to 0.95 s. The number of runs is not given. | 2026-10-30 |
 
-Two readings from the table. The ykcs11 start-up time is long because its first `C_OpenSession` call (the call that opens a session on the token) builds one attestation for each key on the card (8 keys in the sources); the sources do not say how long it takes with fewer keys. Ed25519 here is the pure kind, where the whole message goes to the card, and the time grows with the message: On 2026-10-30 the time grew by about 0.10 ms for each further byte between 64 and 1,024 bytes (87.8 to 186.1 ms). On 2026-11-02 it grew by about 0.11 ms for each further byte between 64 and 3,061 bytes (86.9 to 423.0 ms). These are this note's own calculations. The 3,061 bytes is the largest message that ykcs11 accepted. ECDSA signed a digest or, with the `_SHA384` mechanism, a message hashed inside the caller's process, and both took 145.9 ms.
+Two readings from the table. The ykcs11 start-up time is long because its first `C_OpenSession` call (the call that opens a session on the token) builds one attestation for each key on the card (8 keys in the sources); the sources do not say how long it takes with fewer keys. Ed25519 here is the pure kind, where the whole message goes to the card, and the time grows with the message: on 2026-10-30 by about 0.10 ms for each further byte between 64 and 1,024 bytes (87.8 to 186.1 ms), and on 2026-11-02 by about 0.11 ms for each further byte between 64 and 3,061 bytes (86.9 to 423.0 ms). These are calculations of this page. The 3,061 bytes is the largest message that ykcs11 accepted. ECDSA signed a digest or, with the `_SHA384` mechanism, a message hashed inside the caller's process, and both took 145.9 ms.
 
 ### Several callers on one card
 
@@ -107,25 +101,33 @@ Client A, through ykcs11, did more than disturb the holder: it signed with the c
 
 These are conclusions, not measurements.
 
-1. **Plan on the card's time.** On a P-384 key the card allows about 7 signatures a second, and a second thread or a second process does not raise it. A step that signs many things in a row, for example a certificate with three signatures, costs the sum of them. The card note measured about 450 ms for such a certificate, and about 150 ms for one P-384 signature with piv-go v2.6.0 on firmware 5.8.0 ([card libraries note](./card-libraries-and-tooling-2026-11-01.md); that note gives no count of runs). It agrees with the 148 ms measured here.
-2. **One program should own the card.** In these runs, two programs that shared the card through ykcs11 disturbed each other. piv-go connects to the card exclusively (the source's word; PC/SC has an exclusive and a shared way to connect), and the second client then failed instead of breaking the first. The card note saw the same with a system OpenPGP service: `scdaemon` holding the card stopped piv-go from opening it, and the reverse, and nothing was damaged. `gpgconf --kill scdaemon` freed the card.
-3. **A reset by one client affects all.** The sister project's reading is that libykpiv, after an error, reconnects with a card reset (`SCARD_RESET_CARD`), and that this resets the card for every client. The same project reports (its record 0006, "Exclusive card access", measured 2026-10-31, no counts given) that the PIN state belongs to the powered card, not to one connection. In a ceremony this means: close other card programs before the step that needs the PIN.
+1. **The card's time is the budget.** On a P-384 key the card allows about 7 signatures a second, and a second thread or a second process does not raise it. A step that signs many things in a row costs the sum of them. The card libraries note measured about 450 ms for a certificate with three signatures, and about 150 ms for one P-384 signature with piv-go v2.6.0 on firmware 5.8.0 ([card libraries note](./card-libraries-and-tooling-2026-11-01.md); that note gives no count of runs). It agrees with the 148 ms measured here.
+2. **One program should own the card.** In these runs, two programs that shared the card through ykcs11 disturbed each other. piv-go connects to the card exclusively (the source's word; PC/SC has an exclusive and a shared way to connect), and the second client then failed instead of breaking the first. The card libraries note saw the same with a system OpenPGP service: `scdaemon` holding the card stopped piv-go from opening it, and the reverse, and nothing was damaged. `gpgconf --kill scdaemon` freed the card.
+3. **A reset by one client affects all.** The sluis reading is that libykpiv, after an error, reconnects with a card reset (`SCARD_RESET_CARD`), and that this resets the card for every client. Sluis reports the same project's measurement of 2026-10-31 (no counts given) that the PIN state belongs to the powered card, not to one connection ([slots-pin-touch.md](../slots-pin-touch.md), "Exclusive card access"). So other card programs should be closed before a step that needs the PIN.
 4. **ykcs11 does not choose a reader.** The source reports that it connects to every reader that the PC/SC service lists and has no filter by reader or serial number. No run behind this is in the comments.
 
-The sister project built its own card driver and cache after these runs. Its figures for that driver (161 to 166 ms for P-384, 143 ms for ECDH) include its own overhead and are in [its record 0006](https://github.com/truvity/sluis/blob/c2c15f18beef908a0f6c2279326a6e126e9869e3/docs/decisions/0006-keys-and-sealing.md), sections "Keys per board", "DataKeyWrap" and "Exclusive card access".
+Sluis built its own card driver and cache after these runs, and its figures for that driver (161 to 166 ms for P-384, 143 ms for ECDH) include its own overhead.
+
+## What it means for key/yubikeypiv
+
+- **The driver uses piv-go, not ykcs11,** for the reasons in [the S4 spike](./s4-piv-go-or-pkcs11.md): the exclusive connection, the first signature in 0.17 s, and no second holder breaking the first. The runs above are the measurements behind that choice. The spike dates the same comparison 2026-10-31; the comments are dated 2026-10-30 and 2026-11-02. This page keeps the dates of the comments.
+- **Speed through the driver.** Raw card: about 147 ms for P-384 with piv-go (6.8 a second). Through the driver: 161 to 166 ms (median of 50 signatures on each of three boards, 2026-11-04), about 6 a second, because the driver adds piv-go's command handling, one connect call and a check of each signature with the public key ([slots-pin-touch.md](../slots-pin-touch.md)). These agree: the difference is the driver's own work. RSA-2048, which this page did not run, took a median of 173 ms of 50 against 148 ms for ES384 on the same card model and firmware (2026-11-08, [pcsc-and-cards-on-boards.md](../pcsc-and-cards-on-boards.md)). The driver admits four calls at once, signs them one at a time and refuses the rest as busy, which fits a card that serves one operation at a time.
+- **One holder per card.** The driver connects exclusively and resets the session at its start and exit. A second process on the card makes the driver fail closed with `held_elsewhere`, as piv-go's second client failed here, and not go on with a card it could not reset ([restart-and-session-reset.md](../restart-and-session-reset.md), [pcsc-and-cards-on-boards.md](../pcsc-and-cards-on-boards.md)). The bench asks for no other holder for the same reason ([bench.md](../bench.md)).
+- **The driver does not name a reader on its own.** It connects to the one reader it is told, or to the only one there is, and refuses several. This is the opposite of ykcs11's behaviour in point 4 above ([README](../../README.md#which-card-it-opens)).
+- **Not covered here:** keys that need the PIN for every signature or a touch (see [PIN, touch and reset](./yubikey-piv-pin-touch-and-reset-2026-11-13.md)); firmware other than 5.8.0; hosts other than an arm64 board with pcsc-lite 1.9.5.
 
 ## What this does not show
 
-- **One card model and one firmware.** A YubiKey 5 Nano with firmware 5.8.0. No other firmware, and no other model. This note gives no figure for any firmware older than 5.8.0.
+- **One card model and one firmware.** A YubiKey 5 Nano with firmware 5.8.0. No other firmware, and no other model. This page gives no figure for any firmware older than 5.8.0.
 - **One host type.** An arm64 board with pcsc-lite 1.9.5. No desktop host, no Windows or macOS smart-card service, no other pcsc-lite version.
 - **Touch and PIN always.** Not measured. The runs used touch never and PIN once.
-- **Algorithms not run:** RSA-2048. RSA-3072 was measured with PSS padding only.
+- **Algorithms not run:** RSA-2048 (measured elsewhere, see above). RSA-3072 was measured with PSS padding only.
 - **How many runs.** One speed run on 2026-10-30 and one repeat on 2026-11-02 with a smaller count. The second-program test has 5 runs for each holder on 2026-11-02, and 5 runs of the ykcs11 holder on 2026-10-30; the piv-go holder is not reported for 2026-10-30. The sources give no confidence interval, and a rare failure of piv-go in this test would not show in 5 runs.
 - **Only signing during a second program.** Key generation, a PIN change or a management-key action while another program is on the card was not tried.
-- **Other second programs.** Only a ykcs11 process, `ykman piv info` and (in the card note) `scdaemon`.
+- **Other second programs.** Only a ykcs11 process, `ykman piv info` and (in the card libraries note) `scdaemon`.
 - **Raw logs.** The test programs were throwaway and are not in a repository. The sources are summaries in comments.
 
-## Changes made
+## Changes made to the card
 
 Test cards only. The card was in PIV factory state before the 2026-11-02 run and was reset to factory state after it. After the 2026-10-30 run it was reset (PIV and OpenPGP). The OpenPGP application was not touched on 2026-11-02.
 
@@ -134,5 +136,5 @@ Test cards only. The card was in PIV factory state before the 2026-11-02 run and
 - sluis issue [#879](https://github.com/truvity/sluis/issues/879), the [comment of 2026-10-30](https://github.com/truvity/sluis/issues/879#issuecomment-6535498471).
 - sluis issue [#942](https://github.com/truvity/sluis/issues/942), the comments of [2026-10-30](https://github.com/truvity/sluis/issues/942#issuecomment-6535498740) and [2026-11-02](https://github.com/truvity/sluis/issues/942#issuecomment-6572363120).
 - sluis [record 0006](https://github.com/truvity/sluis/blob/c2c15f18beef908a0f6c2279326a6e126e9869e3/docs/decisions/0006-keys-and-sealing.md), "Exclusive card access" (PIN state belongs to the card).
-- ritueel [card libraries and tooling (2026-11-01)](./card-libraries-and-tooling-2026-11-01.md).
+- [Card libraries and tooling (2026-11-01)](./card-libraries-and-tooling-2026-11-01.md).
 - For the PC/SC sharing modes: the [pcsc-lite API documentation](https://pcsclite.apdu.fr/api/group__API.html).

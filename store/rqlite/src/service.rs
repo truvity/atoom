@@ -1,4 +1,4 @@
-//! The item contract over rqlite (`atoom.store.v1alpha1.ItemService`; store/docs/item-port.md).
+//! The item contract over rqlite (`atoom.store.v1alpha1.ItemService`; store/docs/store-port.md).
 //!
 //! The driver sees keys, versions, bytes, expiries and index entries. It never parses a key into
 //! a kind and never writes a timestamp of its own into an item: its clock only compares with

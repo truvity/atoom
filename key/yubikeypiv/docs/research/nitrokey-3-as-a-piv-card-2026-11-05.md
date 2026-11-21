@@ -1,10 +1,8 @@
 # A Nitrokey 3 (firmware v1.9.1) has no PIV attestation and no per-key policy (2026-11-05)
 
-*Copied from [truvity/ritueel](https://github.com/truvity/ritueel) `main` at commit `a569f9366c0bef69e376db2ae25db8808336a875`, file `docs/research/nitrokey-3-as-a-piv-card-2026-11-05.md`, with the site markup removed (the front matter became the title, the figures are left out). ritueel keeps its copy until it is restarted. Links that start with a slash point to ritueel's own site and are not part of this repository.*
-
 ## Question
 
-Can a Nitrokey 3 take the place of a YubiKey 5 as a PIV card, so that a program written for a YubiKey (here, the Go library piv-go) works with it? PIV is the smart-card standard NIST SP 800-73: a card with numbered key slots, a PIN, and certificates. Planned Nitrokey support is [issue #66](https://github.com/truvity/ritueel/issues/66).
+Can a Nitrokey 3 take the place of a YubiKey 5 as a PIV card, so that a program written for a YubiKey (here, the Go library piv-go) works with it? PIV is the smart-card standard NIST SP 800-73: a card with numbered key slots, a PIN, and certificates.
 
 ## When
 
@@ -12,7 +10,7 @@ Can a Nitrokey 3 take the place of a YubiKey 5 as a PIV card, so that a program 
 
 ## Verdict
 
-**Not without changes to the program, and not as a card that can prove where its keys were born.** Three differences from a YubiKey 5 matter for a ceremony tool:
+**Not without changes to the program, and not as a card that can prove where its keys were born.** Three differences from a YubiKey 5 matter for a program that adopts only keys it can verify:
 
 - **No attestation.** The card answers the attestation command with status `6A81` (function not supported). Attestation is a certificate that a card signs to say "this key was made inside me". Without it, a tool cannot check that a key never existed outside the card.
 - **No per-key PIN and touch policy.** The vendor's source does not read the policy tags. A key that needs no PIN, or a key that needs a touch for every use, cannot be asked for.
@@ -20,7 +18,7 @@ Can a Nitrokey 3 take the place of a YubiKey 5 as a PIV card, so that a program 
 
 A fourth difference is smaller: piv-go lists the card but cannot open it, because it selects the PIV applet with a shorter name than the card accepts.
 
-This agrees with the research recorded in [issue #66](https://github.com/truvity/ritueel/issues/66) on 2026-11-01. The issue records the same three facts, found by reading. This note adds the answers of one real card.
+This agrees with a reading of the vendor's source on 2026-11-01 ([which-keys-to-buy.md](../which-keys-to-buy.md)), which found the same three facts. This note adds the answers of one real card.
 
 ## Method
 
@@ -56,13 +54,13 @@ Every row says whether it was **measured** (the card answered the probe) or **re
 | piv-go management-key path | yes | probably broken | **Inferred**, not run: the card's "get metadata" command is a `TODO` in the source and answers with empty data for most references |
 | OpenSC, PKCS#11 | not compared | the card is seen as a generic PIV card | Listed by the probe: OpenSC's own PIV emulation, with no card-specific driver |
 
-**The OpenPGP applet does not change the result.** It is version 3.4. The OpenPGP card specification has [three key slots](https://gnupg.org/ftp/specs/OpenPGP-smart-card-application-3.4.pdf) (sign, decrypt, authenticate). A ceremony with more keys does not fit. [Issue #66](https://github.com/truvity/ritueel/issues/66) reports no attestation in that applet either; this test did not record whether the OpenPGP applet was asked about attestation.
+**The OpenPGP applet does not change the result.** It is version 3.4. The OpenPGP card specification has [three key slots](https://gnupg.org/ftp/specs/OpenPGP-smart-card-application-3.4.pdf) (sign, decrypt, authenticate). A plan with more keys does not fit. The reading of 2026-11-01 found no attestation in that applet either; this test did not record whether the OpenPGP applet was asked about attestation.
 
 The vendor's documents do not agree with each other on the algorithms. The [PIV page](https://docs.nitrokey.com/nitrokeys/features/piv/key_management.html) lists RSA 2048 and nistp256 (and RSA 3072 and 4096 with non-standard identifiers). The [release notes of v1.8.2](https://github.com/Nitrokey/nitrokey-3-firmware/releases/tag/v1.8.2) say that NIST P-384 was added. The card's own list, read in this test, has P-384.
 
 ## How to read it
 
-The attestation gap decides the question for a root key. ritueel's design, as recorded in [issue #66](https://github.com/truvity/ritueel/issues/66) (design update of 2026-11-02), is that a token that cannot attest has no evidence and holds no root. The attestation result here is the PIV half of that statement for firmware v1.9.1. The PIN and touch policy gap decides it for any key that the tool must keep unlocked or must lock per use.
+The attestation gap decides the question for any key whose origin must be proven. The attestation result here is the PIV half of that statement for firmware v1.9.1. The PIN and touch policy gap decides it for any key that must be unlocked without a PIN or locked per use.
 
 The short-name problem and the fixed GUID are workarounds, not obstacles: a patch to select the applet with the full name, and the GUID in place of the serial.
 
@@ -84,13 +82,22 @@ A write test on a card in factory state would turn the inferred and read rows in
 
 ## Roads not taken
 
-- **The OpenPGP applet for the keys.** Rejected for a many-key ceremony: three slots, and no attestation reported.
+- **The OpenPGP applet for the keys.** Rejected for a plan with many keys: three slots, and no attestation reported.
 - **A write test.** Not run, because the verdict above does not depend on it.
 - **A different class of device** (a hardware security module with PKCS#11) was not examined.
 
-## What this decides, and what blocks
+## What it means for key/yubikeypiv
 
-It decides nothing for ritueel. It gives [issue #66](https://github.com/truvity/ritueel/issues/66) its first measured rows: algorithms, attestation, the short-name problem. The rest of the issue's list is still open: P-384 signatures, the touch policy, PC/SC next to `scdaemon`, a factory reset, and the decision on which store a Nitrokey would join.
+The driver serves a YubiKey 5 and nothing else. The rows above are the reasons a Nitrokey 3 is not served, and each is a check in the driver:
+
+- **It adopts a key only with its attestation.** The driver asks the card for the attestation of every key in the plan and verifies it against Yubico's roots; a card that answers `6A81` gives it nothing to verify, and the key is refused. This is the decision of [s4-piv-go-or-pkcs11.md](s4-piv-go-or-pkcs11.md) and the README: a key is trusted because the card proves it was born there.
+- **It compares the PIN and touch policy of each key with the plan.** The policies come from the attestation. A card with no per-key policy cannot show them.
+- **It binds to a card by its serial** (`--serial`, [the README](../../README.md#which-card-it-opens)). A serial that is the same on every card binds to none.
+- **piv-go cannot open the card** with its short applet name, so even a card the driver was willing to serve would need a patch.
+
+The write test described above was not run. PKCS#11 stays the route for a later driver of a non-YubiKey device ([s4-piv-go-or-pkcs11.md](s4-piv-go-or-pkcs11.md)).
+
+Open: P-384 signatures, ECDH in slot 9d, the touch policy, PC/SC next to `scdaemon`, a factory reset and the behaviour of a later firmware are unmeasured on a Nitrokey 3.
 
 ## Changes made
 

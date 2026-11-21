@@ -30,7 +30,7 @@ A case that needs the change log (`log_order_and_from_sequence`, `sequence_expir
 
 ## What the suite fixes beyond the proto comments
 
-These are the choices the contract left open. Every engine makes them, and a consumer may rely on them. They are in the crate documentation of `atoom_store_conformance` and, as prose, in the [item port](../../docs/item-port.md).
+These are the choices the contract left open. Every engine makes them, and a consumer may rely on them. They are in the crate documentation of `atoom_store_conformance` and, as prose, in the [item port](../../docs/store-port.md).
 
 - A key is printable ASCII without a space, at most 512 bytes.
 - A condition expects `absent: true` or a version; `absent: false` and none are `invalid_argument/batch`. A failed condition is `aborted/version` with the field path `conditions[i]`.
