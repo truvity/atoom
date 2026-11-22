@@ -479,3 +479,95 @@ fn a_host_rule_is_asked_by_admits_with_the_uid() {
         "two rules are not equal because they decide alike"
     );
 }
+
+/// A name a host's interceptor puts in the request's extensions.
+#[derive(Clone, Debug)]
+struct Named(String);
+
+/// The host's interceptor of the tests: names the peer, and counts the calls it saw.
+struct Namer(Arc<AtomicUsize>);
+
+#[connectrpc::interceptor::async_trait]
+impl connectrpc::interceptor::Interceptor for Namer {
+    async fn intercept_unary(
+        &self,
+        mut req: connectrpc::interceptor::UnaryRequest,
+        next: connectrpc::interceptor::Next<'_>,
+    ) -> Result<connectrpc::interceptor::UnaryResponse, ConnectError> {
+        self.0.fetch_add(1, Ordering::SeqCst);
+        let uid = peer(req.ctx.extensions()).map(|p| p.uid);
+        if let Some(uid) = uid {
+            req.ctx
+                .extensions_mut()
+                .insert(Named(format!("actor-{uid}")));
+        }
+        next.run(req).await
+    }
+
+    async fn intercept_streaming(
+        &self,
+        req: connectrpc::interceptor::StreamRequest,
+        inbound: connectrpc::interceptor::PayloadStream,
+        next: connectrpc::interceptor::NextStream<'_>,
+    ) -> Result<connectrpc::interceptor::StreamResponse, ConnectError> {
+        next.run(req, inbound).await
+    }
+}
+
+async fn start_named(cfg: ServerConfig, seen: Arc<AtomicUsize>) -> Running {
+    let socket = cfg.socket.clone();
+    let calls = Arc::new(AtomicUsize::new(0));
+    let counted = calls.clone();
+    let router = Router::new().route(
+        "atoom.test.v1.Who",
+        "Ask",
+        handler_fn(move |ctx: connectrpc::RequestContext, _req: Refusal| {
+            counted.fetch_add(1, Ordering::SeqCst);
+            let name = ctx.extensions().get::<Named>().map(|n| n.0.clone());
+            async move {
+                Response::ok(Refusal {
+                    reason: name.unwrap_or_else(|| "unnamed".to_owned()),
+                    ..Refusal::default()
+                })
+            }
+        }),
+    );
+    let (stop, stopped) = tokio::sync::oneshot::channel::<()>();
+    let task = tokio::spawn(serve(cfg.with_interceptor(Namer(seen)), router, async {
+        let _ = stopped.await;
+    }));
+    for _ in 0..100 {
+        if socket.exists() {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    Running {
+        client: dial(&socket),
+        calls,
+        stop,
+        task,
+    }
+}
+
+#[tokio::test]
+async fn a_host_interceptor_runs_after_the_guard_and_hands_its_handlers_what_it_knows() {
+    let dir = tempfile::tempdir().unwrap();
+    let seen = Arc::new(AtomicUsize::new(0));
+    let r = start_named(ServerConfig::new(dir.path().join("g.sock")), seen.clone()).await;
+    assert_eq!(r.ask().await.unwrap().reason, format!("actor-{}", me()));
+    assert_eq!(seen.load(Ordering::SeqCst), 1);
+    r.stop().await;
+    // A refused call never reaches the host's interceptor.
+    let dir = tempfile::tempdir().unwrap();
+    let seen = Arc::new(AtomicUsize::new(0));
+    let r = start_named(config(&dir, Allow::Uids(vec![me() + 1])), seen.clone()).await;
+    assert_refused_as_caller(&r.ask().await.expect_err("refused"));
+    assert_eq!(
+        seen.load(Ordering::SeqCst),
+        0,
+        "the interceptor saw a refused call"
+    );
+    assert_eq!(r.calls.load(Ordering::SeqCst), 0);
+    r.stop().await;
+}
