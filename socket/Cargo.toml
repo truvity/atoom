@@ -16,12 +16,12 @@ workspace = true
 # what a command line needs and a library consumer does not.
 cli = ["dep:clap"]
 # `testing::Recorder`: a server that records the deadline and the correlation id each call carried, for the tests of a port's client.
-testing = ["dep:bytes", "dep:http-body-util"]
+testing = ["dep:http-body-util"]
 
 [dependencies]
 anyhow = "1"
 atoom-common = { path = "../common" }
-bytes = { version = "1", optional = true }
+bytes = "1"
 clap = { version = "4", features = ["derive", "string"], optional = true }
 connectrpc = { version = "=0.9.1", default-features = false, features = ["json", "gzip", "client", "server"] }
 futures = "0.3"

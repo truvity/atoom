@@ -181,6 +181,21 @@ From sluis `df108e5`.
 | `file/src/{lib,service,suite}.rs`, `tests/port.rs`, `main.rs` | `drivers/store/file/` | `Service::router()` is new; the tests serve through `atoom_socket`; `check` exits 3 when the directory cannot be served |
 | `credential/src/{lib,service,suite}.rs`, `tests/port.rs`, `main.rs` | `drivers/store/credential/` | as for `file`; `--dir` falls back to `$CREDENTIALS_DIRECTORY` |
 
+Added after the move, not from sluis: the Go driver `source/file` (step B2 of the plan).
+
+### source/file in Go
+
+<a id="source-file-go"></a>
+
+New code written for atoom, in the directory of the Rust driver. Its contract is the source port, and its rules are the ones of the Rust `source/file`.
+
+| Here | From | Changed |
+| --- | --- | --- |
+| `file.go` | `source/file/src/{lib,service}.rs` | ported to Go: the same names, label, refusals and `Watch`; the path is opened with `os.Root` where the Rust one calls `openat2` and its own walk; `New`, `Handler` and `Run` are the shape of the other Go drivers (`store/dynamodb`) |
+| `file_test.go`, `service_test.go`, `memnet_test.go` | `source/file/src/{lib,suite}.rs` tests, `tests/port.rs` | the backend cases and the port cases, ported; the transport of the tests is an in-memory one |
+| `cmd/file/` | `source/file/src/main.rs`; `store/dynamodb/cmd/dynamodb/` | the flags and the exit codes of the Rust main (`check` exits 3); the socket code and the tests of the guard are those of the other Go mains |
+| `docs/go.md` | new | |
+
 `buf.yaml` ignores the lint rules that the spellings of the contract break (`NONE`, `NOTIFY`, `POLL` without the enum prefix, `SourceWatchRequest`) rather than rename them. What stayed in sluis: the wrapper mains, store@ (which links the file driver for `store check --validate`), exchange (a client of the port) and the signed configuration.
 
 ## blob

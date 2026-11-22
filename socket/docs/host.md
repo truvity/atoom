@@ -7,4 +7,6 @@
 - **A socket owner.** `ServerConfig::mode` and `socket_gid` set the file mode and the group; the owner of the socket is the uid the process runs as.
 - **Its own command line, version stamp and shutdown.**
 
+- **In process, the same list is shorter and the host's rule is an interceptor.** A host that links a driver in its own process ([in process](in-process.md)) has no socket and no peer: it adds its rule of who may call to `in_process_with` as an interceptor, and gives the deadline of a call that carries none with `InProcessConfig::with_default_deadline`.
+
 The driver library does not change: its `router()` is the same value either way. That is the host seam: what a consumer adds around a driver is listed in [provenance](../../docs/provenance.md).

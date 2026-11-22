@@ -17,6 +17,6 @@ printf '{"payload":"x"}\n' > /tmp/boundary.bytes
 target/debug/source-conformance --socket /tmp/source.sock --present boundary --bytes /tmp/boundary.bytes
 ```
 
-`just conformance` (CI runs it on Linux, on every architecture) builds the kit once and runs it against the thin main of both drivers in this repository (`tools/scripts/conformance-source.sh`). The cases and what they fix beyond the contract's comments are in [docs/suite.md](docs/suite.md). The kit has a test of its own that a driver that is wrong in each way the suite looks for fails the case that looks for it. Where the code came from is in [provenance](../../docs/provenance.md#source).
+`just conformance` (CI runs it on Linux, on every architecture) builds the kit once and runs it against the thin main of every driver in this repository (the file driver in Rust and in Go, and the credential driver) (`tools/scripts/conformance-source.sh`). The cases and what they fix beyond the contract's comments are in [docs/suite.md](docs/suite.md). The kit has a test of its own that a driver that is wrong in each way the suite looks for fails the case that looks for it. Where the code came from is in [provenance](../../docs/provenance.md#source).
 
 Dependencies: the port ([`atoom-source`](../README.md)), [`atoom-common`](../../common/README.md) for the refusal helper, [`atoom-socket`](../../socket/README.md) for the client, and `clap`, `tokio` and `anyhow`.

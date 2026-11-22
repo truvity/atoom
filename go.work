@@ -18,6 +18,7 @@ use (
 	./key/yubikeypiv
 	./socket
 	./source
+	./source/file
 	./store
 	./store/dynamodb
 	./tools
@@ -49,6 +50,8 @@ replace github.com/truvity/atoom/key/yubikeypiv v0.2.0 => ./key/yubikeypiv
 replace github.com/truvity/atoom/socket v0.2.0 => ./socket
 
 replace github.com/truvity/atoom/source v0.2.0 => ./source
+
+replace github.com/truvity/atoom/source/file v0.2.0 => ./source/file
 
 replace github.com/truvity/atoom/store v0.2.0 => ./store
 
