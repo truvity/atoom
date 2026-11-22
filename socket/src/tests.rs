@@ -357,3 +357,125 @@ fn allow_decides_by_uid() {
     );
     assert!(Allow::Any.admits(1, 5));
 }
+
+// The host's rule (Allow::check) and the observer of refusals (ServerConfig::on_refused).
+
+#[tokio::test]
+async fn a_host_rule_admits_from_the_whole_peer_and_the_procedure() {
+    let dir = tempfile::tempdir().unwrap();
+    let asked = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let seen = asked.clone();
+    let own = me();
+    let cfg = ServerConfig::new(dir.path().join("g.sock")).with_allow(Allow::check(
+        move |p: &Peer, procedure: &str| {
+            seen.lock()
+                .unwrap()
+                .push((p.uid, p.pid, procedure.to_owned()));
+            if p.uid == own {
+                Ok(())
+            } else {
+                Err("call_graph")
+            }
+        },
+    ));
+    let r = start(cfg).await;
+    assert_eq!(r.ask().await.unwrap().reason, me().to_string());
+    assert_eq!(r.calls.load(Ordering::SeqCst), 1);
+    let asked = asked.lock().unwrap().clone();
+    assert_eq!(asked.len(), 1, "the rule is asked once per call: {asked:?}");
+    assert_eq!(asked[0].0, me());
+    #[cfg(target_os = "linux")]
+    assert_eq!(asked[0].1, i32::try_from(std::process::id()).ok());
+    assert_eq!(asked[0].2, "/atoom.test.v1.Who/Ask");
+    r.stop().await;
+}
+
+#[tokio::test]
+async fn a_host_rule_refuses_with_its_own_reason_before_the_handler_runs_and_the_observer_hears_it()
+{
+    let dir = tempfile::tempdir().unwrap();
+    let heard = Arc::new(std::sync::Mutex::new(Vec::<Refused>::new()));
+    let log = heard.clone();
+    let cfg = ServerConfig::new(dir.path().join("g.sock"))
+        .with_allow(Allow::check(|_: &Peer, _: &str| Err("call_graph")))
+        .with_on_refused(move |r: &Refused| log.lock().unwrap().push(r.clone()));
+    let r = start(cfg).await;
+    let err = r.ask().await.expect_err("the rule refuses every call");
+    assert_eq!(err.code, ErrorCode::PermissionDenied, "{err:?}");
+    assert_eq!(
+        refusal::reason(&err).as_deref(),
+        Some("call_graph"),
+        "{err:?}"
+    );
+    assert_eq!(
+        r.calls.load(Ordering::SeqCst),
+        0,
+        "a refused call reached the handler"
+    );
+    // The message is not decoded either: a body that is no message is still a refusal, not invalid_argument.
+    let (status, body) = raw_post(
+        r.client.socket().unwrap(),
+        "/atoom.test.v1.Who/Ask",
+        b"\xff\xff not proto",
+    )
+    .await;
+    assert_eq!(status, 403, "{body}");
+    let heard = heard.lock().unwrap().clone();
+    assert_eq!(heard.len(), 2, "{heard:?}");
+    assert_eq!(heard[0].reason, "call_graph");
+    assert_eq!(heard[0].peer.map(|p| p.uid), Some(me()));
+    assert_eq!(heard[0].procedure, "/atoom.test.v1.Who/Ask");
+    r.stop().await;
+}
+
+#[tokio::test]
+async fn an_empty_reason_of_a_host_rule_is_caller() {
+    let dir = tempfile::tempdir().unwrap();
+    let cfg = ServerConfig::new(dir.path().join("g.sock"))
+        .with_allow(Allow::check(|_: &Peer, _: &str| Err("")));
+    let r = start(cfg).await;
+    assert_refused_as_caller(&r.ask().await.expect_err("refused"));
+    r.stop().await;
+}
+
+#[tokio::test]
+async fn the_observer_hears_a_uid_outside_the_set() {
+    let dir = tempfile::tempdir().unwrap();
+    let heard = Arc::new(AtomicUsize::new(0));
+    let n = heard.clone();
+    let cfg = config(&dir, Allow::Uids(vec![me() + 1])).with_on_refused(move |r: &Refused| {
+        assert_eq!(r.reason, REASON_CALLER);
+        n.fetch_add(1, Ordering::SeqCst);
+    });
+    let r = start(cfg).await;
+    assert_refused_as_caller(&r.ask().await.expect_err("refused"));
+    assert!(r.ask().await.is_err());
+    assert_eq!(heard.load(Ordering::SeqCst), 2);
+    // An admitted call is not a refusal.
+    r.stop().await;
+    let dir = tempfile::tempdir().unwrap();
+    let quiet = Arc::new(AtomicUsize::new(0));
+    let q = quiet.clone();
+    let r = start(
+        ServerConfig::new(dir.path().join("g.sock")).with_on_refused(move |_: &Refused| {
+            q.fetch_add(1, Ordering::SeqCst);
+        }),
+    )
+    .await;
+    r.ask().await.unwrap();
+    assert_eq!(quiet.load(Ordering::SeqCst), 0);
+    r.stop().await;
+}
+
+#[test]
+fn a_host_rule_is_asked_by_admits_with_the_uid() {
+    let rule = Allow::check(|p: &Peer, _: &str| if p.uid == 7 { Ok(()) } else { Err("x") });
+    assert!(rule.admits(7, 5));
+    assert!(!rule.admits(5, 5), "the own uid is not implied by a rule");
+    assert_eq!(rule.clone(), rule, "a rule is equal to itself");
+    assert_ne!(
+        Allow::check(|_: &Peer, _: &str| Ok(())),
+        Allow::check(|_: &Peer, _: &str| Ok(())),
+        "two rules are not equal because they decide alike"
+    );
+}

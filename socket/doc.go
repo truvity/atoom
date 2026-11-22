@@ -10,7 +10,11 @@
 //     under a temporary name and renamed).
 //   - The context of a handler carries the correlation id of the request and the deadline of the caller, to hand down to the calls it
 //     makes: see the package github.com/truvity/atoom/common/call.
-//   - [Allow] says who may call: the uid of this process (the default), exactly the listed uids, or every uid.
+//   - [Allow] says who may call: the uid of this process (the default), exactly the listed uids, every uid, or the host's own rule
+//     ([AllowFunc]), a function of the peer and the procedure that admits a call or names the reason of its refusal.
+//   - Config.OnRefused is told of every call the guard refuses, for a host that audits its refusals; Config.DefaultDeadline gives a
+//     call that carries no deadline one.
+//   - The package github.com/truvity/atoom/socket/restart is the restart back-off of a program run by systemd.
 //   - [PeerFromContext] is the caller of the call that a handler is serving.
 //   - [Flags] registers the flags --allow-uid, --allow-any-uid, --socket-gid and --socket-mode on a flag set, so that every thin main
 //     spells them the same.

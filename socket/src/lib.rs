@@ -9,8 +9,12 @@
 //!   host's rule of who may call is an interceptor ([`InProcessConfig::with_interceptor`]).
 //! - [`serve`] listens on a socket and serves a [`Router`](connectrpc::Router) on it until a future resolves. The peer's credentials
 //!   are read from the kernel once per connection and every call passes the guard ([`Allow`]) before its message is decoded: a caller
-//!   whose uid is not admitted is refused with the reason `caller`. A handler reads the caller with [`peer`]. `ServerConfig` also
-//!   sets the group and the mode of the socket.
+//!   whose uid is not admitted is refused with the reason `caller`. A host with a rule of its own (a registry and a call graph, say)
+//!   gives it as [`Allow::check`], a function of the peer that admits a call or names the reason of its refusal, and may observe
+//!   every refusal ([`ServerConfig::on_refused`]). A handler reads the caller with [`peer`]. `ServerConfig` also sets the group and
+//!   the mode of the socket.
+//! - [`restart`] is the restart back-off of a program run by systemd: the sleep before an exit with a failure, by the count of
+//!   failures in a row kept in a small file.
 //! - [`call`] is the deadline and the correlation id of a call, handed down to the calls it makes: [`serve`] reads them from each call it
 //!   accepts, a client made by [`dial`] puts them on each call a handler makes, and [`call::scope`] states them for code that is not
 //!   in a handler.
@@ -24,6 +28,7 @@ pub mod call;
 pub mod cli;
 mod client;
 mod guard;
+pub mod restart;
 mod server;
 #[cfg(feature = "testing")]
 pub mod testing;
@@ -32,7 +37,7 @@ pub use call::{Call, HEADER_CORRELATION};
 pub use client::{
     Client, InProcessConfig, ResponseBody, Transport, dial, in_process, in_process_with,
 };
-pub use guard::{Allow, Peer, REASON_CALLER, peer};
+pub use guard::{Admit, Allow, OnRefused, Peer, REASON_CALLER, Refused, peer};
 pub use server::{ServerConfig, serve};
 
 /// The version of this build: the version stamped at build time through the environment variable `ATOOM_VERSION` (a release build
