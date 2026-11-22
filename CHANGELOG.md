@@ -5,10 +5,27 @@ libraries changed. `just release-prepare X.Y.Z` writes the section.
 
 <!-- release-prepare: new sections go below this line -->
 
-## Unreleased
+## 0.4.0 - 2026-11-22
+
+One version for the whole repository: every library is tagged 0.4.0, changed or not.
+
+Libraries that changed since v0.3.0:
+- `blocks/seal`
+- `common`
+- `socket`
+- `store`
+- `store/conformance`
+- `store/dynamodb`
+- `store/memory`
+- `store/rqlite`
 
 **Breaking in the Rust API of `socket`** (a new `Allow` variant; new `ServerConfig` fields, one of them private, so build it with `ServerConfig::new` and its `with_*` methods); the Go API only grows; the wire does not change ([record 0018](docs/decisions/0018-a-hosts-rule-on-the-socket-guard.md)).
 
+Blocks and store:
+- **The seal block** (`blocks/seal`, Go), moved from sluis key@ (B4): Seal, Open, Mac, Sign, PublicKey, Rotate, Erase, Rewrap. A generation counts its seals in reservations and stops at its limit; a generation can be marked compromised (B-2 A). This instance opens its own wrap when the listing finds it.
+- **Capabilities declares the durability of a store driver** (B3): `STRICT` or `LOSSY`; the memory store declares `LOSSY` ([record 0017](docs/decisions/0017-the-memory-store-is-lossy.md)).
+
+Socket:
 - **The socket guard runs a host's own rule**: Rust `Allow::check(|peer, procedure| ...)`, Go `socket.AllowFunc(...)`. It is asked for every call with the whole peer and the procedure before the message is decoded, and a refusal carries the reason the rule names.
 - **A host's interceptors on a Rust server**: `ServerConfig::with_interceptor`, run after the guard for the admitted calls only, before the message is decoded (for example to put the caller's name in the extensions), as `InProcessConfig::with_interceptor` in process.
 - **The guard tells the host of every refusal**: Rust `ServerConfig::on_refused` (`with_on_refused`), Go `Config.OnRefused`, with the reason, the peer and the procedure.
