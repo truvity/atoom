@@ -70,6 +70,7 @@ const (
 	OpRotate    Op = "rotate"
 	OpErase     Op = "erase"
 	OpRewrap    Op = "rewrap"
+	OpMark      Op = "mark_compromised"
 )
 
 // Request is what the rules decide on: one call, or one item of an Open. The block has checked the form of every field before it asks.
@@ -131,16 +132,17 @@ type Event struct {
 	Scope      string
 	Generation uint32
 	Recipient  string // EventWrap: the recipient the wrap is for
-	Reason     string // EventRefuse: the refusal's reason
+	Reason     string // EventRefuse: the refusal's reason; EventRotate: "limit" or "compromised" when the block rotated on its own
 	Count      int    // EventMake: the wraps written; EventErase: the wraps deleted
 }
 
 // The actions of an Event.
 const (
-	EventMake   = "data_key.make" // a data key was made, with its wraps
-	EventWrap   = "wrap.write"    // a wrap was written for a recipient
-	EventErase  = "wrap.erase"    // the wraps of a scope and purpose were deleted
-	EventRotate = "data_key.rotate"
+	EventMake   = "data_key.make"   // a data key was made, with its wraps
+	EventWrap   = "wrap.write"      // a wrap was written for a recipient
+	EventErase  = "wrap.erase"      // the wraps of a scope and purpose were deleted
+	EventRotate = "data_key.rotate" // Reason "limit" when the seal limit made it
+	EventMark   = "generation.compromised"
 	EventRefuse = "refusal"
 )
 
@@ -174,6 +176,12 @@ type Options struct {
 	CacheTTL time.Duration
 	// Observe receives the block's facts; none when nil. It is called on the path of the call, so it must be quick.
 	Observe func(context.Context, Event)
+	// SealsPerGeneration is the most seals one generation of a seal key makes before the block rotates to the next:
+	// DefaultSealsPerGeneration when zero, at most MaxSealsPerGeneration (docs/seal-block.md, "The seal limit").
+	SealsPerGeneration uint64
+	// SealReservation is N, how many seals an instance reserves at once in the durable counter of a generation: one store write per N
+	// seals. DefaultSealReservation when zero, at most SealsPerGeneration.
+	SealReservation uint32
 	// Now is the clock of the cache; time.Now when nil.
 	Now func() time.Time
 }
@@ -186,6 +194,15 @@ const (
 	DefaultKeyPrefix       = "seal/"
 	DefaultCacheTTL        = 15 * time.Minute
 	MaxCacheTTL            = time.Hour
+	// MaxSealsPerGeneration is the limit of NIST SP 800-38D (section 8.3) for AES-GCM with random 96-bit nonces: 2^32 invocations
+	// of one key.
+	MaxSealsPerGeneration uint64 = 1 << 32
+	// DefaultSealsPerGeneration is half of it: the block rotates with a margin of 2^31 seals, so the probability of a repeated nonce
+	// stays below 2^-34 for any one key.
+	DefaultSealsPerGeneration uint64 = 1 << 31
+	// DefaultSealReservation is N: one store write per 1024 seals, and at most 1024 seals lost from the budget of a generation when an
+	// instance stops with a reservation unused.
+	DefaultSealReservation uint32 = 1024
 )
 
 var (
@@ -218,6 +235,12 @@ func (o Options) withDefaults() (Options, map[string]Purpose, error) {
 	if o.Now == nil {
 		o.Now = time.Now
 	}
+	if o.SealsPerGeneration == 0 {
+		o.SealsPerGeneration = DefaultSealsPerGeneration
+	}
+	if o.SealReservation == 0 {
+		o.SealReservation = uint32(min(uint64(DefaultSealReservation), o.SealsPerGeneration))
+	}
 	var problems []error
 	add := func(format string, args ...any) { problems = append(problems, fmt.Errorf(format, args...)) }
 	if o.Keys == nil {
@@ -237,6 +260,12 @@ func (o Options) withDefaults() (Options, map[string]Purpose, error) {
 	}
 	if !prefixPattern.MatchString(o.KeyPrefix) {
 		add("KeyPrefix: printable ASCII without a space, ending with '/', at most 128 bytes")
+	}
+	if o.SealsPerGeneration > MaxSealsPerGeneration {
+		add("SealsPerGeneration: at most 2^32 (NIST SP 800-38D)")
+	}
+	if uint64(o.SealReservation) > o.SealsPerGeneration {
+		add("SealReservation: at most SealsPerGeneration")
 	}
 	if o.CacheTTL < 0 || o.CacheTTL > MaxCacheTTL {
 		add("CacheTTL: 0 to %s", MaxCacheTTL)

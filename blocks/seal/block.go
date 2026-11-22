@@ -27,19 +27,20 @@ import (
 
 // The reasons of the block's refusals: a closed list (docs/seal-block.md, "Refusals").
 const (
-	ReasonPurpose    = "purpose"    // not a purpose of the declaration, or not one of the call's use
-	ReasonScope      = "scope"      // not a scope
-	ReasonAddress    = "address"    // no address, more than 16 parts, or a part longer than 1024 octets
-	ReasonItems      = "items"      // an Open of no item or of more than 64
-	ReasonLabel      = "label"      // a Mac label that is empty, longer than 1024 octets or not UTF-8
-	ReasonGeneration = "generation" // a generation where the purpose takes none, or none where it needs one
-	ReasonSize       = "size"       // a plaintext or a content longer than 1 MiB
-	ReasonOpen       = "open"       // an envelope that does not open: the one answer, whatever the cause
-	ReasonRule       = "rule"       // the host's rules refused the call
-	ReasonCreate     = "create"     // the key does not exist and the rules did not allow the call to make it
-	ReasonWrap       = "wrap"       // the key exists and is not wrapped for this instance yet, or this instance is not a recipient
-	ReasonStore      = "store"      // the store port did not answer
-	ReasonKey        = "key"        // the key port did not answer
+	ReasonPurpose     = "purpose"     // not a purpose of the declaration, or not one of the call's use
+	ReasonScope       = "scope"       // not a scope
+	ReasonAddress     = "address"     // no address, more than 16 parts, or a part longer than 1024 octets
+	ReasonItems       = "items"       // an Open of no item or of more than 64
+	ReasonLabel       = "label"       // a Mac label that is empty, longer than 1024 octets or not UTF-8
+	ReasonGeneration  = "generation"  // a generation where the purpose takes none, or none where it needs one
+	ReasonSize        = "size"        // a plaintext or a content longer than 1 MiB
+	ReasonOpen        = "open"        // an envelope that does not open: the one answer, whatever the cause
+	ReasonRule        = "rule"        // the host's rules refused the call
+	ReasonCreate      = "create"      // the key does not exist and the rules did not allow the call to make it
+	ReasonWrap        = "wrap"        // the key exists and is not wrapped for this instance yet, or this instance is not a recipient
+	ReasonStore       = "store"       // the store port did not answer
+	ReasonKey         = "key"         // the key port did not answer
+	ReasonCompromised = "compromised" // the current generation is marked compromised and no newer one exists
 )
 
 // The limits of a call.
@@ -63,6 +64,9 @@ type Block struct {
 	flightMu sync.Mutex
 	flights  map[keyRef]*flight
 	makeMu   sync.Mutex
+
+	budgetMu sync.Mutex
+	budgets  map[keyRef]*budget
 }
 
 // New checks the options, makes sure the wrapping key and the signing keys exist in the key store (Ensure, which never exports), and
@@ -105,7 +109,7 @@ func New(ctx context.Context, opts Options) (*Block, error) {
 	}
 	return &Block{
 		opts: opts, purposes: byName, wrapping: wrapping, recipient: recipientLabel(wrapping),
-		cache: newCache(opts.CacheTTL, opts.Now), flights: map[keyRef]*flight{},
+		cache: newCache(opts.CacheTTL, opts.Now), flights: map[keyRef]*flight{}, budgets: map[keyRef]*budget{},
 	}, nil
 }
 
@@ -199,7 +203,7 @@ func validAddress(a []string) bool {
 
 // Capabilities says what the block serves.
 func (b *Block) Capabilities(context.Context, *connect.Request[sealv1alpha1.CapabilitiesRequest]) (*connect.Response[sealv1alpha1.CapabilitiesResponse], error) {
-	out := &sealv1alpha1.CapabilitiesResponse{Recipient: b.recipient}
+	out := &sealv1alpha1.CapabilitiesResponse{Recipient: b.recipient, SealsPerGeneration: b.opts.SealsPerGeneration, SealReservation: b.opts.SealReservation}
 	for _, p := range b.opts.Purposes {
 		info := &sealv1alpha1.PurposeInfo{Name: p.Name, Algorithm: p.Algorithm, CallerGeneration: p.CallerGeneration, Code: uint32(p.Code)}
 		switch p.Use {
@@ -236,29 +240,54 @@ func (b *Block) Seal(ctx context.Context, req *connect.Request[sealv1alpha1.Seal
 		return nil, err
 	}
 	l := line{m.GetScope(), p.Name}
-	g, err := b.current(ctx, l)
-	if err != nil {
-		return nil, b.failure(ctx, OpSeal, p.Name, err, false)
-	}
-	if g == 0 {
-		if !d.MayCreate {
-			return nil, b.refuse(ctx, OpSeal, p.Name, connect.CodePermissionDenied, ReasonCreate, "")
+	for range 4 {
+		g, err := b.current(ctx, l)
+		if err != nil {
+			return nil, b.failure(ctx, OpSeal, p.Name, err, false)
 		}
-		g = 1
+		if g == 0 {
+			if !d.MayCreate {
+				return nil, b.refuse(ctx, OpSeal, p.Name, connect.CodePermissionDenied, ReasonCreate, "")
+			}
+			g = 1
+		}
+		ref := keyRef{l.scope, l.purpose, g}
+		var env []byte
+		err = b.withKeyMarked(ctx, ref, d.MayCreate, func(key []byte, compromised bool) error {
+			if compromised {
+				return errCompromised
+			}
+			// One seal of the generation's budget, after the mark and before the nonce is drawn.
+			if err := b.take(ctx, ref); err != nil {
+				return err
+			}
+			var e error
+			env, e = envelope.Seal(key, b.opts.SealDomain, p.Code, g, m.GetAddress(), m.GetPlaintext())
+			return e
+		})
+		switch {
+		case errors.Is(err, errLimit):
+			// The generation has made its seals: move to the next, which another instance may have made already.
+			if _, err := b.rotateFrom(ctx, l, g, "limit"); err != nil {
+				return nil, b.failure(ctx, OpSeal, p.Name, err, false)
+			}
+			continue
+		case errors.Is(err, errCompromised):
+			// A newer generation exists when the mark was made through MarkCompromised; without one, the seal is refused.
+			b.cache.forgetGeneration(l)
+			if cur, err := b.current(ctx, l); err == nil && cur > g {
+				continue
+			}
+			return nil, b.refuse(ctx, OpSeal, p.Name, connect.CodeFailedPrecondition, ReasonCompromised, "")
+		case err != nil:
+			return nil, b.failure(ctx, OpSeal, p.Name, err, false)
+		}
+		if g == 1 {
+			b.cache.setGeneration(l, g)
+		}
+		return connect.NewResponse(&sealv1alpha1.SealResponse{Envelope: env}), nil
 	}
-	var env []byte
-	err = b.withKey(ctx, keyRef{l.scope, l.purpose, g}, d.MayCreate, func(key []byte) error {
-		var e error
-		env, e = envelope.Seal(key, b.opts.SealDomain, p.Code, g, m.GetAddress(), m.GetPlaintext())
-		return e
-	})
-	if err != nil {
-		return nil, b.failure(ctx, OpSeal, p.Name, err, false)
-	}
-	if g == 1 {
-		b.cache.setGeneration(l, g)
-	}
-	return connect.NewResponse(&sealv1alpha1.SealResponse{Envelope: env}), nil
+	return nil, b.refuse(ctx, OpSeal, p.Name, connect.CodeUnavailable, ReasonWrap, "")
 }
 
 // opening is one item of an Open that passed its checks.
@@ -486,6 +515,48 @@ func (b *Block) Erase(ctx context.Context, req *connect.Request[sealv1alpha1.Era
 		}
 	}
 	return connect.NewResponse(&sealv1alpha1.EraseResponse{Wraps: uint32(min(total, 1<<31))}), nil
+}
+
+// MarkCompromised marks a generation of a seal key compromised (sluis record 0041): the block seals under it no more, and when it was the
+// current generation a new one is made, so seals go on under that. What the generation sealed still opens, until the host re-seals it
+// and erases the scope, or keeps it for its retention. The mark is durable and never taken back. This instance sees it at once; another
+// sees it when its cache entry of the key ends, at its next Rewrap, or at Forget: within CacheTTL at the latest.
+func (b *Block) MarkCompromised(ctx context.Context, req *connect.Request[sealv1alpha1.MarkCompromisedRequest]) (*connect.Response[sealv1alpha1.MarkCompromisedResponse], error) {
+	m := req.Msg
+	p, ok := b.purposeOf(m.GetPurpose(), UseSeal)
+	switch {
+	case !ok:
+		return nil, b.refuse(ctx, OpMark, m.GetPurpose(), connect.CodeInvalidArgument, ReasonPurpose, "purpose")
+	case !validScope(m.GetScope()):
+		return nil, b.refuse(ctx, OpMark, p.Name, connect.CodeInvalidArgument, ReasonScope, "scope")
+	case m.GetGeneration() == 0:
+		return nil, b.refuse(ctx, OpMark, p.Name, connect.CodeInvalidArgument, ReasonGeneration, "generation")
+	}
+	if _, err := b.decide(ctx, Request{Op: OpMark, Purpose: p.Name, Scope: m.GetScope(), Generation: m.GetGeneration(), Authorization: m.GetAuthorization()}, "purpose"); err != nil {
+		return nil, err
+	}
+	l := line{m.GetScope(), p.Name}
+	ref := keyRef{l.scope, l.purpose, m.GetGeneration()}
+	b.cache.forgetGeneration(l)
+	cur, err := b.current(ctx, l)
+	if err != nil {
+		return nil, b.failure(ctx, OpMark, p.Name, err, false)
+	}
+	if ref.generation > cur {
+		// A generation that was never made: nothing to mark.
+		return nil, b.refuse(ctx, OpMark, p.Name, connect.CodeInvalidArgument, ReasonGeneration, "generation")
+	}
+	if err := b.writeMark(ctx, ref); err != nil {
+		return nil, b.failure(ctx, OpMark, p.Name, err, false)
+	}
+	b.cache.drop(ref)
+	b.observe(ctx, Event{Action: EventMark, Purpose: p.Name, Scope: l.scope, Generation: ref.generation})
+	if cur == ref.generation {
+		if cur, err = b.rotateFrom(ctx, l, ref.generation, "compromised"); err != nil {
+			return nil, b.failure(ctx, OpMark, p.Name, err, false)
+		}
+	}
+	return connect.NewResponse(&sealv1alpha1.MarkCompromisedResponse{Generation: cur}), nil
 }
 
 // Rewrap runs one rewrap pass: every data key that this instance opens is wrapped for each recipient that lacks a wrap, and keys whose

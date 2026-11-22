@@ -50,6 +50,11 @@ func (b *Block) wrapContext(ref keyRef, recipient string) wrap.Context {
 // withKey runs fn with the data key of ref, opened from this instance's wrap and cached. With create, a key that has no wrap at all is
 // made first. The bytes are valid only during fn.
 func (b *Block) withKey(ctx context.Context, ref keyRef, create bool, fn func(key []byte) error) error {
+	return b.withKeyMarked(ctx, ref, create, func(key []byte, _ bool) error { return fn(key) })
+}
+
+// withKeyMarked is withKey with the generation's compromised mark, as read when the key entered the cache.
+func (b *Block) withKeyMarked(ctx context.Context, ref keyRef, create bool, fn func(key []byte, compromised bool) error) error {
 	for range 3 {
 		e := b.cache.get(ref)
 		if e == nil {
@@ -107,7 +112,18 @@ func (b *Block) runFlight(ctx context.Context, ref keyRef, f *flight) {
 		f.err = err
 		return
 	}
-	f.entry = b.cache.put(ref, key)
+	f.entry, f.err = b.putOpened(ctx, ref, key)
+}
+
+// putOpened reads the generation's mark and caches an opened key with it: the mark is read each time the cache refills. A mark that
+// cannot be read keeps the key out of the cache, failing closed.
+func (b *Block) putOpened(ctx context.Context, ref keyRef, key []byte) (*entry, error) {
+	compromised, err := b.readMark(ctx, ref)
+	if err != nil {
+		clear(key)
+		return nil, err
+	}
+	return b.cache.put(ref, key, compromised), nil
 }
 
 // openOwn reads this instance's wrap of ref and opens it: errNoKey when there is no wrap of the key at all, errNotWrapped when there
@@ -221,7 +237,7 @@ func (b *Block) make(ctx context.Context, ref keyRef) (*entry, error) {
 	key, err := b.openOwn(ctx, ref)
 	switch {
 	case err == nil:
-		return b.cache.put(ref, key), nil
+		return b.putOpened(ctx, ref, key)
 	case !errors.Is(err, errNoKey):
 		return nil, err
 	}
@@ -250,7 +266,7 @@ func (b *Block) make(ctx context.Context, ref keyRef) (*entry, error) {
 		if err != nil {
 			return nil, err
 		}
-		return b.cache.put(ref, key), nil
+		return b.putOpened(ctx, ref, key)
 	default:
 		clear(key)
 		return nil, err
@@ -259,7 +275,7 @@ func (b *Block) make(ctx context.Context, ref keyRef) (*entry, error) {
 	for _, it := range items {
 		b.observe(ctx, Event{Action: EventWrap, Purpose: ref.purpose, Scope: ref.scope, Generation: ref.generation, Recipient: it.recipient})
 	}
-	return b.cache.put(ref, key), nil
+	return b.cache.put(ref, key, false), nil
 }
 
 // current returns the current generation of a line: the highest that has a wrap, or 0 when the key was never made (or was erased).
@@ -304,14 +320,39 @@ func (b *Block) rotate(ctx context.Context, l line) (uint32, error) {
 	return next.generation, nil
 }
 
-// erase deletes every wrap of a line, every generation and every recipient, and drops the line from the cache.
+// rotateFrom moves a line past generation g: to the newest generation when another instance has already made one, or to g+1, which it
+// makes. The seal limit and a compromised mark use it, so that two instances that meet the same limit make one generation, not two.
+func (b *Block) rotateFrom(ctx context.Context, l line, g uint32, reason string) (uint32, error) {
+	b.cache.forgetGeneration(l)
+	cur, err := b.current(ctx, l)
+	if err != nil {
+		return 0, err
+	}
+	if cur > g {
+		return cur, nil
+	}
+	next := keyRef{scope: l.scope, purpose: l.purpose, generation: g + 1}
+	if _, err := b.make(ctx, next); err != nil {
+		return 0, err
+	}
+	b.cache.setGeneration(l, next.generation)
+	b.observe(ctx, Event{Action: EventRotate, Purpose: l.purpose, Scope: l.scope, Generation: next.generation, Reason: reason})
+	return next.generation, nil
+}
+
+// erase deletes every wrap of a line, every generation and every recipient, with the counters and marks of its generations, and drops
+// the line from the cache.
 func (b *Block) erase(ctx context.Context, l line) (int, error) {
 	wraps, err := b.listWraps(ctx, b.linePrefix(l))
 	if err != nil {
 		return 0, err
 	}
 	n, err := b.deleteWraps(ctx, wraps)
+	if err == nil {
+		err = b.deleteLineState(ctx, l)
+	}
 	b.cache.dropLine(l)
+	b.dropBudgets(l)
 	if n > 0 {
 		b.observe(ctx, Event{Action: EventErase, Purpose: l.purpose, Scope: l.scope, Count: n})
 	}
@@ -338,6 +379,9 @@ func (b *Block) rewrap(ctx context.Context) (int, error) {
 		have[w.ref][w.recipient] = true
 	}
 	b.dropErased(have)
+	if err := b.dropMarked(ctx); err != nil {
+		return 0, err
+	}
 	written := 0
 	var errs []error
 	for ref, got := range have {

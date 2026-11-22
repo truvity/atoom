@@ -26,7 +26,8 @@ The host passes the two clients in (`Options.Keys`, `Options.Items`); the block 
 | `PublicKey` | the public key of a signing purpose and its `key_id` |
 | `Rotate` | makes the next generation of a data key; seals move to it and the older generations keep opening |
 | `Erase` | deletes every wrap of a scope, for the purposes named or every data-key purpose |
-| `Rewrap` | wraps every data key this instance opens for each recipient that lacks a wrap, and drops from the cache the keys whose wrap is gone |
+| `Rewrap` | wraps every data key this instance opens for each recipient that lacks a wrap, and drops from the cache the keys whose wrap is gone or whose generation was marked |
+| `MarkCompromised` | marks a generation of a seal key compromised: it seals no more, and a new generation is made when it was the current one |
 
 ## Purposes
 
@@ -76,6 +77,8 @@ Each wrap is one item of the store port, under the host's prefix (`Options.KeyPr
 
 ```text
 <prefix>wrap/<scope or ->/<purpose>/<generation>/<recipient>  ->  DataKeyWrap (proto, the fields of sluis's kind)
+<prefix>count/<scope or ->/<purpose>/<generation>              ->  SealCounter (the seals reserved from the generation)
+<prefix>mark/<scope or ->/<purpose>/<generation>               ->  GenerationMark (the generation is compromised)
 ```
 
 The value is already ciphertext. A host gives the block a namespace of its own or a prefix that nothing else writes under. The block reads at `linearizable: true`, so a wrap that another instance has just written is seen, and deletes in transactions of at most 100 writes, which every store driver takes.
@@ -84,8 +87,31 @@ The value is already ciphertext. A host gives the block a namespace of its own o
 
 - **The current generation** of a purpose and scope is the highest that has a wrap. `Seal` and `Mac` use it (or 1 for a new key); `Open` takes the generation from the envelope, so every older generation keeps opening while its wraps exist.
 - **`Rotate`** makes the next generation, with its wraps, and makes it current here. Another instance moves to it when its cached generation ends (the cache's time to live), and both open either. A re-seal of what an older generation sealed is the host's job (the rewrap job of a KV store in sluis 0047 opens and seals again). The block keeps the wraps of the older generations: it erases by scope, not by generation.
-- **`Erase`** deletes every wrap of a scope, every generation and every recipient, for the purposes named or every data-key purpose of the declaration. What was sealed under them stops opening, because the wraps were the only route to the keys. A later call that may make a key makes a new one, which opens nothing of the old. A store holds ciphertext only, so an archive of it is unreadable once its wraps age out.
-- **Planned:** rotation by count before the AES-GCM usage limit, and the refusal of seals under a generation declared compromised (sluis 0041). Both need a durable counter or mark per generation, which the block does not keep yet; a host rotates on its own events today.
+- **`Erase`** deletes every wrap of a scope, every generation and every recipient, with the counters and marks of its generations, for the purposes named or every data-key purpose of the declaration. What was sealed under them stops opening, because the wraps were the only route to the keys. A later call that may make a key makes a new one, which opens nothing of the old. A store holds ciphertext only, so an archive of it is unreadable once its wraps age out.
+- **Erasure reaches another instance within the cache's time to live**, as built (owner decision B-4 A, 2026-11-22): an instance that did not run the `Erase` stops opening at its next `Rewrap`, at `Forget`, or when its entry ends. A watch of the store's change log would make it immediate; it is not built, because not every store driver keeps a change log (DynamoDB does not).
+
+### The seal limit
+
+AES-GCM with random 96-bit nonces may run at most 2^32 times under one key (NIST SP 800-38D, section 8.3). The block counts the seals of each generation of a seal key in a durable counter and rotates before the limit (owner decision B-2 A, 2026-11-22).
+
+- **The counter is an item of the store** (`<prefix>count/...`), one per generation. An instance reserves **N** seals at a time (`Options.SealReservation`) by a conditional update of the counter, and seals from its reservation until it is used up. So there is one store write per N seals, and the counter is an upper bound of the seals of the generation, counted over every instance.
+- **N is 1024 by default.** A seal costs a store write only once in 1024, which is noise beside the store write of the sealed value itself. An instance that stops with a reservation unused loses at most 1024 seals of the generation's budget, a part in two million of the default limit. A smaller N wastes less and writes more; a host with a high seal rate may raise it.
+- **The limit is 2^31 seals per generation by default** (`Options.SealsPerGeneration`, at most 2^32): half of the AES-GCM limit, so the chance of a repeated nonce under one key stays below 2^-34.
+- **When the counter reaches the limit, the next seal rotates:** it makes the next generation (or finds that another instance made it) and seals there. The rotation is the block's own safety and does not wait for the rules' `MayCreate`. Envelopes of older generations keep opening. The fact is a rotation with the reason `limit`.
+- A `Mac` purpose has no nonce and no limit; its `Rotate` is the host's.
+
+### Compromised generations
+
+A generation of a seal key that is declared compromised seals no more (sluis record 0041; owner decision B-2 A).
+
+- **`MarkCompromised(purpose, scope, generation)`** writes a durable mark (`<prefix>mark/...`) after the rules allow it. When the generation was the current one it makes the next, so seals go on under that. A generation that was never made is `invalid_argument`, reason `generation`. A mark is never taken back.
+- **The mark is read when the cache refills:** each time an instance opens a key from its wrap, it reads the mark of the key's generation with it, one store read per cache refill. A seal under a marked generation moves to a newer one if one exists, and is refused otherwise (`failed_precondition`, reason `compromised`).
+- **How late a mark takes effect.** The instance that marks sees it at once. Another instance that holds the key in its cache seals under the marked generation until its entry ends, its next `Rewrap` (which drops every cached key whose generation is marked), or `Forget`: within `CacheTTL` at the latest, 15 minutes by default and an hour at most. A host that needs it sooner runs `Rewrap` on every instance after a mark, or shortens `CacheTTL`.
+- **What the generation sealed still opens.** sluis's rule that its integrity keys (`grant`, `cookie`, `chain`) stop opening at once is the host's: its rules refuse the opens of a marked generation. Re-sealing is the host's job, after which it may erase the scope.
+
+### Moving sluis's wraps
+
+When sluis key@ becomes the host of the block, its existing `DataKeyWrap` items of store@ are **moved once** into the block's layout (owner decision B-3 B, 2026-11-22): each wrap `<purpose>/<generation>/<recipient>` of a tenant becomes the item `<prefix>wrap/<tenant or ->/<purpose>/<generation>/<recipient>` with the same value, and each wrap `secret/<store>/<generation>/<recipient>` of a KV store becomes the item of the scope `<store>`. The bytes of the wraps do not change (the domain `sluis-wrap-v1`, the boundary as the installation), so every value sealed before the move opens after it. The move is sluis's, in the change that makes key@ the host; the block reads only its own layout.
 
 ## The cache
 
@@ -109,21 +135,22 @@ Every refusal is a Connect error with the `Refusal` detail of [common](../../../
 | `invalid_argument` | `address` | no part, more than 16, or a part longer than 1024 octets |
 | `invalid_argument` | `items` | an `Open` of no item or of more than 64 |
 | `invalid_argument` | `label` | a `Mac` label that is empty or longer than 1024 octets |
-| `invalid_argument` | `generation` | a generation for a purpose that takes none, or none for one that needs it |
+| `invalid_argument` | `generation` | a generation for a purpose that takes none, or none for one that needs it, or a mark of a generation never made |
 | `invalid_argument` | `size` | a plaintext, an input or a content above 1 MiB |
 | `permission_denied` | `open` | an envelope that does not open, for any reason |
 | `permission_denied` | `rule` | the host's rules refused (or the rules' own refusal, as they gave it) |
 | `permission_denied` | `create` | the key does not exist and the rules did not allow the call to make it |
+| `failed_precondition` | `compromised` | the current generation is marked compromised and no newer one exists |
 | `unavailable` | `wrap` | the key is not wrapped for this instance yet, or this instance is not among the recipients |
 | `unavailable` | `store`, `key` | the store port or the key port did not answer |
 
 ## The facts
 
-`Options.Observe` receives the block's facts, with no value and no key in them: a data key made (with the number of its wraps), a wrap written for a recipient, the wraps of a scope erased, a rotation, and every refusal with its reason. A host that keeps audit facts emits them; sluis's are audit facts of key@.
+`Options.Observe` receives the block's facts, with no value and no key in them: a data key made (with the number of its wraps), a wrap written for a recipient, the wraps of a scope erased, a rotation (with the reason `limit` or `compromised` when the block rotated on its own), a generation marked compromised, and every refusal with its reason. A host that keeps audit facts emits them; sluis's are audit facts of key@.
 
 ## The kit
 
-The kit (package `conformance`, command `seal-conformance`) speaks the contract only. It declares its own purposes (`conformance.Purposes()`: two seal purposes, a mac purpose of each kind, a signing purpose for each algorithm) and its own rules (`conformance.Rules()`: a scope that starts with `kit-refused-` is refused, one that starts with `kit-nocreate-` may make no key), and writes under scopes of its own run, so it can run again against the same store.
+The kit (package `conformance`, command `seal-conformance`) speaks the contract only. It declares its own purposes (`conformance.Purposes()`: two seal purposes, a mac purpose of each kind, a signing purpose for each algorithm), its own seal limit (`conformance.SealsPerGeneration`, 64, with reservations of `conformance.SealReservation`, 8, so that it can seal past it) and its own rules (`conformance.Rules()`: a scope that starts with `kit-refused-` is refused, one that starts with `kit-nocreate-` may make no key), and writes under scopes of its own run, so it can run again against the same store.
 
 | Case | What it holds the block to |
 | --- | --- |
@@ -141,12 +168,14 @@ The kit (package `conformance`, command `seal-conformance`) speaks the contract 
 | `the_hosts_rules_decide` | a refused scope is `permission_denied/rule`, a scope with no right to make a key is `permission_denied/create`, an open makes no key |
 | `sign_verifies_under_the_public_key` | each algorithm verifies in DER and raw form under the public key, with the same `key_id`, and not over other content |
 | `what_is_not_a_call_is_refused` | the refusals of the table above, with their reasons |
+| `seals_rotate_before_the_limit` | 193 seals in one scope use at least four generations, never go back a generation, never make more than the limit under one, and all open |
+| `a_compromised_generation_seals_no_more` | after the mark the next generation seals and the marked one does not, and what it sealed opens; a mark of a generation never made, of a mac purpose or in a refused scope is refused |
 | `rewrap` | a pass succeeds |
 
-What the kit cannot test is in the block's own tests: several instances and their recipients, a rewrap for a recipient added later, an erasure seen by another instance, one ECDH per key and time to live, a port that does not answer, the facts, the rules' own refusals, the options.
+What the kit cannot test is in the block's own tests: the counter reserved N at a time, two instances sharing one limit, a mark reaching another instance at its `Rewrap`, a mark with no newer generation, the erasure of counters and marks, several instances and their recipients, a rewrap for a recipient added later, an erasure seen by another instance, one ECDH per key and time to live, a port that does not answer, the facts, the rules' own refusals, the options.
 
 `just conformance` runs the kit over the memory drivers of the two ports, `key/software` and `store/memory`, each behind the socket of its thin main, with the block hosted in the kit's process and called in-process (`tools/scripts/conformance-seal.sh`). The block's tests run it over in-memory stand-ins.
 
 ## Hosting the block
 
-A host builds `seal.Options`, starts its key driver with `seal.KeyPurposes`, calls `seal.New` and serves `Block.Handler()`: in its process through `socket.InProcess`, or on a socket through `socket.Serve`. It runs `Rewrap` on a timer and after a change of its recipients, and `Close` at its end. A consumer in another language reaches the block over a socket ([record 0008](../../../docs/decisions/0008-blocks.md): one implementation, in the language of its main host). No thin main is released yet; a host serves the block itself.
+A host builds `seal.Options` (with its seal limit, or the defaults), starts its key driver with `seal.KeyPurposes`, calls `seal.New` and serves `Block.Handler()`: in its process through `socket.InProcess`, or on a socket through `socket.Serve`. It runs `Rewrap` on a timer, after a change of its recipients and after a `MarkCompromised`, and `Close` at its end. A consumer in another language reaches the block over a socket ([record 0008](../../../docs/decisions/0008-blocks.md): one implementation, in the language of its main host). No thin main is released yet; a host serves the block itself.
