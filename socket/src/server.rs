@@ -3,9 +3,11 @@
 use std::future::Future;
 use std::os::unix::fs::{FileTypeExt, PermissionsExt};
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::{Context, bail};
+use connectrpc::interceptor::Interceptor;
 use connectrpc::{ConnectRpcService, DeadlinePolicy, Router};
 use hyper_util::rt::{TokioExecutor, TokioIo};
 use hyper_util::server::conn::auto::Builder as AutoBuilder;
@@ -23,7 +25,7 @@ const GRACE: Duration = Duration::from_secs(5);
 pub(crate) const DEFAULT_DEADLINE: Duration = Duration::from_secs(30);
 
 /// The configuration of one server on one socket.
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct ServerConfig {
     /// The absolute path of the socket.
     pub socket: PathBuf,
@@ -42,6 +44,22 @@ pub struct ServerConfig {
     /// The host's observer of the calls the guard refuses, or `None`: the guard logs every refusal either way. A host that audits its
     /// refusals sets it ([`OnRefused`]).
     pub on_refused: Option<OnRefused>,
+    /// The host's interceptors, run after the guard admitted a call ([`ServerConfig::with_interceptor`]).
+    interceptors: Vec<Arc<dyn Interceptor>>,
+}
+
+impl std::fmt::Debug for ServerConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ServerConfig")
+            .field("socket", &self.socket)
+            .field("mode", &format_args!("{:#o}", self.mode))
+            .field("socket_gid", &self.socket_gid)
+            .field("allow", &self.allow)
+            .field("default_deadline", &self.default_deadline)
+            .field("on_refused", &self.on_refused)
+            .field("interceptors", &self.interceptors.len())
+            .finish()
+    }
 }
 
 impl ServerConfig {
@@ -56,7 +74,19 @@ impl ServerConfig {
             allow: Allow::SameUid,
             default_deadline: DEFAULT_DEADLINE,
             on_refused: None,
+            interceptors: Vec::new(),
         }
+    }
+
+    /// The same configuration with an interceptor of the host's, run for every call the guard admitted, in the order added, after
+    /// the guard and before the message is decoded (a Rust interceptor sees the request head, not the message). A host uses it to
+    /// put what it knows of the caller (a name it maps the [`Peer`] to) in the request's extensions for its handlers, or to refuse
+    /// a call by a rule that needs more than the peer and the procedure. It is the socket's counterpart of
+    /// [`InProcessConfig::with_interceptor`](crate::InProcessConfig::with_interceptor).
+    #[must_use]
+    pub fn with_interceptor(mut self, i: impl Interceptor) -> Self {
+        self.interceptors.push(Arc::new(i));
+        self
     }
 
     /// The same configuration with the host's own rule of who may call ([`Allow::check`]).
@@ -96,6 +126,10 @@ pub async fn serve(
     let any = matches!(cfg.allow, Allow::Any);
     if !any {
         service = service.with_interceptor(Guard::new(cfg.allow.clone(), cfg.on_refused.clone()));
+    }
+    // The host's own, after the guard: they see only the calls it admitted.
+    for i in cfg.interceptors {
+        service = service.with_interceptor_arc(i);
     }
     // After the guard, so that a refused call is refused before its headers are read. Every server hands the call down.
     service = service.with_interceptor(Inherit);
