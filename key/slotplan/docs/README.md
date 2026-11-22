@@ -1,6 +1,6 @@
 # The slot plan
 
-What `key/slotplan` checks: a versioned map from key purpose to PIV slot, which the library holds to a few rules and the card driver holds to the rows it serves.
+What `key/slotplan` checks: a versioned map from key purpose to PIV slot, which the library holds to a few rules and the card driver uses to place the purposes that its host declares.
 
 ## The map
 
@@ -19,12 +19,12 @@ A map says which card slot serves which purpose: one slot per purpose and per al
 | Two purposes in one slot are refused. | yes |
 | A purpose listed twice is refused. | yes |
 | A purpose that the plan does not list is not enabled: it needs no slot and gets no key. | yes |
-| `CheckCard` adds the card driver's limits: no override of a slot, and no purpose outside the rows the card driver serves (`CardServed`). | yes |
+| `CheckCard` adds the card driver's one limit: a purpose whose algorithm a card does not hold (`PS256`, `EdDSA`) is refused. Since step B13 the card driver serves any purpose that a host declares, in any slot that `Check` accepts. | yes |
 
 - **Which purposes count.** The checks apply to a purpose whose algorithm is a card key: `ES384`, `ES256`, `RS256` and `ECDH-P384` (also spelled `ECDH-P-384`). A purpose with another algorithm is skipped by every check. `PS256` and `EdDSA` are not on the list yet, so a plan with two such purposes in one slot passes. They join the list with the card driver's rows for the slots `8b`, `8d` and `8e`.
-- **The card serves ten rows today:** `9a`, `9c`, `9d` and `82` to `88`. A purpose of the slots `89` to `8f` has its slot in the map and no row in the driver, so `CheckCard` refuses it. The driver's own table is held to `CardServed` by its tests.
-- **The RS256 row is optional on a card.** Slot `88` is a fixed row, not a name in the plan: the card driver verifies no override of a slot. A key in slot `88` that is not the plan's leaves the purpose absent and does not stop the driver.
-- **Purposes are the host's.** The key port is meant to take any purpose that a host declares, with its slot named by the host. That change is planned. Today the card driver serves the closed list of rows above, and `Default` is the only table the library holds.
+- **A card holds fourteen of the seventeen rows of `Default`:** every one whose algorithm is `ES384`, `ES256`, `RS256` or `ECDH-P384` (`CardServed`). The three that it does not hold are `PS256` (`8b`) and `EdDSA` (`8d`, `8e`), which the port has no algorithm for.
+- **An RS256 purpose is optional on a card.** A key in the slot of an `RS256` purpose that is not the plan's leaves the purpose absent and does not stop the driver.
+- **Purposes are the host's.** The key port takes any purpose that a host declares, with its slot named by the host or taken from `Default` ([the declaration](../../docs/key-port.md#the-declaration-of-purposes)). The card driver builds its slot plan with `Resolve` over the declaration, and `Default` stays the reference map of sluis.
 
 ## Versions of the map
 
@@ -33,7 +33,7 @@ A map says which card slot serves which purpose: one slot per purpose and per al
 | 1 | `9a`, `9c`, `9d`, `82` to `88` (ten slots) | `89` to `95` |
 | 2 (the one in `Default`) | version 1, and `89` to `8f` | `90` to `95` (six) |
 
-Version 2 changed only slots that version 1 left spare, so every assignment of version 1 stays. The cost of pinning is that fewer slots are free: six rotation spares instead of thirteen. `CardServed` is still the ten rows of version 1.
+Version 2 changed only slots that version 1 left spare, so every assignment of version 1 stays. The cost of pinning is that fewer slots are free: six rotation spares instead of thirteen. `CardServed` holds the rows a card can hold, fourteen of the seventeen.
 
 ## Where the map stops
 

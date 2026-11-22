@@ -6,6 +6,7 @@ import (
 	"crypto/ecdh"
 	"crypto/ecdsa"
 	"crypto/rand"
+	"crypto/sha256"
 	"crypto/sha512"
 	"crypto/x509"
 	"errors"
@@ -24,7 +25,21 @@ import (
 	"github.com/truvity/atoom/key/conformance"
 	keyv1alpha1 "github.com/truvity/atoom/key/gen/atoom/key/v1alpha1"
 	"github.com/truvity/atoom/key/gen/atoom/key/v1alpha1/keyv1alpha1connect"
+	"github.com/truvity/atoom/key/purpose"
+	"github.com/truvity/atoom/key/signature"
 )
+
+// hostPurposes is the declaration of a host on AWS: the reference purposes of sluis, without the PIN release key, which a KMS key has no
+// PIN for and which the host does not declare here.
+func hostPurposes() []purpose.Declaration {
+	var out []purpose.Declaration
+	for _, d := range purpose.Reference() {
+		if d.Name != "pin-release" {
+			out = append(out, d)
+		}
+	}
+	return out
+}
 
 // kmsClient is a KMS client of the real AWS SDK that talks to the fake over HTTP.
 func kmsClient(t *testing.T, f *kmsfake.Fake) *kms.Client {
@@ -40,6 +55,9 @@ func start(t *testing.T, f *kmsfake.Fake, opts awskms.Options) (keyv1alpha1conne
 	t.Helper()
 	if opts.KMS == nil {
 		opts.KMS = kmsClient(t, f)
+	}
+	if opts.Purposes == nil {
+		opts.Purposes = hostPurposes()
 	}
 	svc, err := awskms.New(opts)
 	if err != nil {
@@ -83,7 +101,7 @@ func digest384() []byte {
 // TestConformance runs the key kit of the port against the driver over the fake KMS, through the driver's Connect handler.
 func TestConformance(t *testing.T) {
 	f := kmsfake.New()
-	c, _ := start(t, f, awskms.Options{CreateKeys: true})
+	c, _ := start(t, f, awskms.Options{CreateKeys: true, Purposes: conformance.Declaration()})
 	var out bytes.Buffer
 	err := conformance.Run(context.Background(), c, &out)
 	t.Log("\n" + out.String())
@@ -143,7 +161,7 @@ func TestUnofferedCallsAreUnimplemented(t *testing.T) {
 	if connect.CodeOf(err) != connect.CodeUnimplemented {
 		t.Errorf("FinishPinRelease: %v", err)
 	}
-	// The key of a card's PIN release is not held.
+	// The key of a card's PIN release is held only when the host declares the name.
 	_, err = c.Ensure(ctx, connect.NewRequest(&keyv1alpha1.EnsureRequest{Purpose: "pin-release", Algorithm: "ES384"}))
 	want(t, err, connect.CodeInvalidArgument, "purpose")
 }
@@ -437,22 +455,28 @@ func TestNewRefusesWhatKMSWouldRefuse(t *testing.T) {
 	f := kmsfake.New()
 	client := kmsClient(t, f)
 	for _, prefix := range []string{"aws", "aws/x", "a b", "/x", "x/", "x//y", "é"} {
-		if _, err := awskms.New(awskms.Options{KMS: client, AliasPrefix: prefix}); !errors.Is(err, awskms.ErrAliasPrefix) {
+		if _, err := awskms.New(awskms.Options{KMS: client, Purposes: hostPurposes(), AliasPrefix: prefix}); !errors.Is(err, awskms.ErrAliasPrefix) {
 			t.Errorf("prefix %q: %v", prefix, err)
 		}
 	}
 	for _, prefix := range []string{"", "atoom", "site/prod", "a_b-c/d"} {
-		if _, err := awskms.New(awskms.Options{KMS: client, AliasPrefix: prefix}); err != nil {
+		if _, err := awskms.New(awskms.Options{KMS: client, Purposes: hostPurposes(), AliasPrefix: prefix}); err != nil {
 			t.Errorf("prefix %q: %v", prefix, err)
 		}
 	}
 	if _, err := awskms.New(awskms.Options{}); err == nil {
 		t.Error("New without a KMS client succeeded")
 	}
-	if _, err := awskms.New(awskms.Options{KMS: client, KeyIDs: map[string]string{"pin-release": "alias/x"}}); err == nil {
-		t.Error("New took a key for a purpose that the driver does not hold")
+	if _, err := awskms.New(awskms.Options{KMS: client}); !errors.Is(err, purpose.ErrNone) {
+		t.Errorf("New without purposes: %v", err)
 	}
-	if _, err := awskms.New(awskms.Options{KMS: client, KeyIDs: map[string]string{"token-signing": ""}}); err == nil {
+	if _, err := awskms.New(awskms.Options{KMS: client, Purposes: []purpose.Declaration{{Name: "Bad", Algorithm: "ES256"}}}); err == nil {
+		t.Error("New took a declaration that is not one")
+	}
+	if _, err := awskms.New(awskms.Options{KMS: client, Purposes: hostPurposes(), KeyIDs: map[string]string{"pin-release": "alias/x"}}); err == nil {
+		t.Error("New took a key for a purpose that the host did not declare")
+	}
+	if _, err := awskms.New(awskms.Options{KMS: client, Purposes: hostPurposes(), KeyIDs: map[string]string{"token-signing": ""}}); err == nil {
 		t.Error("New took an empty key")
 	}
 }
@@ -461,7 +485,7 @@ func TestNewRefusesWhatKMSWouldRefuse(t *testing.T) {
 func TestRunServesOnTheHost(t *testing.T) {
 	f := kmsfake.New()
 	served := make(chan string, 1)
-	err := awskms.Run(context.Background(), awskms.Options{KMS: kmsClient(t, f)}, awskms.Host{
+	err := awskms.Run(context.Background(), awskms.Options{KMS: kmsClient(t, f), Purposes: hostPurposes()}, awskms.Host{
 		Serve: func(_ context.Context, path string, h http.Handler) error {
 			if h == nil {
 				t.Error("no handler")
@@ -476,7 +500,7 @@ func TestRunServesOnTheHost(t *testing.T) {
 	if p := <-served; !strings.HasSuffix(p, "/") || !strings.Contains(p, "KeyStoreService") {
 		t.Fatalf("served at %q", p)
 	}
-	if err := awskms.Run(context.Background(), awskms.Options{KMS: kmsClient(t, f)}, awskms.Host{}); err == nil {
+	if err := awskms.Run(context.Background(), awskms.Options{KMS: kmsClient(t, f), Purposes: hostPurposes()}, awskms.Host{}); err == nil {
 		t.Fatal("Run without Serve succeeded")
 	}
 }
@@ -494,4 +518,78 @@ func TestANewKeyThatIsNotVisibleYet(t *testing.T) {
 	if f.Calls("CreateAlias") != 3 || f.Calls("GetPublicKey") != 3 {
 		t.Fatalf("CreateAlias %d times and GetPublicKey %d times, want 3 and 3", f.Calls("CreateAlias"), f.Calls("GetPublicKey"))
 	}
+}
+
+// The purposes of a host that no driver ever knew: ES256 and ES384 signatures for the client assertions and the identity header of
+// session, made in KMS under the host's names with the spec of their algorithm, signing through KMS, and the raw form of a JWS from
+// the DER that KMS returns.
+func TestAHostDeclaredPurposeIsServedWithES256AndES384(t *testing.T) {
+	f := kmsfake.New()
+	c, _ := start(t, f, awskms.Options{CreateKeys: true, Purposes: []purpose.Declaration{
+		{Name: "client-assertion", Algorithm: purpose.ES256, Operations: []purpose.Operation{purpose.Sign}},
+		{Name: "identity-header", Algorithm: purpose.ES384, Operations: []purpose.Operation{purpose.Sign}},
+		{Name: "made-only", Algorithm: purpose.ES384},
+	}})
+	ctx := context.Background()
+	e256, e384 := ensure(t, c, "client-assertion", "ES256"), ensure(t, c, "identity-header", "ES384")
+	if !e256.GetCreated() || !e384.GetCreated() {
+		t.Fatal("the keys were not made")
+	}
+	if f.KeyByAlias("alias/atoom/client-assertion") == nil || f.KeyByAlias("alias/atoom/identity-header") == nil {
+		t.Fatal("no key under the alias of the host's purpose")
+	}
+	k256, _ := x509.ParsePKIXPublicKey(e256.GetSpkiDer())
+	k384, _ := x509.ParsePKIXPublicKey(e384.GetSpkiDer())
+	pub256, pub384 := k256.(*ecdsa.PublicKey), k384.(*ecdsa.PublicKey)
+	if pub256.Curve.Params().Name != "P-256" || pub384.Curve.Params().Name != "P-384" {
+		t.Fatalf("curves %s and %s", pub256.Curve.Params().Name, pub384.Curve.Params().Name)
+	}
+	d256, d384 := sha256.Sum256([]byte("jws signing input")), digest384()
+	for _, tc := range []struct {
+		purpose, alg string
+		digest       []byte
+		pub          *ecdsa.PublicKey
+	}{{"client-assertion", "ES256", d256[:], pub256}, {"identity-header", "ES384", d384, pub384}} {
+		res, err := c.Sign(ctx, connect.NewRequest(&keyv1alpha1.SignRequest{Purpose: tc.purpose, Algorithm: tc.alg, Digest: tc.digest}))
+		if err != nil {
+			t.Fatalf("%s: %v", tc.purpose, err)
+		}
+		if !ecdsa.VerifyASN1(tc.pub, tc.digest, res.Msg.GetSignatureDer()) {
+			t.Fatalf("%s: the DER signature does not verify", tc.purpose)
+		}
+		raw, err := signature.DERToRaw(tc.alg, res.Msg.GetSignatureDer())
+		if err != nil || len(raw) != 2*signature.Size(tc.alg) {
+			t.Fatalf("%s: raw form: %v", tc.purpose, err)
+		}
+	}
+	// A name of the old closed list that the host did not declare is refused; so is a declared purpose that has no operation.
+	_, err := c.Ensure(ctx, connect.NewRequest(&keyv1alpha1.EnsureRequest{Purpose: "token-signing", Algorithm: "ES384"}))
+	want(t, err, connect.CodeInvalidArgument, "purpose")
+	ensure(t, c, "made-only", "ES384")
+	_, err = c.Sign(ctx, connect.NewRequest(&keyv1alpha1.SignRequest{Purpose: "made-only", Algorithm: "ES384", Digest: d384}))
+	want(t, err, connect.CodeInvalidArgument, "purpose")
+	res, err := c.Capabilities(ctx, connect.NewRequest(&keyv1alpha1.CapabilitiesRequest{}))
+	if err != nil || len(res.Msg.GetPurposes()) != 3 || res.Msg.GetPurposes()[0].GetName() != "client-assertion" {
+		t.Fatalf("capabilities purposes: %v %v", res, err)
+	}
+}
+
+// A key of the wrong spec under a declared purpose is refused, never replaced: a host that changes the algorithm of a purpose finds the
+// old key and is told so.
+func TestAChangedAlgorithmFindsTheOldKeyAndIsRefused(t *testing.T) {
+	f := kmsfake.New()
+	c, _ := start(t, f, awskms.Options{CreateKeys: true, Purposes: []purpose.Declaration{{Name: "assertion", Algorithm: purpose.ES384, Operations: []purpose.Operation{purpose.Sign}}}})
+	ensure(t, c, "assertion", "ES384")
+	c2, _ := start(t, f, awskms.Options{CreateKeys: true, Purposes: []purpose.Declaration{{Name: "assertion", Algorithm: purpose.ES256, Operations: []purpose.Operation{purpose.Sign}}}})
+	_, err := c2.Ensure(context.Background(), connect.NewRequest(&keyv1alpha1.EnsureRequest{Purpose: "assertion", Algorithm: "ES256"}))
+	want(t, err, connect.CodeFailedPrecondition, "algorithm")
+}
+
+// An agreement purpose declared without agree is made and read and never used.
+func TestAnAgreementPurposeNeedsTheOperation(t *testing.T) {
+	c, _ := start(t, kmsfake.New(), awskms.Options{CreateKeys: true, Purposes: []purpose.Declaration{{Name: "no-agree", Algorithm: purpose.ECDHP384}}})
+	ensure(t, c, "no-agree", "ECDH-P384")
+	eph, _ := ecdh.P384().GenerateKey(rand.Reader)
+	_, err := c.Ecdh(context.Background(), connect.NewRequest(&keyv1alpha1.EcdhRequest{Purpose: "no-agree", PeerPublic: eph.PublicKey().Bytes()}))
+	want(t, err, connect.CodeInvalidArgument, "purpose")
 }

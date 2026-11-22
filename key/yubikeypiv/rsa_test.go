@@ -201,7 +201,7 @@ func TestAWrongKeyInSlot88OrAnRSAKeyInAnotherSlotIsRefusedAtStart(t *testing.T) 
 		t.Run(tt.name, func(t *testing.T) {
 			c := cardtest.New()
 			tt.setup(c)
-			svc, err := yubikeypiv.New(yubikeypiv.Options{Environment: yubikeypiv.Production, Serial: c.SerialNo, Open: c.Opener()})
+			svc, err := yubikeypiv.New(yubikeypiv.Options{Purposes: refPurposes(), Environment: yubikeypiv.Production, Serial: c.SerialNo, Open: c.Opener()})
 			if tt.want == "" || tt.want == "absent" {
 				if err != nil {
 					t.Fatalf("refused: %v", err)
@@ -248,7 +248,7 @@ func TestOnlyAFewRSASignaturesAreAdmittedAndTheRestAreRefusedAtOnce(t *testing.T
 		}
 		t.Run(fmt.Sprintf("places-%d", queue), func(t *testing.T) {
 			c := cardtest.New()
-			r := startOpts(t, c, yubikeypiv.Development, self(), yubikeypiv.Options{Node: "node-a", RSAQueue: given})
+			r := startOpts(t, c, yubikeypiv.Development, self(), yubikeypiv.Options{Purposes: refPurposes(), Node: "node-a", RSAQueue: given})
 			ensure(t, r.key, rsPurpose, "RS256")
 			ensure(t, r.key, "token-signing", "ES384")
 			r.unlock(t, "123456")
@@ -305,7 +305,7 @@ func TestOnlyAFewRSASignaturesAreAdmittedAndTheRestAreRefusedAtOnce(t *testing.T
 // verifies: REQ-KEYS-276
 func TestAnES384SignatureWaitsForTheRSAOneOnTheCardAndNotForTheFlood(t *testing.T) {
 	c := cardtest.New()
-	r := startOpts(t, c, yubikeypiv.Development, self(), yubikeypiv.Options{Node: "node-a"})
+	r := startOpts(t, c, yubikeypiv.Development, self(), yubikeypiv.Options{Purposes: refPurposes(), Node: "node-a"})
 	ensure(t, r.key, rsPurpose, "RS256")
 	ensure(t, r.key, "token-signing", "ES384")
 	r.unlock(t, "123456")

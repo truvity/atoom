@@ -31,7 +31,7 @@ func status(t *testing.T, r running) *keyv1alpha1.StatusResponse {
 }
 
 func newOpts(c *cardtest.Card) yubikeypiv.Options {
-	return yubikeypiv.Options{Environment: yubikeypiv.Development, Serial: c.SerialNo, Open: c.Opener(), Node: "node-a"}
+	return yubikeypiv.Options{Purposes: refPurposes(), Environment: yubikeypiv.Development, Serial: c.SerialNo, Open: c.Opener(), Node: "node-a"}
 }
 
 // verifies: REQ-KEYS-228

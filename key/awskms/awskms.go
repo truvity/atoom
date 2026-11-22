@@ -6,14 +6,15 @@
 // in-memory transport; there are no sidecars there), on a server of its own (Handler), or on a server that the host provides (Run).
 // The main (cmd/awskms) serves the library on a UNIX socket and nothing more.
 //
-// What it maps (docs/layout.md has the full table). A purpose is a KMS key found by its alias, alias/<prefix>/<purpose>, or by an
+// What it maps (docs/layout.md has the full table). A purpose is a name that the host declares (Options.Purposes: its algorithm ES256,
+// ES384, RS256 or ECDH-P384, and the operations it allows) and a KMS key found by its alias, alias/<prefix>/<purpose>, or by an
 // identifier that the host names for it (Options.KeyIDs); the key carries the tags atoom:purpose and atoom:algorithm. Ensure finds the
 // key, or makes it when Options.CreateKeys allows, and returns its public key. Sign is Sign with a digest. PublicKey is GetPublicKey.
 // Ecdh is DeriveSharedSecret on a KEY_AGREEMENT key. A key is never replaced, never imported and never exported.
 //
 // What it does not offer, and says so. KMS cannot attest where a key was born, so Attest and VerifyAttestation answer unimplemented and
-// Capabilities says attests false. There is no PIN, so the three calls of the PIN release answer unimplemented as well, and the key of
-// the pin-release purpose is not held. The contract has no call that makes a data key, so GenerateDataKey is not used (docs/layout.md,
+// Capabilities says attests false. There is no PIN, so the three calls of the PIN release answer unimplemented as well, and a purpose
+// named pin-release is only a name here. The contract has no call that makes a data key, so GenerateDataKey is not used (docs/layout.md,
 // "What is not here").
 package awskms
 
@@ -34,6 +35,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/kms"
 
 	keyv1alpha1connect "github.com/truvity/atoom/key/gen/atoom/key/v1alpha1/keyv1alpha1connect"
+	"github.com/truvity/atoom/key/purpose"
 )
 
 // DefaultAliasPrefix is the prefix of the aliases of the keys that the driver finds and makes: alias/atoom/<purpose>.
@@ -76,12 +78,16 @@ var ErrAliasPrefix = errors.New("awskms: the alias prefix may hold letters, digi
 type Options struct {
 	// KMS is the client of the KMS service: its region, credentials and endpoint are the host's. Required.
 	KMS API
+	// Purposes are the purposes the host declares: the only names the driver finds or makes a key for, each with its algorithm and its
+	// operations (key/purpose). Required. The field Slot of a declaration is read by the card driver only. Each purpose is a KMS key
+	// of the spec and usage of its algorithm; a key of another spec is refused, never replaced.
+	Purposes []purpose.Declaration
 	// AliasPrefix is the prefix of the aliases of the purposes' keys: alias/<AliasPrefix>/<purpose>. Empty is DefaultAliasPrefix. One
 	// AWS account and region can hold several installations, each under a prefix of its own.
 	AliasPrefix string
 	// KeyIDs names the KMS key of a purpose by key ID, key ARN or alias name, and wins over the alias that the prefix gives. A host
 	// whose keys are made by its deployment code (Terraform, CloudFormation) names them here; sluis names the ARN of each key in its
-	// signed key plan. A purpose that is not listed is found by its alias. The key is read once and its identifier is then kept, so an
+	// signed key plan. Only a declared purpose may be named. A purpose that is not listed is found by its alias. The key is read once and its identifier is then kept, so an
 	// alias that is moved afterwards does not move the driver; a rotation under an alias takes a restart.
 	KeyIDs map[string]string
 	// CreateKeys lets Ensure make the key of a purpose that has none: CreateKey, CreateAlias and the tags. The default is off, so that a
@@ -103,11 +109,12 @@ type Host struct {
 // Service implements the key-store port over AWS KMS.
 type Service struct {
 	keyv1alpha1connect.UnimplementedKeyStoreServiceHandler
-	api    API
-	prefix string
-	ids    map[string]string
-	create bool
-	caller func(context.Context) string
+	api      API
+	purposes *purpose.Set
+	prefix   string
+	ids      map[string]string
+	create   bool
+	caller   func(context.Context) string
 
 	mu   sync.Mutex
 	keys map[string]*key // by purpose; a key's identifier, public key and time never change
@@ -126,6 +133,10 @@ func New(opts Options) (*Service, error) {
 	if opts.KMS == nil {
 		return nil, errors.New("awskms: Options.KMS is required")
 	}
+	set, err := purpose.New(opts.Purposes)
+	if err != nil {
+		return nil, err
+	}
 	prefix := opts.AliasPrefix
 	if prefix == "" {
 		prefix = DefaultAliasPrefix
@@ -134,16 +145,16 @@ func New(opts Options) (*Service, error) {
 		return nil, ErrAliasPrefix
 	}
 	ids := make(map[string]string, len(opts.KeyIDs))
-	for purpose, id := range opts.KeyIDs {
-		if _, ok := algorithmFor(purpose); !ok {
-			return nil, fmt.Errorf("awskms: Options.KeyIDs names %q, which is not a purpose of the contract", purpose)
+	for name, id := range opts.KeyIDs {
+		if _, ok := set.Lookup(name); !ok {
+			return nil, fmt.Errorf("awskms: Options.KeyIDs names %q, which the host did not declare", name)
 		}
 		if id == "" {
-			return nil, fmt.Errorf("awskms: Options.KeyIDs gives the purpose %q an empty key", purpose)
+			return nil, fmt.Errorf("awskms: Options.KeyIDs gives the purpose %q an empty key", name)
 		}
-		ids[purpose] = id
+		ids[name] = id
 	}
-	return &Service{api: opts.KMS, prefix: prefix, ids: ids, create: opts.CreateKeys, caller: opts.Caller, keys: map[string]*key{}}, nil
+	return &Service{api: opts.KMS, purposes: set, prefix: prefix, ids: ids, create: opts.CreateKeys, caller: opts.Caller, keys: map[string]*key{}}, nil
 }
 
 // Handler returns the Connect handler of the key-store service, to mount on a server or an in-memory transport.
@@ -160,7 +171,7 @@ func Run(ctx context.Context, opts Options, host Host) error {
 	if err != nil {
 		return err
 	}
-	slog.Info("aws kms key driver starting", "alias_prefix", svc.prefix, "create_keys", svc.create)
+	slog.Info("aws kms key driver starting", "alias_prefix", svc.prefix, "create_keys", svc.create, "purposes", svc.purposes.Names())
 	path, h := svc.Handler(host.HandlerOptions...)
 	return host.Serve(ctx, path, h)
 }

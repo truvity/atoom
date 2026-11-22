@@ -15,7 +15,22 @@ import (
 	"github.com/truvity/atoom/common/refusal"
 	"github.com/truvity/atoom/key/conformance"
 	keyv1alpha1 "github.com/truvity/atoom/key/gen/atoom/key/v1alpha1"
+	"github.com/truvity/atoom/key/purpose"
 )
+
+// purposesFile writes the declaration of the kit as the JSON file that --purposes takes, and returns its path.
+func purposesFile(t *testing.T) string {
+	t.Helper()
+	raw, err := purpose.Marshal(purpose.MustNew(conformance.Declaration()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(t.TempDir(), "purposes.json")
+	if err := os.WriteFile(path, raw, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
 
 // serveWith runs the main with the guard flags `extra` and waits for its socket. The returned function stops it (the way a service
 // manager does) and says how it ended.
@@ -28,7 +43,7 @@ func serveWith(t *testing.T, extra ...string) (socket string, stop func() int) {
 	}
 	t.Cleanup(func() { _ = os.RemoveAll(dir) })
 	socket = filepath.Join(dir, "s")
-	args := append([]string{"serve", "--socket", socket, "--state-dir", filepath.Join(dir, "st"), "--environment", "development"}, extra...)
+	args := append([]string{"serve", "--socket", socket, "--state-dir", filepath.Join(dir, "st"), "--purposes", purposesFile(t), "--environment", "development"}, extra...)
 	done := make(chan int, 1)
 	go func() { done <- run(args, &bytes.Buffer{}, &bytes.Buffer{}) }()
 	deadline := time.Now().Add(10 * time.Second)

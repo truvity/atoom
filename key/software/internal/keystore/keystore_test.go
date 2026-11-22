@@ -17,8 +17,12 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/truvity/atoom/key/purpose"
 	"github.com/truvity/atoom/key/software/internal/keystore"
 )
+
+// refSet is the declaration of sluis, the purposes the tests of this package use.
+var refSet = purpose.MustNew(purpose.Reference())
 
 // stateDir returns a new state directory of mode 0700 (the umask of a test run may narrow, never widen, it).
 func stateDir(t *testing.T) string {
@@ -44,7 +48,7 @@ func problems(t *testing.T, err error) []string {
 
 func TestEnsureSignVerifyAndPersist(t *testing.T) {
 	dir := stateDir(t)
-	s, err := keystore.Open(dir)
+	s, err := keystore.Open(dir, refSet)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -96,7 +100,7 @@ func TestEnsureSignVerifyAndPersist(t *testing.T) {
 	}
 
 	// A new process reads the same key.
-	s2, err := keystore.Open(dir)
+	s2, err := keystore.Open(dir, refSet)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -111,7 +115,7 @@ func TestEnsureSignVerifyAndPersist(t *testing.T) {
 
 func TestOpenCreatesTheDirectoryWith0700(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "new")
-	if _, err := keystore.Open(dir); err != nil {
+	if _, err := keystore.Open(dir, refSet); err != nil {
 		t.Fatal(err)
 	}
 	fi, err := os.Stat(dir)
@@ -126,7 +130,7 @@ func TestPermissionsAreRefused(t *testing.T) {
 		if err := os.Chmod(dir, 0o755); err != nil { //nolint:gosec // the point of the test
 			t.Fatal(err)
 		}
-		_, err := keystore.Open(dir)
+		_, err := keystore.Open(dir, refSet)
 		p := problems(t, err)
 		if len(p) != 1 || !strings.HasPrefix(p[0], dir+": mode 0755") {
 			t.Fatalf("problems = %v", p)
@@ -134,7 +138,7 @@ func TestPermissionsAreRefused(t *testing.T) {
 	})
 	t.Run("key file 0644", func(t *testing.T) {
 		dir := stateDir(t)
-		s, err := keystore.Open(dir)
+		s, err := keystore.Open(dir, refSet)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -145,7 +149,7 @@ func TestPermissionsAreRefused(t *testing.T) {
 		if err := os.Chmod(path, 0o644); err != nil { //nolint:gosec // the point of the test
 			t.Fatal(err)
 		}
-		_, err = keystore.Open(dir)
+		_, err = keystore.Open(dir, refSet)
 		p := problems(t, err)
 		if len(p) != 1 || !strings.HasPrefix(p[0], path+": mode 0644") {
 			t.Fatalf("problems = %v", p)
@@ -157,7 +161,7 @@ func TestPermissionsAreRefused(t *testing.T) {
 		if err := os.Symlink(dir, link); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := keystore.Open(link); err == nil {
+		if _, err := keystore.Open(link, refSet); err == nil {
 			t.Fatal("a symlink was accepted")
 		}
 	})
@@ -170,7 +174,7 @@ func TestPermissionsAreRefused(t *testing.T) {
 		if err := os.Symlink(target, filepath.Join(dir, "token-signing.p8")); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := keystore.Open(dir); err == nil {
+		if _, err := keystore.Open(dir, refSet); err == nil {
 			t.Fatal("a symlink was accepted")
 		}
 	})
@@ -188,7 +192,7 @@ func TestBadContentIsRefusedWithoutShowingIt(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "nonsense.p8"), nil, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	_, err := keystore.Open(dir)
+	_, err := keystore.Open(dir, refSet)
 	p := problems(t, err)
 	if len(p) != 3 {
 		t.Fatalf("problems = %v", p)
@@ -211,7 +215,7 @@ func TestAKeyOfAnotherCurveIsRefused(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "token-signing.p8"), der, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := keystore.Open(dir); err == nil {
+	if _, err := keystore.Open(dir, refSet); err == nil {
 		t.Fatal("a P-256 key was accepted")
 	}
 }
@@ -219,7 +223,7 @@ func TestAKeyOfAnotherCurveIsRefused(t *testing.T) {
 // The audit-log key is P-256 and signs SHA-256 (ADR 0006, "Named exceptions"; D-25), the one exception to P-384.
 func TestAuditLogKeyIsP256AndSignsSHA256(t *testing.T) {
 	dir := stateDir(t)
-	s, err := keystore.Open(dir)
+	s, err := keystore.Open(dir, refSet)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -248,7 +252,7 @@ func TestAuditLogKeyIsP256AndSignsSHA256(t *testing.T) {
 		t.Fatalf("Sign with a SHA-384 digest: %v", err)
 	}
 	// It persists as P-256 and every other purpose stays P-384.
-	again, err := keystore.Open(dir)
+	again, err := keystore.Open(dir, refSet)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -281,7 +285,7 @@ func TestAnOldP384AuditLogKeyIsRefused(t *testing.T) {
 	if err := os.WriteFile(path, der, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	_, err = keystore.Open(dir)
+	_, err = keystore.Open(dir, refSet)
 	var pe *keystore.ProblemsError
 	if !errors.As(err, &pe) || len(pe.Problems) != 1 || !strings.Contains(pe.Problems[0], "audit-log.p8: not a P-256 key") {
 		t.Fatalf("want one problem that names audit-log.p8 and P-256, got %v", err)
@@ -298,7 +302,7 @@ func TestLeftoverTemporaryFilesAreRemoved(t *testing.T) {
 	if err := os.WriteFile(tmp, []byte("x"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := keystore.Open(dir); err != nil {
+	if _, err := keystore.Open(dir, refSet); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Stat(tmp); !errors.Is(err, os.ErrNotExist) {
@@ -307,7 +311,7 @@ func TestLeftoverTemporaryFilesAreRemoved(t *testing.T) {
 }
 
 func TestAlgorithmPerPurpose(t *testing.T) {
-	s, err := keystore.Open(stateDir(t))
+	s, err := keystore.Open(stateDir(t), refSet)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -345,7 +349,7 @@ func TestAlgorithmPerPurpose(t *testing.T) {
 // with PKCS#1 v1.5 and reads the same key after a restart.
 func TestTheRS256KeyIsRSA2048AndPersists(t *testing.T) {
 	dir := stateDir(t)
-	s, err := keystore.Open(dir)
+	s, err := keystore.Open(dir, refSet)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -379,7 +383,7 @@ func TestTheRS256KeyIsRSA2048AndPersists(t *testing.T) {
 	if err != nil || fi.Mode().Perm() != 0o600 {
 		t.Fatalf("key file: %v, %v", fi, err)
 	}
-	s2, err := keystore.Open(dir)
+	s2, err := keystore.Open(dir, refSet)
 	if err != nil {
 		t.Fatalf("a restart refused the key it wrote: %v", err)
 	}
@@ -440,7 +444,7 @@ func TestAKeyOfAnotherKindIsRefusedForThePurpose(t *testing.T) {
 			if err := os.WriteFile(filepath.Join(dir, c.file), der, 0o600); err != nil {
 				t.Fatal(err)
 			}
-			_, err = keystore.Open(dir)
+			_, err = keystore.Open(dir, refSet)
 			if c.want != (err == nil) {
 				t.Fatalf("Open = %v, accepted should be %v", err, c.want)
 			}

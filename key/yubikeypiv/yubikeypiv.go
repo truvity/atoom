@@ -37,7 +37,7 @@ import (
 	"github.com/truvity/atoom/common/refusal"
 	keyv1alpha1 "github.com/truvity/atoom/key/gen/atoom/key/v1alpha1"
 	"github.com/truvity/atoom/key/gen/atoom/key/v1alpha1/keyv1alpha1connect"
-	"github.com/truvity/atoom/key/pinrelease"
+	"github.com/truvity/atoom/key/purpose"
 	"github.com/truvity/atoom/key/slotplan"
 	"github.com/truvity/atoom/key/yubikeypiv/internal/card"
 )
@@ -101,6 +101,13 @@ var ErrUnlisted = errors.New("the node is not listed with a pin-release key")
 // Options are what the driver needs besides the host.
 type Options struct {
 	Environment string
+	// Purposes are the purposes the host declares: the only names the driver holds a key for, each with its algorithm (ES256, ES384,
+	// RS256 or ECDH-P384), its operations and, when it names one, its PIV slot; a purpose that names none takes the slot of the reference
+	// map (slotplan.Default). Required. The driver refuses a declaration that the card cannot follow (two purposes in one slot, a slot
+	// that is no slot of a board, a purpose with no slot, an algorithm that a card does not hold) before it opens the card, and a card
+	// whose slot holds a key that is not the declared one (another algorithm, another origin) refuses the start. The PIN release key is
+	// the purpose pin-release: ES384, slot 87, and it signs nothing for a caller.
+	Purposes []purpose.Declaration
 	// Node is the node whose card this is; the admin socket reports it so that an unlock for another node is caught.
 	// The PIN release names it too: the driver writes it into its own request and seals to no request of its own.
 	Node string
@@ -153,6 +160,10 @@ type Service struct {
 	node    string
 	mgmtKey []byte
 
+	// The host's purposes as slots of the card, in the order of the declaration, and as Capabilities says them.
+	plan  []entry
+	infos []*keyv1alpha1.PurposeInfo
+
 	// The check of the other side of a PIN release (PeerKeys).
 	boundary string
 	peers    PeerKeys
@@ -197,6 +208,14 @@ func New(opts Options) (*Service, error) {
 	if opts.Environment != Development && opts.Serial == 0 {
 		return nil, ErrSerial
 	}
+	set, err := purpose.New(opts.Purposes)
+	if err != nil {
+		return nil, err
+	}
+	plan, err := buildPlan(set)
+	if err != nil {
+		return nil, err
+	}
 	open := opts.Open
 	if open == nil {
 		open = card.Open
@@ -209,7 +228,8 @@ func New(opts Options) (*Service, error) {
 	if queue <= 0 {
 		queue = RSAQueueDefault
 	}
-	s := &Service{env: opts.Environment, node: opts.Node, mgmtKey: opts.ManagementKey, card: c, keys: map[string]*slotKey{}, dead: make(chan struct{}),
+	s := &Service{env: opts.Environment, node: opts.Node, mgmtKey: opts.ManagementKey, plan: plan, infos: planInfos(plan), card: c,
+		keys: map[string]*slotKey{}, dead: make(chan struct{}),
 		rsaTickets: make(chan struct{}, queue),
 		boundary:   opts.Boundary, peers: opts.PeerKeys, caller: opts.Caller, refused: refusedMark{dir: opts.StateDir}}
 	if err := s.refused.restore(); err != nil {
@@ -318,7 +338,7 @@ func (s *Service) start(wantSerial uint32) error {
 	}
 	s.attCert = att
 	var problems []string
-	for _, e := range slotPlan {
+	for _, e := range s.plan {
 		k, err := s.adopt(e)
 		switch {
 		case errors.Is(err, card.ErrNoKey):
@@ -366,7 +386,7 @@ func (s *Service) Present() []string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	out := make([]string, 0, len(s.keys))
-	for _, e := range slotPlan {
+	for _, e := range s.plan {
 		if _, ok := s.keys[e.purpose]; ok {
 			out = append(out, e.purpose)
 		}
@@ -478,11 +498,22 @@ func (s *Service) refuseAt(ctx context.Context, level slog.Level, method string,
 	return refusal.New(code, reason, field)
 }
 
-// Capabilities says what the store can do.
-func (*Service) Capabilities(context.Context, *connect.Request[keyv1alpha1.CapabilitiesRequest]) (*connect.Response[keyv1alpha1.CapabilitiesResponse], error) {
+// Capabilities says what the store can do: the four algorithms of the port (a YubiKey 5 holds all of them), the purposes the host
+// declared, and that it attests.
+func (s *Service) Capabilities(context.Context, *connect.Request[keyv1alpha1.CapabilitiesRequest]) (*connect.Response[keyv1alpha1.CapabilitiesResponse], error) {
 	return connect.NewResponse(&keyv1alpha1.CapabilitiesResponse{
-		Store: StoreName, Attests: true, Algorithms: []string{ES384, ES256, RS256, ECDHP384},
+		Store: StoreName, Attests: true, Algorithms: []string{ES384, ES256, RS256, ECDHP384}, Purposes: s.infos,
 	}), nil
+}
+
+// planFor returns the row of a purpose that the host declared.
+func (s *Service) planFor(name string) (entry, bool) {
+	for _, e := range s.plan {
+		if e.purpose == name {
+			return e, true
+		}
+	}
+	return entry{}, false
 }
 
 // Ensure returns the public key of a purpose. A key that the card holds was verified at start (or when it was
@@ -491,7 +522,7 @@ func (*Service) Capabilities(context.Context, *connect.Request[keyv1alpha1.Capab
 // by its owners, and a management key does not sit on a board.
 func (s *Service) Ensure(ctx context.Context, req *connect.Request[keyv1alpha1.EnsureRequest]) (*connect.Response[keyv1alpha1.EnsureResponse], error) {
 	purpose, algorithm := req.Msg.GetPurpose(), req.Msg.GetAlgorithm()
-	e, ok := planFor(purpose)
+	e, ok := s.planFor(purpose)
 	if !ok {
 		return nil, s.refuse(ctx, "Ensure", connect.CodeInvalidArgument, reasonPurpose, "purpose")
 	}
@@ -553,7 +584,7 @@ func (s *Service) key(purpose string) (*slotKey, bool) {
 // PublicKey returns the public key of a purpose.
 func (s *Service) PublicKey(ctx context.Context, req *connect.Request[keyv1alpha1.PublicKeyRequest]) (*connect.Response[keyv1alpha1.PublicKeyResponse], error) {
 	purpose := req.Msg.GetPurpose()
-	if _, ok := planFor(purpose); !ok {
+	if _, ok := s.planFor(purpose); !ok {
 		return nil, s.refuse(ctx, "PublicKey", connect.CodeInvalidArgument, reasonPurpose, "purpose")
 	}
 	k, ok := s.key(purpose)
@@ -620,18 +651,22 @@ func (s *Service) exit(why error) {
 // Sign signs a digest with the key of a purpose, on the card.
 func (s *Service) Sign(ctx context.Context, req *connect.Request[keyv1alpha1.SignRequest]) (*connect.Response[keyv1alpha1.SignResponse], error) {
 	purpose := req.Msg.GetPurpose()
-	e, ok := planFor(purpose)
+	e, ok := s.planFor(purpose)
 	if !ok {
 		return nil, s.refuse(ctx, "Sign", connect.CodeInvalidArgument, reasonPurpose, "purpose")
 	}
-	// The pin-release key signs while the board is locked (PIN never), so it signs only the texts the driver writes
-	// itself, in BeginPinRelease and SealPin: a digest from key@ could be of a request with a key of key@'s own.
-	if purpose == pinrelease.PurposePinRelease {
+	// The key-agreement key does not sign, whatever the algorithm asked.
+	if e.algorithm == ECDHP384 {
+		return nil, s.refuse(ctx, "Sign", connect.CodeInvalidArgument, reasonAlgorithm, "algorithm")
+	}
+	// A purpose that the host declared without the operation is not one this host lets sign. The pin-release key is one: it signs while
+	// the board is locked (PIN never), so it signs only the texts the driver writes itself, in BeginPinRelease and SealPin: a digest
+	// from a caller could be of a request with a key of the caller's own.
+	if !e.sign {
 		return nil, s.refuse(ctx, "Sign", connect.CodeInvalidArgument, reasonPurpose, "purpose")
 	}
-	// The algorithm must be the purpose's own: ES256 (SHA-256) for audit-log, RS256 (SHA-256) for the RS256 purpose, ES384
-	// (SHA-384) for the rest. The key-agreement key does not sign.
-	if a := req.Msg.GetAlgorithm(); e.algorithm == ECDHP384 || a != e.algorithm {
+	// The algorithm must be the purpose's own: ES256 and RS256 sign SHA-256, ES384 SHA-384.
+	if a := req.Msg.GetAlgorithm(); a != e.algorithm {
 		return nil, s.refuse(ctx, "Sign", connect.CodeInvalidArgument, reasonAlgorithm, "algorithm")
 	}
 	digest := req.Msg.GetDigest()
@@ -732,12 +767,16 @@ func (s *Service) signRS256(ctx context.Context, purpose string, digest []byte) 
 // Ecdh derives the shared secret of the key-agreement key (slot 9d) with a peer.
 func (s *Service) Ecdh(ctx context.Context, req *connect.Request[keyv1alpha1.EcdhRequest]) (*connect.Response[keyv1alpha1.EcdhResponse], error) {
 	purpose := req.Msg.GetPurpose()
-	e, ok := planFor(purpose)
+	e, ok := s.planFor(purpose)
 	if !ok {
 		return nil, s.refuse(ctx, "Ecdh", connect.CodeInvalidArgument, reasonPurpose, "purpose")
 	}
 	if e.algorithm != ECDHP384 {
 		return nil, s.refuse(ctx, "Ecdh", connect.CodeFailedPrecondition, reasonAlgorithm, "purpose")
+	}
+	// A purpose that the host declared without the operation is not one this host lets agree.
+	if !e.agree {
+		return nil, s.refuse(ctx, "Ecdh", connect.CodeInvalidArgument, reasonPurpose, "purpose")
 	}
 	peer, err := ecdh.P384().NewPublicKey(req.Msg.GetPeerPublic()) // SEC1 uncompressed; the point is checked to be on the curve
 	if err != nil {

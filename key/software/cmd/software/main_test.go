@@ -13,7 +13,8 @@ import (
 )
 
 func TestUsage(t *testing.T) {
-	for _, args := range [][]string{nil, {"nope"}, {"serve"}, {"serve", "--socket", "/x"}, {"check"}, {"serve", "--socket", "/x", "--state-dir", "/y", "--socket-mode", "zz"}} {
+	for _, args := range [][]string{nil, {"nope"}, {"serve"}, {"serve", "--socket", "/x"}, {"serve", "--socket", "/x", "--state-dir", "/y"}, {"check"}, {"check", "--state-dir", "/y"},
+		{"serve", "--socket", "/x", "--state-dir", "/y", "--purposes", "/y/none.json"}, {"serve", "--socket", "/x", "--state-dir", "/y", "--purposes", "/y/none.json", "--socket-mode", "zz"}} {
 		var out, errb bytes.Buffer
 		if code := run(args, &out, &errb); code != 2 {
 			t.Errorf("run(%v) = %d, want 2 (%s)", args, code, errb.String())
@@ -34,7 +35,7 @@ func TestVersion(t *testing.T) {
 func TestAnUnknownEnvironmentIsAUsageError(t *testing.T) {
 	base := t.TempDir()
 	var errb bytes.Buffer
-	code := run([]string{"serve", "--socket", filepath.Join(base, "s"), "--state-dir", filepath.Join(base, "st"), "--environment", "prod"}, &bytes.Buffer{}, &errb)
+	code := run([]string{"serve", "--socket", filepath.Join(base, "s"), "--state-dir", filepath.Join(base, "st"), "--purposes", purposesFile(t), "--environment", "prod"}, &bytes.Buffer{}, &errb)
 	if code != 2 {
 		t.Fatalf("exit %d (%s)", code, errb.String())
 	}
@@ -43,7 +44,7 @@ func TestAnUnknownEnvironmentIsAUsageError(t *testing.T) {
 func TestProductionIsRefusedOnlyWhenAsked(t *testing.T) {
 	base := t.TempDir()
 	var errb bytes.Buffer
-	code := run([]string{"serve", "--socket", filepath.Join(base, "s"), "--state-dir", filepath.Join(base, "st"), "--environment", "production", "--refuse-production"}, &bytes.Buffer{}, &errb)
+	code := run([]string{"serve", "--socket", filepath.Join(base, "s"), "--state-dir", filepath.Join(base, "st"), "--purposes", purposesFile(t), "--environment", "production", "--refuse-production"}, &bytes.Buffer{}, &errb)
 	if code != 1 || !strings.Contains(errb.String(), "refused in production") {
 		t.Fatalf("exit %d (%s)", code, errb.String())
 	}
@@ -54,16 +55,17 @@ func TestProductionIsRefusedOnlyWhenAsked(t *testing.T) {
 
 func TestCheckRefusesAWideDirectory(t *testing.T) {
 	st := filepath.Join(t.TempDir(), "st")
+	purposes := purposesFile(t)
 	if err := os.Mkdir(st, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if code := run([]string{"check", "--state-dir", st}, &bytes.Buffer{}, &bytes.Buffer{}); code != 0 {
+	if code := run([]string{"check", "--state-dir", st, "--purposes", purposes}, &bytes.Buffer{}, &bytes.Buffer{}); code != 0 {
 		t.Fatalf("check of an empty 0700 directory: %d", code)
 	}
 	if err := os.Chmod(st, 0o755); err != nil { //nolint:gosec // the point of the test
 		t.Fatal(err)
 	}
-	if code := run([]string{"check", "--state-dir", st}, &bytes.Buffer{}, &bytes.Buffer{}); code != 1 {
+	if code := run([]string{"check", "--state-dir", st, "--purposes", purposes}, &bytes.Buffer{}, &bytes.Buffer{}); code != 1 {
 		t.Fatalf("check of a 0755 directory: %d", code)
 	}
 }
@@ -79,7 +81,7 @@ func TestTheKitPassesAgainstTheSocket(t *testing.T) {
 	socket := filepath.Join(dir, "s")
 	done := make(chan int, 1)
 	go func() {
-		done <- run([]string{"serve", "--socket", socket, "--state-dir", filepath.Join(dir, "st"), "--environment", "development"}, &bytes.Buffer{}, &bytes.Buffer{})
+		done <- run([]string{"serve", "--socket", socket, "--state-dir", filepath.Join(dir, "st"), "--purposes", purposesFile(t), "--environment", "development"}, &bytes.Buffer{}, &bytes.Buffer{})
 	}()
 	deadline := time.Now().Add(5 * time.Second)
 	for {
@@ -116,5 +118,29 @@ func TestTheKitPassesAgainstTheSocket(t *testing.T) {
 		}
 	case <-time.After(10 * time.Second):
 		t.Error("serve did not end")
+	}
+}
+
+// A declaration file that is not a declaration is a usage error, and the message names a word and no value of the file.
+func TestADeclarationThatIsRefusedIsAUsageError(t *testing.T) {
+	base := t.TempDir()
+	for name, content := range map[string]string{
+		"syntax":    `{"purposes":`,
+		"a name":    `{"purposes":[{"name":"Secret_Name","algorithm":"ES256"}]}`,
+		"algorithm": `{"purposes":[{"name":"ok","algorithm":"PS256"}]}`,
+		"none":      `{"purposes":[]}`,
+	} {
+		path := filepath.Join(base, name+".json")
+		if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		var errb bytes.Buffer
+		code := run([]string{"serve", "--socket", filepath.Join(base, "s"), "--state-dir", filepath.Join(base, "st"), "--purposes", path}, &bytes.Buffer{}, &errb)
+		if code != 2 || !strings.Contains(errb.String(), "--purposes") || strings.Contains(errb.String(), "Secret_Name") {
+			t.Errorf("%s: exit %d (%s)", name, code, errb.String())
+		}
+		if _, err := os.Lstat(filepath.Join(base, "st")); err == nil {
+			t.Errorf("%s: the state directory was made", name)
+		}
 	}
 }

@@ -12,10 +12,26 @@ import (
 	"github.com/truvity/atoom/key/awskms"
 	"github.com/truvity/atoom/key/awskms/internal/kmsfake"
 	"github.com/truvity/atoom/key/conformance"
+	"github.com/truvity/atoom/key/purpose"
 )
 
+// purposesFile writes the declaration of the kit as the JSON file that --purposes takes, and returns its path.
+func purposesFile(t *testing.T) string {
+	t.Helper()
+	raw, err := purpose.Marshal(purpose.MustNew(conformance.Declaration()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(t.TempDir(), "purposes.json")
+	if err := os.WriteFile(path, raw, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
 func TestUsage(t *testing.T) {
-	for _, args := range [][]string{nil, {"nope"}, {"serve"}, {"serve", "--socket", "/x", "--socket-mode", "zz"}, {"serve", "--socket", "/x", "extra"}} {
+	for _, args := range [][]string{nil, {"nope"}, {"serve"}, {"serve", "--socket", "/x"}, {"serve", "--socket", "/x", "--purposes", "/none.json"}, {"serve", "--purposes", "/none.json"},
+		{"serve", "--socket", "/x", "--purposes", "/none.json", "--socket-mode", "zz"}, {"serve", "--socket", "/x", "--purposes", "/none.json", "extra"}} {
 		var out, errb bytes.Buffer
 		if code := run(args, &out, &errb); code != 2 {
 			t.Errorf("run(%v) = %d, want 2 (%s)", args, code, errb.String())
@@ -48,7 +64,7 @@ func useFake(t *testing.T) *kmsfake.Fake {
 func TestABadAliasPrefixIsAUsageError(t *testing.T) {
 	useFake(t)
 	var errb bytes.Buffer
-	code := run([]string{"serve", "--socket", filepath.Join(t.TempDir(), "s"), "--alias-prefix", "aws/x"}, &bytes.Buffer{}, &errb)
+	code := run([]string{"serve", "--socket", filepath.Join(t.TempDir(), "s"), "--purposes", purposesFile(t), "--alias-prefix", "aws/x"}, &bytes.Buffer{}, &errb)
 	if code != 2 {
 		t.Fatalf("exit %d (%s)", code, errb.String())
 	}
@@ -65,7 +81,7 @@ func TestTheKitPassesAgainstTheSocket(t *testing.T) {
 	socket := filepath.Join(dir, "s")
 	done := make(chan int, 1)
 	go func() {
-		done <- run([]string{"serve", "--socket", socket, "--create-keys", "--alias-prefix", "ci/kit"}, &bytes.Buffer{}, &bytes.Buffer{})
+		done <- run([]string{"serve", "--socket", socket, "--purposes", purposesFile(t), "--create-keys", "--alias-prefix", "ci/kit"}, &bytes.Buffer{}, &bytes.Buffer{})
 	}()
 	deadline := time.Now().Add(5 * time.Second)
 	for {
@@ -92,7 +108,7 @@ func TestTheKitPassesAgainstTheSocket(t *testing.T) {
 			t.Errorf("%s: %v\n%s", name, err, out.String())
 		}
 	}
-	if f.KeyByAlias("alias/ci/kit/token-signing") == nil {
+	if f.KeyByAlias("alias/ci/kit/conformance-es384") == nil {
 		t.Error("the keys were not made under the alias prefix of the flag")
 	}
 	p, _ := os.FindProcess(os.Getpid())
@@ -104,5 +120,25 @@ func TestTheKitPassesAgainstTheSocket(t *testing.T) {
 		}
 	case <-time.After(10 * time.Second):
 		t.Error("serve did not end")
+	}
+}
+
+// A declaration file that is not a declaration is a usage error, and the message names a word and no value of the file.
+func TestADeclarationThatIsRefusedIsAUsageError(t *testing.T) {
+	useFake(t)
+	base := t.TempDir()
+	for name, content := range map[string]string{
+		"syntax": `{"purposes":`, "a name": `{"purposes":[{"name":"Secret_Name","algorithm":"ES256"}]}`,
+		"algorithm": `{"purposes":[{"name":"ok","algorithm":"PS256"}]}`, "none": `{"purposes":[]}`,
+	} {
+		path := filepath.Join(base, name+".json")
+		if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		var errb bytes.Buffer
+		code := run([]string{"serve", "--socket", filepath.Join(base, "s"), "--purposes", path}, &bytes.Buffer{}, &errb)
+		if code != 2 || !strings.Contains(errb.String(), "--purposes") || strings.Contains(errb.String(), "Secret_Name") {
+			t.Errorf("%s: exit %d (%s)", name, code, errb.String())
+		}
 	}
 }

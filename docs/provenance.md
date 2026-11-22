@@ -63,7 +63,7 @@ From sluis `3f0afea`.
 | `docs/key-port.md` | | new: the rules of the contract in prose |
 | `docs/key-stores.md`, `docs/what-a-store-can-prove.md`, `docs/research/private-root-alternatives-2026-11-02.md` | ritueel `docs/learn/key-stores.md`, `docs/learn/what-a-store-can-prove.md`, `docs/research/private-root-alternatives-2026-11-02.md` | rewritten in atoom's voice; ritueel's own design left out |
 
-What stayed in sluis: the actor that uses the port (`actors/key`), the registry of purposes and its pages, and the text of its records.
+What stayed in sluis: the actor that uses the port (`actors/key`), the registry of purposes and its pages, and the text of its records. The purposes left the drivers and the kit when the port took any purpose a host declares (step B13): `purpose/` (the declaration and `purpose.Reference()`, which holds sluis's eleven purposes as they were in the drivers' lists) and `signature/` (the DER to raw conversion of a JWS) are new in atoom and have no origin in sluis.
 
 ### key/conformance
 
@@ -136,7 +136,7 @@ From sluis `3f0afea`.
 | `slotplan/docs/` | record 0006 ("The slot plan", the default slot map version 2) and `docs/reference/keys.md` | rewritten |
 | `pinrelease/pinrelease.go`, `pinrelease_test.go` | `kits/go/pinrelease/` | `PurposePinRelease` and `SlotPinRelease` are here; the wire domains `sluis-pin-release-v1` and `sluis-pin-release-answer-v1` are unchanged, since they are the wire of every board |
 
-sluis's Rust loader of its signed key plan reads the same `slotplan/testdata/vectors.json`. What stayed in sluis: `kits/go/pinrelease/slotmap.go` (it reads the slot map of a signed key plan).
+sluis's Rust loader of its signed key plan reads the same `slotplan/testdata/vectors.json`; since step B13 the `card` column of the vectors refuses only an algorithm that a card does not hold (the card driver serves any purpose a host declares), and `CardServed` holds the fourteen rows whose algorithm a card holds. What stayed in sluis: `kits/go/pinrelease/slotmap.go` (it reads the slot map of a signed key plan).
 
 ## store
 

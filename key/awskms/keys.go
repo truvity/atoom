@@ -6,50 +6,26 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"slices"
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/service/kms"
 	"github.com/aws/aws-sdk-go-v2/service/kms/types"
+
+	"github.com/truvity/atoom/key/purpose"
 )
 
 // The algorithms of the key-store port (keystore.proto).
 const (
-	ES384    = "ES384"     // ECDSA over P-384 with SHA-384 (RFC 7518, section 3.4); KMS ECC_NIST_P384 and ECDSA_SHA_384
-	ES256    = "ES256"     // ECDSA over P-256 with SHA-256; KMS ECC_NIST_P256 and ECDSA_SHA_256; the audit-log purpose only
-	RS256    = "RS256"     // RSASSA-PKCS1-v1_5 over SHA-256 with RSA-2048; KMS RSA_2048 and RSASSA_PKCS1_V1_5_SHA_256; token-signing-rs256 only
-	ECDHP384 = "ECDH-P384" // ECDH over P-384; KMS ECC_NIST_P384 with the key usage KEY_AGREEMENT
+	ES384    = purpose.ES384    // ECDSA over P-384 with SHA-384 (RFC 7518, section 3.4); KMS ECC_NIST_P384 and ECDSA_SHA_384
+	ES256    = purpose.ES256    // ECDSA over P-256 with SHA-256; KMS ECC_NIST_P256 and ECDSA_SHA_256
+	RS256    = purpose.RS256    // RSASSA-PKCS1-v1_5 over SHA-256 with RSA-2048; KMS RSA_2048 and RSASSA_PKCS1_V1_5_SHA_256
+	ECDHP384 = purpose.ECDHP384 // ECDH over P-384; KMS ECC_NIST_P384 with the key usage KEY_AGREEMENT
 )
 
-// purposeAlgorithm maps the key purposes that a key store holds to the algorithm of their key, the same table as the other key drivers
-// of this repository (a driver requires no other driver, so each holds its own copy). The purpose pin-release is not here: it is the
-// key of a card's PIN release, and a KMS key has no PIN.
-var purposeAlgorithm = map[string]string{
-	"wrapping":            ECDHP384,
-	"token-signing":       ES384,
-	"audit-log":           ES256,
-	"workload-issuer":     ES384,
-	"x509-intermediate":   ES384,
-	"ssh-user":            ES384,
-	"ssh-host":            ES384,
-	"issuance-log":        ES384,
-	"release-signing":     ES384,
-	"token-signing-rs256": RS256,
-}
-
-// Purposes returns the purposes that the driver holds a key for, sorted.
-func Purposes() []string {
-	out := make([]string, 0, len(purposeAlgorithm))
-	for p := range purposeAlgorithm {
-		out = append(out, p)
-	}
-	slices.Sort(out)
-	return out
-}
-
-func algorithmFor(purpose string) (string, bool) {
-	a, ok := purposeAlgorithm[purpose]
-	return a, ok
+// algorithmFor returns the algorithm the host declared for a purpose, and false when it declared none.
+func (s *Service) algorithmFor(name string) (string, bool) {
+	d, ok := s.purposes.Lookup(name)
+	return d.Algorithm, ok
 }
 
 // kmsShape is how an algorithm is a KMS key: its key spec, its key usage, and what Sign needs.
@@ -84,25 +60,25 @@ func (e *stateError) Unwrap() error { return errState }
 
 // load returns the key of a purpose: from memory when it was read before, else from KMS by its identifier or alias, else (when make is
 // true and the host allows it) made. made reports that this call made the key.
-func (s *Service) load(ctx context.Context, purpose, algorithm string, create bool) (k *key, made bool, err error) {
+func (s *Service) load(ctx context.Context, name, algorithm string, create bool) (k *key, made bool, err error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if k, ok := s.keys[purpose]; ok {
+	if k, ok := s.keys[name]; ok {
 		if algorithm != "" && k.algorithm != algorithm {
 			return nil, false, errAlgorithm
 		}
 		return k, false, nil
 	}
-	want, _ := algorithmFor(purpose)
+	want, _ := s.algorithmFor(name)
 	if algorithm != "" && algorithm != want {
 		return nil, false, errAlgorithm
 	}
-	meta, err := s.describe(ctx, s.reference(purpose))
+	meta, err := s.describe(ctx, s.reference(name))
 	fresh := false // this call went through makeKey: KMS may not show a new key everywhere yet
 	switch {
-	case errors.Is(err, errAbsent) && create && s.create && s.ids[purpose] == "":
+	case errors.Is(err, errAbsent) && create && s.create && s.ids[name] == "":
 		// A purpose that the host names a key for is the deployment's to make: an alias that the driver made would not be the one named.
-		meta, made, err = s.makeKey(ctx, purpose, want)
+		meta, made, err = s.makeKey(ctx, name, want)
 		if err != nil {
 			return nil, false, err
 		}
@@ -130,7 +106,7 @@ func (s *Service) load(ctx context.Context, purpose, algorithm string, create bo
 	if meta.CreationDate != nil {
 		k.createdAt = *meta.CreationDate
 	}
-	s.keys[purpose] = k
+	s.keys[name] = k
 	return k, made, nil
 }
 
@@ -171,15 +147,15 @@ func checkShape(meta *types.KeyMetadata, algorithm string) error {
 
 // makeKey makes the KMS key of a purpose under its alias. The alias is the lock: CreateAlias refuses a name that is taken, so of two
 // callers that make a key at once one keeps its key and the other schedules its own for deletion and reads the winner's.
-func (s *Service) makeKey(ctx context.Context, purpose, algorithm string) (meta *types.KeyMetadata, made bool, err error) {
+func (s *Service) makeKey(ctx context.Context, name, algorithm string) (meta *types.KeyMetadata, made bool, err error) {
 	sh := shapes[algorithm]
-	desc := fmt.Sprintf("atoom key for the purpose %s (%s)", purpose, algorithm)
+	desc := fmt.Sprintf("atoom key for the purpose %s (%s)", name, algorithm)
 	created, err := s.api.CreateKey(ctx, &kms.CreateKeyInput{
 		KeySpec:     sh.spec,
 		KeyUsage:    sh.usage,
 		Description: &desc,
 		Tags: []types.Tag{
-			{TagKey: ptr(TagPurpose), TagValue: &purpose},
+			{TagKey: ptr(TagPurpose), TagValue: &name},
 			{TagKey: ptr(TagAlgorithm), TagValue: &algorithm},
 			{TagKey: ptr(TagManagedBy), TagValue: ptr(managedBy)},
 		},
@@ -191,13 +167,13 @@ func (s *Service) makeKey(ctx context.Context, purpose, algorithm string) (meta 
 		return nil, false, errors.New("awskms: CreateKey answered without key metadata")
 	}
 	id := *created.KeyMetadata.KeyId
-	alias := s.Alias(purpose)
+	alias := s.Alias(name)
 	err = retryNotFound(ctx, func() error {
 		_, err := s.api.CreateAlias(ctx, &kms.CreateAliasInput{AliasName: &alias, TargetKeyId: &id})
 		return err
 	})
 	if err == nil {
-		slog.Info("key made", "purpose", purpose, "algorithm", algorithm, "alias", alias)
+		slog.Info("key made", "purpose", name, "algorithm", algorithm, "alias", alias)
 		return created.KeyMetadata, true, nil
 	}
 	// The key that was just made has no alias, so nothing can reach it: it goes whatever happened.
@@ -206,7 +182,7 @@ func (s *Service) makeKey(ctx context.Context, purpose, algorithm string) (meta 
 	if !errors.As(err, &exists) {
 		return nil, false, err
 	}
-	slog.Info("another caller made the key first; keeping its key", "purpose", purpose, "alias", alias)
+	slog.Info("another caller made the key first; keeping its key", "purpose", name, "alias", alias)
 	meta, err = s.describe(ctx, alias)
 	return meta, false, err
 }

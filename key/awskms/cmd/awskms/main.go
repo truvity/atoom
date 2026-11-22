@@ -2,9 +2,12 @@
 // The library (github.com/truvity/atoom/key/awskms) is the driver; a program that needs the driver inside its own process (a Lambda
 // function) links the library instead and needs no socket.
 //
-//	awskms serve --socket PATH [--alias-prefix atoom] [--create-keys]
+//	awskms serve --socket PATH --purposes FILE [--alias-prefix atoom] [--create-keys]
 //	             [--allow-uid UID]... [--allow-any-uid] [--socket-gid GID] [--socket-mode MODE]
 //	awskms version  (also --version)
+//
+// --purposes names the JSON file in which the host declares its purposes: a name, an algorithm (ES384, ES256, RS256 or ECDH-P384) and
+// the operations (sign or agree) of each (github.com/truvity/atoom/key/purpose). The driver finds or makes a KMS key for those names only.
 //
 // The region, the credentials and an endpoint of another place (AWS_ENDPOINT_URL_KMS) come from the AWS SDK's own configuration chain:
 // the environment, the shared files, the role of the host. The socket is guarded
@@ -29,6 +32,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/kms"
 
 	"github.com/truvity/atoom/key/awskms"
+	"github.com/truvity/atoom/key/purpose"
 	atoomsocket "github.com/truvity/atoom/socket"
 )
 
@@ -83,11 +87,17 @@ func serve(args []string, stderr io.Writer) int {
 	socket := fs.String("socket", "", "the UNIX socket to serve on (required)")
 	prefix := fs.String("alias-prefix", awskms.DefaultAliasPrefix, "the prefix of the aliases of the keys: alias/<prefix>/<purpose>")
 	create := fs.Bool("create-keys", false, "let Ensure make the key of a purpose that has none (CreateKey, CreateAlias, tags)")
+	purposes := fs.String("purposes", "", "the JSON file of the purposes the host declares (required)")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
-	if *socket == "" || fs.NArg() != 0 {
-		_, _ = fmt.Fprintln(stderr, "awskms serve: --socket is required")
+	if *socket == "" || *purposes == "" || fs.NArg() != 0 {
+		_, _ = fmt.Fprintln(stderr, "awskms serve: --socket and --purposes are required")
+		return 2
+	}
+	decls, err := readPurposes(*purposes)
+	if err != nil {
+		_, _ = fmt.Fprintln(stderr, "awskms serve:", err)
 		return 2
 	}
 	cfg, err := guard.Config(*socket)
@@ -105,7 +115,7 @@ func serve(args []string, stderr io.Writer) int {
 	host := awskms.Host{Serve: func(ctx context.Context, path string, h http.Handler) error {
 		return atoomsocket.Serve(ctx, cfg, path, h)
 	}}
-	if err := awskms.Run(ctx, awskms.Options{KMS: api, AliasPrefix: *prefix, CreateKeys: *create}, host); err != nil {
+	if err := awskms.Run(ctx, awskms.Options{KMS: api, Purposes: decls, AliasPrefix: *prefix, CreateKeys: *create}, host); err != nil {
 		_, _ = fmt.Fprintln(stderr, "awskms:", err)
 		if errors.Is(err, awskms.ErrAliasPrefix) {
 			return 2
@@ -113,4 +123,19 @@ func serve(args []string, stderr io.Writer) int {
 		return 1
 	}
 	return 0
+}
+
+// readPurposes reads the declaration file and checks it, and returns the declarations. A file that cannot be read or is not a
+// declaration is a refusal of the command line (status 2), and the message names a path and a word, never a value of the file.
+func readPurposes(path string) ([]purpose.Declaration, error) {
+	f, err := os.Open(path) //nolint:gosec // the path is the operator's flag
+	if err != nil {
+		return nil, fmt.Errorf("--purposes: %s cannot be read", path)
+	}
+	defer func() { _ = f.Close() }()
+	set, err := purpose.Parse(f)
+	if err != nil {
+		return nil, fmt.Errorf("--purposes %s: %w", path, err)
+	}
+	return set.List(), nil
 }

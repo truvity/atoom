@@ -28,7 +28,7 @@ func serveWith(t *testing.T, extra ...string) (socket string, stop func() int) {
 	}
 	t.Cleanup(func() { _ = os.RemoveAll(dir) })
 	socket = filepath.Join(dir, "s")
-	args := append([]string{"serve", "--socket", socket, "--create-keys", "--alias-prefix", "ci/guard"}, extra...)
+	args := append([]string{"serve", "--socket", socket, "--purposes", purposesFile(t), "--create-keys", "--alias-prefix", "ci/guard"}, extra...)
 	done := make(chan int, 1)
 	go func() { done <- run(args, &bytes.Buffer{}, &bytes.Buffer{}) }()
 	deadline := time.Now().Add(10 * time.Second)

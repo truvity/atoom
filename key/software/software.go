@@ -1,5 +1,6 @@
-// Package software is the software key driver of atoom: the key port, atoom.key.v1alpha1, served over P-384 keys held in files (sluis
-// ADR 0006, "Floors in code"; ADR 0011, "The local installation"). The Go module is github.com/truvity/atoom/key/software.
+// Package software is the software key driver of atoom: the key port, atoom.key.v1alpha1, served over keys held in files (sluis
+// ADR 0006, "Floors in code"; ADR 0011, "The local installation"). It holds a key for every purpose its host declares, ES256, ES384,
+// RS256 or ECDH-P384 as the declaration says (key/purpose), and for no other name. The Go module is github.com/truvity/atoom/key/software.
 //
 // It is a library and a thin main. The library is the Connect handler and the logic behind it: New opens a state directory and returns
 // a Service that a program mounts in-process, on an in-memory transport or on a server of its own (Handler), and Run does the
@@ -23,6 +24,7 @@ import (
 	"github.com/truvity/atoom/common/refusal"
 	keyv1alpha1 "github.com/truvity/atoom/key/gen/atoom/key/v1alpha1"
 	"github.com/truvity/atoom/key/gen/atoom/key/v1alpha1/keyv1alpha1connect"
+	"github.com/truvity/atoom/key/purpose"
 	"github.com/truvity/atoom/key/software/internal/keystore"
 )
 
@@ -68,6 +70,10 @@ func Floor(environment string, refuseProduction bool) error {
 type Options struct {
 	// StateDir is the directory of the key files, mode 0700 and owned by the driver's user.
 	StateDir string
+	// Purposes are the purposes the host declares: the only names the driver holds a key for, each with its algorithm and its
+	// operations (key/purpose). Required. A key file in the state directory of a purpose that is not declared, or of another algorithm
+	// than the declared one, refuses the start. The field Slot of a declaration is read by the card driver only.
+	Purposes []purpose.Declaration
 	// Environment names the installation: development, staging or production. Empty names nothing. Staging logs a warning at the start.
 	Environment string
 	// RefuseProduction makes New and Run refuse the environment production, before anything is opened (sluis's floor). The default
@@ -91,14 +97,18 @@ func New(opts Options) (*Service, error) {
 	if err := Floor(opts.Environment, opts.RefuseProduction); err != nil {
 		return nil, err
 	}
-	if opts.Environment == Staging {
-		slog.Warn("software keys in staging: anyone who can read the volume has the keys", "environment", Staging)
-	}
-	st, err := keystore.Open(opts.StateDir)
+	set, err := purpose.New(opts.Purposes)
 	if err != nil {
 		return nil, err
 	}
-	return &Service{store: st, caller: opts.Caller}, nil
+	if opts.Environment == Staging {
+		slog.Warn("software keys in staging: anyone who can read the volume has the keys", "environment", Staging)
+	}
+	st, err := keystore.Open(opts.StateDir, set)
+	if err != nil {
+		return nil, err
+	}
+	return &Service{store: st, purposes: set, caller: opts.Caller}, nil
 }
 
 // Handler returns the Connect handler of the key-store service, to mount on a server or an in-memory transport.
@@ -124,9 +134,14 @@ func Run(ctx context.Context, opts Options, host Host) error {
 	return host.Serve(ctx, path, h)
 }
 
-// Check verifies the state directory and the keys in it. It reads, and writes nothing. A problem is a *Problems error.
-func Check(dir string) error {
-	if _, problems := keystore.Check(dir); len(problems) > 0 {
+// Check verifies the state directory and the keys in it against the host's purposes. It reads, and writes nothing. A problem is a
+// *Problems error; purposes that are not a declaration are a *purpose.Error.
+func Check(dir string, purposes []purpose.Declaration) error {
+	set, err := purpose.New(purposes)
+	if err != nil {
+		return err
+	}
+	if _, problems := keystore.Check(dir, set); len(problems) > 0 {
 		return &Problems{Problems: problems}
 	}
 	return nil
@@ -135,8 +150,9 @@ func Check(dir string) error {
 // Service implements the key-store port over a keystore.Store.
 type Service struct {
 	keyv1alpha1connect.UnimplementedKeyStoreServiceHandler
-	store  *keystore.Store
-	caller func(context.Context) string
+	store    *keystore.Store
+	purposes *purpose.Set
+	caller   func(context.Context) string
 }
 
 // The reasons of the refusals of the port (a closed list).
@@ -156,54 +172,58 @@ func (s *Service) refuse(ctx context.Context, method string, code connect.Code, 
 }
 
 // Capabilities says what the store can do.
-func (*Service) Capabilities(context.Context, *connect.Request[keyv1alpha1.CapabilitiesRequest]) (*connect.Response[keyv1alpha1.CapabilitiesResponse], error) {
+func (s *Service) Capabilities(context.Context, *connect.Request[keyv1alpha1.CapabilitiesRequest]) (*connect.Response[keyv1alpha1.CapabilitiesResponse], error) {
 	return connect.NewResponse(&keyv1alpha1.CapabilitiesResponse{
 		Store: "software", Attests: false, Algorithms: []string{keystore.ES384, keystore.ES256, keystore.RS256, keystore.ECDHP384},
+		Purposes: s.purposes.Infos(),
 	}), nil
 }
 
 // Ensure makes the key of a purpose when it is absent and returns its public key.
 func (s *Service) Ensure(ctx context.Context, req *connect.Request[keyv1alpha1.EnsureRequest]) (*connect.Response[keyv1alpha1.EnsureResponse], error) {
-	purpose, algorithm := req.Msg.GetPurpose(), req.Msg.GetAlgorithm()
-	want, ok := keystore.AlgorithmFor(purpose)
+	name, algorithm := req.Msg.GetPurpose(), req.Msg.GetAlgorithm()
+	decl, ok := s.purposes.Lookup(name)
 	if !ok {
 		return nil, s.refuse(ctx, "Ensure", connect.CodeInvalidArgument, reasonPurpose, "purpose")
 	}
 	if algorithm != keystore.ES384 && algorithm != keystore.ES256 && algorithm != keystore.RS256 && algorithm != keystore.ECDHP384 {
 		return nil, s.refuse(ctx, "Ensure", connect.CodeInvalidArgument, reasonAlgorithm, "algorithm")
 	}
-	if algorithm != want {
+	if algorithm != decl.Algorithm {
 		// An existing key has another algorithm, or the purpose is not for this one: the key is never replaced.
 		return nil, s.refuse(ctx, "Ensure", connect.CodeFailedPrecondition, reasonAlgorithm, "algorithm")
 	}
-	spki, created, err := s.store.Ensure(purpose, algorithm)
+	spki, created, err := s.store.Ensure(name, algorithm)
 	if err != nil {
 		return nil, s.failed(ctx, "Ensure", err)
 	}
 	if created {
-		slog.Info("key made", "purpose", purpose, "algorithm", algorithm)
+		slog.Info("key made", "purpose", name, "algorithm", algorithm)
 	}
 	res := &keyv1alpha1.EnsureResponse{SpkiDer: spki, Created: created}
-	if at, err := s.store.CreatedAt(purpose); err == nil {
+	if at, err := s.store.CreatedAt(name); err == nil {
 		res.CreatedAt = timestamppb.New(at)
 	}
 	return connect.NewResponse(res), nil
 }
 
-// Sign signs a digest with the key of a purpose, in place. An RS256 signature is the RSASSA-PKCS1-v1_5 octet string in
-// signature_der, which has no DER form (keystore.proto).
+// Sign signs a digest with the key of a purpose, in place. An ES256 or ES384 signature is DER (key/signature converts it to the raw
+// r||s of a JWS); an RS256 signature is the RSASSA-PKCS1-v1_5 octet string in signature_der, which has no DER form (keystore.proto).
 func (s *Service) Sign(ctx context.Context, req *connect.Request[keyv1alpha1.SignRequest]) (*connect.Response[keyv1alpha1.SignResponse], error) {
-	purpose := req.Msg.GetPurpose()
-	want, ok := keystore.AlgorithmFor(purpose)
+	name := req.Msg.GetPurpose()
+	decl, ok := s.purposes.Lookup(name)
 	if !ok {
 		return nil, s.refuse(ctx, "Sign", connect.CodeInvalidArgument, reasonPurpose, "purpose")
 	}
-	// The algorithm must be the purpose's own: ES256 (SHA-256) for audit-log, RS256 (SHA-256) for the RS256 purpose,
-	// ES384 (SHA-384) for the rest.
-	if a := req.Msg.GetAlgorithm(); (a != keystore.ES384 && a != keystore.ES256 && a != keystore.RS256) || (want != keystore.ECDHP384 && a != want) {
+	// The algorithm must be the purpose's own: ES256 and RS256 sign SHA-256, ES384 SHA-384. The key-agreement purpose signs nothing.
+	if a := req.Msg.GetAlgorithm(); (a != keystore.ES384 && a != keystore.ES256 && a != keystore.RS256) || (decl.Algorithm != keystore.ECDHP384 && a != decl.Algorithm) {
 		return nil, s.refuse(ctx, "Sign", connect.CodeInvalidArgument, reasonAlgorithm, "algorithm")
 	}
-	sig, err := s.store.Sign(purpose, req.Msg.GetDigest())
+	// A purpose declared without the operation is not one this host lets sign.
+	if decl.Algorithm != keystore.ECDHP384 && !decl.Allows(purpose.Sign) {
+		return nil, s.refuse(ctx, "Sign", connect.CodeInvalidArgument, reasonPurpose, "purpose")
+	}
+	sig, err := s.store.Sign(name, req.Msg.GetDigest())
 	if err != nil {
 		return nil, s.failed(ctx, "Sign", err)
 	}
@@ -212,11 +232,11 @@ func (s *Service) Sign(ctx context.Context, req *connect.Request[keyv1alpha1.Sig
 
 // PublicKey returns the public key of a purpose.
 func (s *Service) PublicKey(ctx context.Context, req *connect.Request[keyv1alpha1.PublicKeyRequest]) (*connect.Response[keyv1alpha1.PublicKeyResponse], error) {
-	purpose := req.Msg.GetPurpose()
-	if _, ok := keystore.AlgorithmFor(purpose); !ok {
+	name := req.Msg.GetPurpose()
+	if _, ok := s.purposes.Lookup(name); !ok {
 		return nil, s.refuse(ctx, "PublicKey", connect.CodeInvalidArgument, reasonPurpose, "purpose")
 	}
-	spki, err := s.store.PublicKey(purpose)
+	spki, err := s.store.PublicKey(name)
 	if err != nil {
 		return nil, s.failed(ctx, "PublicKey", err)
 	}
@@ -225,11 +245,15 @@ func (s *Service) PublicKey(ctx context.Context, req *connect.Request[keyv1alpha
 
 // Ecdh derives the shared secret of the key-agreement key with a peer.
 func (s *Service) Ecdh(ctx context.Context, req *connect.Request[keyv1alpha1.EcdhRequest]) (*connect.Response[keyv1alpha1.EcdhResponse], error) {
-	purpose := req.Msg.GetPurpose()
-	if _, ok := keystore.AlgorithmFor(purpose); !ok {
+	name := req.Msg.GetPurpose()
+	decl, ok := s.purposes.Lookup(name)
+	if !ok {
 		return nil, s.refuse(ctx, "Ecdh", connect.CodeInvalidArgument, reasonPurpose, "purpose")
 	}
-	secret, err := s.store.Ecdh(purpose, req.Msg.GetPeerPublic())
+	if decl.Algorithm == keystore.ECDHP384 && !decl.Allows(purpose.Agree) {
+		return nil, s.refuse(ctx, "Ecdh", connect.CodeInvalidArgument, reasonPurpose, "purpose")
+	}
+	secret, err := s.store.Ecdh(name, req.Msg.GetPeerPublic())
 	if err != nil {
 		return nil, s.failed(ctx, "Ecdh", err)
 	}

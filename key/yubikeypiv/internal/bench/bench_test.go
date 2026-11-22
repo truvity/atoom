@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/truvity/atoom/key/gen/atoom/key/v1alpha1/keyv1alpha1connect"
+	"github.com/truvity/atoom/key/purpose"
 	"github.com/truvity/atoom/key/yubikeypiv"
 	"github.com/truvity/atoom/key/yubikeypiv/internal/bench"
 	"github.com/truvity/atoom/key/yubikeypiv/internal/card/cardtest"
@@ -36,7 +37,7 @@ func startDriver(t *testing.T, c *cardtest.Card) keyv1alpha1connect.UnlockServic
 		<-ctx.Done()
 		return nil
 	}}
-	opts := yubikeypiv.Options{Environment: yubikeypiv.Development, Node: "bench", Serial: c.SerialNo, Open: c.Opener()}
+	opts := yubikeypiv.Options{Purposes: purpose.Reference(), Environment: yubikeypiv.Development, Node: "bench", Serial: c.SerialNo, Open: c.Opener()}
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
 	go func() {

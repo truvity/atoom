@@ -28,7 +28,8 @@ type vectorFile struct {
 // are not enabled is accepted. The card check adds the card driver's limit: no override of a slot, no purpose outside the
 // map. The RS256 purpose is a card-key purpose like the others: it needs a slot and shares none. The purposes of version 2 take
 // their own slots, 89 to 8f, by default and are refused on a card, whose driver has no row for them yet (an algorithm the
-// check does not list skips every one of these).
+// check does not list skips every one of these). Since step B13 the card driver serves any purpose a host declares, so the card check
+// refuses only an algorithm that a card does not hold (PS256 and EdDSA).
 func TestTheSlotMapVectors(t *testing.T) {
 	raw, err := os.ReadFile("testdata/vectors.json")
 	if err != nil {
@@ -38,7 +39,7 @@ func TestTheSlotMapVectors(t *testing.T) {
 	if err := json.Unmarshal(raw, &f); err != nil {
 		t.Fatal(err)
 	}
-	if len(f.Cases) < 28 {
+	if len(f.Cases) < 31 {
 		t.Fatalf("%d vectors", len(f.Cases))
 	}
 	want := func(name, got string, err error) {
@@ -63,7 +64,7 @@ func TestTheSlotMapVectors(t *testing.T) {
 }
 
 // The default map is the reference map of sluis, version 2: the slots 89 to 8f hold their purposes, the rotation spares 90 to 95 hold
-// none, and the card driver serves a subset of the map (the ten rows of version 1). That it is also the one in sluis's
+// none, and a card holds every row but the three of PS256 and EdDSA. That it is also the one in sluis's
 // docs/architecture/keys.yaml is checked by sluis, which holds that file.
 //
 // verifies: REQ-KEYS-046, REQ-KEYS-278
@@ -88,13 +89,18 @@ func TestTheDefaultIsTheReferenceMap(t *testing.T) {
 			t.Errorf("%s: slot %s is no board slot", purpose, slot)
 		}
 	}
-	// What a card serves is part of the map.
+	// What a card holds is part of the map: every row but the three of PS256 (8b) and EdDSA (8d, 8e), which a card driver does not hold.
 	for purpose := range CardServed {
 		if _, ok := Default[purpose]; !ok {
 			t.Errorf("the card serves %s, which the default map lacks", purpose)
 		}
 	}
-	if len(CardServed) != 10 {
-		t.Errorf("the card driver serves %d purposes; this change serves none of the new ones (version 1's ten)", len(CardServed))
+	for purpose, slot := range Default {
+		if served, notServed := CardServed[purpose], slot == "8b" || slot == "8d" || slot == "8e"; served == notServed {
+			t.Errorf("%s (slot %s): served by a card is %v", purpose, slot, served)
+		}
+	}
+	if len(CardServed) != len(Default)-3 {
+		t.Errorf("a card holds %d purposes of %d; the three of PS256 and EdDSA are the ones it does not", len(CardServed), len(Default))
 	}
 }

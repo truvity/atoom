@@ -14,12 +14,14 @@ import (
 	"github.com/truvity/atoom/key/conformance"
 	keyv1alpha1 "github.com/truvity/atoom/key/gen/atoom/key/v1alpha1"
 	"github.com/truvity/atoom/key/gen/atoom/key/v1alpha1/keyv1alpha1connect"
+	"github.com/truvity/atoom/key/purpose"
 )
 
 // capsOnly is a driver that answers Capabilities and nothing else: enough to test what the kit skips and what it fails.
 type capsOnly struct {
 	keyv1alpha1connect.UnimplementedKeyStoreServiceHandler
 	algorithms []string
+	purposes   []*keyv1alpha1.PurposeInfo
 	attests    bool
 	err        error
 }
@@ -28,7 +30,7 @@ func (c *capsOnly) Capabilities(context.Context, *connect.Request[keyv1alpha1.Ca
 	if c.err != nil {
 		return nil, c.err
 	}
-	return connect.NewResponse(&keyv1alpha1.CapabilitiesResponse{Store: "fake", Attests: c.attests, Algorithms: c.algorithms}), nil
+	return connect.NewResponse(&keyv1alpha1.CapabilitiesResponse{Store: "fake", Attests: c.attests, Algorithms: c.algorithms, Purposes: c.purposes}), nil
 }
 
 func client(t *testing.T, h keyv1alpha1connect.KeyStoreServiceHandler) conformance.Client {
@@ -123,8 +125,78 @@ func TestTheCapabilitiesCase(t *testing.T) {
 	}
 }
 
-func TestTheSuiteHasTheCasesOfBothDrivers(t *testing.T) {
-	if n := len(conformance.Suite()); n != 11 {
+func TestTheSuiteHasItsCases(t *testing.T) {
+	if n := len(conformance.Suite()); n != 12 {
 		t.Fatalf("%d cases", n)
+	}
+}
+
+// The kit's declaration is a good one, holds each algorithm of the contract, and uses no name of the closed lists that the drivers once
+// held: a pass shows that a driver serves what its host declares.
+func TestTheKitsDeclarationIsItsOwn(t *testing.T) {
+	set, err := purpose.New(conformance.Declaration())
+	if err != nil {
+		t.Fatal(err)
+	}
+	algs := map[string]bool{}
+	for _, d := range set.List() {
+		algs[d.Algorithm] = true
+		if _, old := purpose.MustNew(purpose.Reference()).Lookup(d.Name); old && d.Name != conformance.PurposeRelease {
+			t.Errorf("%s is a name of the reference list", d.Name)
+		}
+	}
+	for _, a := range []string{conformance.ES384, conformance.ES256, conformance.RS256, conformance.ECDHP384} {
+		if !algs[a] {
+			t.Errorf("no purpose of %s", a)
+		}
+	}
+	if _, ok := set.Lookup(conformance.PurposeUndeclared); ok {
+		t.Error("the undeclared purpose is declared")
+	}
+	// Every purpose that a case names is in the declaration.
+	for _, c := range conformance.Suite() {
+		for _, name := range c.Purposes {
+			if _, ok := set.Lookup(name); !ok {
+				t.Errorf("%s: the case names %s, which the declaration lacks", c.Name, name)
+			}
+		}
+	}
+}
+
+// A store that lists the algorithm of a case and does not serve the kit's purposes fails the case; a store that does not list the
+// algorithm skips it. The reason says what to do.
+func TestACaseFailsWhenTheStoreDoesNotServeTheKitsPurposes(t *testing.T) {
+	cases := []conformance.Case{{Name: "needs the es384 purpose", Algorithm: conformance.ES384, Purposes: []string{conformance.PurposeES384}, Run: ran("")}}
+	run := func(d *capsOnly) string {
+		var out bytes.Buffer
+		_ = conformance.RunCases(context.Background(), client(t, d), append(cases, conformance.Case{Name: "plain", Run: ran("")}), &out)
+		return out.String()
+	}
+	if got := run(&capsOnly{algorithms: []string{conformance.ES384}}); !strings.Contains(got, "FAIL needs the es384 purpose: the store does not serve the purpose conformance-es384") {
+		t.Errorf("no purposes declared:\n%s", got)
+	}
+	other := []*keyv1alpha1.PurposeInfo{{Name: "token-signing", Algorithm: conformance.ES384, Operations: []string{"sign"}}}
+	if got := run(&capsOnly{algorithms: []string{conformance.ES384}, purposes: other}); !strings.Contains(got, "FAIL needs the es384 purpose") {
+		t.Errorf("another purpose declared:\n%s", got)
+	}
+	wrong := []*keyv1alpha1.PurposeInfo{{Name: conformance.PurposeES384, Algorithm: conformance.ES256, Operations: []string{"sign"}}}
+	if got := run(&capsOnly{algorithms: []string{conformance.ES384}, purposes: wrong}); !strings.Contains(got, "another algorithm or operations") {
+		t.Errorf("another algorithm declared:\n%s", got)
+	}
+	right := []*keyv1alpha1.PurposeInfo{{Name: conformance.PurposeES384, Algorithm: conformance.ES384, Operations: []string{"sign"}}}
+	if got := run(&capsOnly{algorithms: []string{conformance.ES384}, purposes: right}); !strings.Contains(got, "ok   needs the es384 purpose") {
+		t.Errorf("the right purpose declared:\n%s", got)
+	}
+	if got := run(&capsOnly{algorithms: []string{conformance.ES256}}); !strings.Contains(got, "skip needs the es384 purpose: the store does not list ES384") {
+		t.Errorf("an algorithm the store lacks:\n%s", got)
+	}
+}
+
+// The capabilities case rejects purposes that are not a declaration.
+func TestTheCapabilitiesCaseChecksThePurposes(t *testing.T) {
+	bad := []*keyv1alpha1.PurposeInfo{{Name: "Bad", Algorithm: conformance.ES384}}
+	rs := conformance.Results(context.Background(), client(t, &capsOnly{algorithms: []string{conformance.ES384}, purposes: bad}), conformance.Suite()[:1])
+	if rs[0].Err == nil || !strings.Contains(rs[0].Err.Error(), "not a declaration") {
+		t.Fatalf("err = %v", rs[0].Err)
 	}
 }
