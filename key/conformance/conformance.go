@@ -15,6 +15,7 @@ import (
 	"fmt"
 	"io"
 	"slices"
+	"strings"
 
 	"math/big"
 
@@ -23,6 +24,7 @@ import (
 	"github.com/truvity/atoom/common/refusal"
 	keyv1alpha1 "github.com/truvity/atoom/key/gen/atoom/key/v1alpha1"
 	"github.com/truvity/atoom/key/gen/atoom/key/v1alpha1/keyv1alpha1connect"
+	"github.com/truvity/atoom/key/keyid"
 	"github.com/truvity/atoom/key/purpose"
 	"github.com/truvity/atoom/key/signature"
 )
@@ -206,7 +208,10 @@ func Suite() []Case {
 		{Name: "ecdh against a reference", Algorithm: ECDHP384, Purposes: []string{PurposeAgree}, Run: caseEcdh},
 		{Name: "an undeclared purpose is refused", Algorithm: ES384, Purposes: []string{PurposeES384}, Run: caseUndeclaredPurpose},
 		{Name: "unknown algorithm is refused", Algorithm: ES384, Purposes: []string{PurposeES384}, Run: caseUnknownAlgorithm},
-		{Name: "a digest of the wrong length is refused", Algorithm: ES384, Purposes: []string{PurposeES384}, Run: caseDigest},
+		{Name: "a digest of the wrong length is refused (ES384, 48 octets)", Algorithm: ES384, Purposes: []string{PurposeES384}, Run: caseDigestFor(PurposeES384, ES384)},
+		{Name: "a digest of the wrong length is refused (ES256, 32 octets)", Algorithm: ES256, Purposes: []string{PurposeES256}, Run: caseDigestFor(PurposeES256, ES256)},
+		{Name: "a digest of the wrong length is refused (RS256, 32 octets)", Algorithm: RS256, Purposes: []string{PurposeRS256}, Run: caseDigestFor(PurposeRS256, RS256)},
+		{Name: "the key_id of a signature is the key_id of the public key", Algorithm: ES384, Purposes: []string{PurposeES384, PurposeMadeOnly}, Run: caseKeyID},
 		{Name: "the algorithm of another purpose is refused", Algorithm: ES256, Purposes: []string{PurposeES256}, Run: caseOtherAlgorithm},
 		{Name: "an operation the host did not allow is refused", Algorithm: ES384, Purposes: []string{PurposeES384, PurposeMadeOnly}, Run: caseOperations},
 	}
@@ -474,22 +479,70 @@ func caseUnknownAlgorithm(ctx context.Context, c Client) error {
 	return wantRefusal(err, connect.CodeInvalidArgument, reasonAlgorithm)
 }
 
-func caseDigest(ctx context.Context, c Client) error {
-	if _, err := ensure(ctx, c, PurposeES384, ES384); err != nil {
-		return err
-	}
-	d := sha512.Sum384([]byte("x"))
-	_, err := c.Sign(ctx, connect.NewRequest(&keyv1alpha1.SignRequest{Purpose: PurposeES384, Digest: d[:47], Algorithm: ES384}))
-	if e := wantRefusal(err, connect.CodeInvalidArgument, reasonDigest); e != nil {
-		return e
-	}
-	if slices.Contains(capabilities(ctx, c), ES256) {
-		// A SHA-384 digest is not an ES256 digest: that key is P-256 and signs SHA-256.
-		if _, err := ensure(ctx, c, PurposeES256, ES256); err != nil {
+// caseDigestFor: Sign takes the digest of the content and nothing else, so a digest of any other length than the algorithm's (48 octets for
+// ES384, 32 for ES256 and RS256) is invalid_argument with the reason digest, whatever the length: none, one octet, one short, one long, and
+// the lengths of the other algorithms, SHA-512 included. A digest of the right length is signed (the other cases show it).
+func caseDigestFor(name, alg string) func(context.Context, Client) error {
+	return func(ctx context.Context, c Client) error {
+		if _, err := ensure(ctx, c, name, alg); err != nil {
 			return err
 		}
-		_, err = c.Sign(ctx, connect.NewRequest(&keyv1alpha1.SignRequest{Purpose: PurposeES256, Digest: d[:], Algorithm: ES256}))
-		return wantRefusal(err, connect.CodeInvalidArgument, reasonDigest)
+		want := purpose.DigestLen(alg)
+		for _, n := range []int{0, 1, want - 1, want + 1, 32, 48, 64, 2 * want} {
+			if n == want {
+				continue
+			}
+			_, err := c.Sign(ctx, connect.NewRequest(&keyv1alpha1.SignRequest{Purpose: name, Digest: make([]byte, n), Algorithm: alg}))
+			if err := wantRefusal(err, connect.CodeInvalidArgument, reasonDigest); err != nil {
+				return fmt.Errorf("a digest of %d octets: %w", n, err)
+			}
+		}
+		_, err := c.Sign(ctx, connect.NewRequest(&keyv1alpha1.SignRequest{Purpose: name, Algorithm: alg}))
+		if err := wantRefusal(err, connect.CodeInvalidArgument, reasonDigest); err != nil {
+			return fmt.Errorf("no digest: %w", err)
+		}
+		return nil
+	}
+}
+
+// caseKeyID: the key_id that Sign returns names the key that signed, and is the one PublicKey returns for the purpose, so that a caller
+// can publish the right public key as the kid of a JWS. It is not empty, it ends with the hex SHA-256 of the public key (keyid), it does
+// not change between calls, and another key has another one.
+func caseKeyID(ctx context.Context, c Client) error {
+	ens, err := ensure(ctx, c, PurposeES384, ES384)
+	if err != nil {
+		return err
+	}
+	if _, err := ensure(ctx, c, PurposeMadeOnly, ES384); err != nil {
+		return err
+	}
+	pubRes, err := c.PublicKey(ctx, connect.NewRequest(&keyv1alpha1.PublicKeyRequest{Purpose: PurposeES384}))
+	if err != nil {
+		return fmt.Errorf("public key: %w", err)
+	}
+	id := pubRes.Msg.GetKeyId()
+	if id == "" {
+		return errors.New("PublicKey returned no key_id")
+	}
+	if !strings.HasSuffix(id, keyid.Fingerprint(ens.GetSpkiDer())) {
+		return errors.New("the key_id does not end with the hex SHA-256 of the public key")
+	}
+	digest := sha512.Sum384([]byte("atoom key conformance"))
+	for range 2 {
+		sig, err := sign(ctx, c, PurposeES384, ES384, digest[:])
+		if err != nil {
+			return err
+		}
+		if sig.GetKeyId() != id {
+			return errors.New("the key_id of the signature is not the key_id of the public key")
+		}
+	}
+	other, err := c.PublicKey(ctx, connect.NewRequest(&keyv1alpha1.PublicKeyRequest{Purpose: PurposeMadeOnly}))
+	if err != nil {
+		return fmt.Errorf("public key: %w", err)
+	}
+	if other.Msg.GetKeyId() == "" || other.Msg.GetKeyId() == id {
+		return errors.New("another key has no key_id of its own")
 	}
 	return nil
 }

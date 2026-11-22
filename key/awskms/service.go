@@ -105,7 +105,7 @@ func (s *Service) Sign(ctx context.Context, req *connect.Request[keyv1alpha1.Sig
 	if err != nil {
 		return nil, s.failed(ctx, "Sign", err)
 	}
-	return connect.NewResponse(&keyv1alpha1.SignResponse{SignatureDer: out.Signature}), nil
+	return connect.NewResponse(&keyv1alpha1.SignResponse{SignatureDer: out.Signature, KeyId: k.keyID}), nil
 }
 
 // PublicKey returns the public key of a purpose. It is read from KMS once, the first time the key is used, and kept: the public half of a
@@ -119,7 +119,7 @@ func (s *Service) PublicKey(ctx context.Context, req *connect.Request[keyv1alpha
 	if err != nil {
 		return nil, s.failed(ctx, "PublicKey", err)
 	}
-	return connect.NewResponse(&keyv1alpha1.PublicKeyResponse{SpkiDer: bytes.Clone(k.spki)}), nil
+	return connect.NewResponse(&keyv1alpha1.PublicKeyResponse{SpkiDer: bytes.Clone(k.spki), KeyId: k.keyID}), nil
 }
 
 // Ecdh derives the shared secret of the key-agreement key with a peer: KMS DeriveSharedSecret, which answers the raw secret (the x

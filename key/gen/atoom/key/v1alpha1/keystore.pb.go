@@ -315,7 +315,7 @@ func (x *EnsureResponse) GetCreatedAt() *timestamppb.Timestamp {
 type SignRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Purpose       string                 `protobuf:"bytes,1,opt,name=purpose,proto3" json:"purpose,omitempty"`     // the purpose whose key signs
-	Digest        []byte                 `protobuf:"bytes,2,opt,name=digest,proto3" json:"digest,omitempty"`       // the digest of the content the caller checked: SHA-384 for ES384, SHA-256 for ES256 and RS256
+	Digest        []byte                 `protobuf:"bytes,2,opt,name=digest,proto3" json:"digest,omitempty"`       // the digest of the content the caller checked, and nothing else: 48 octets (SHA-384) for ES384, 32 (SHA-256) for ES256 and RS256; another length is invalid_argument, reason "digest"
 	Algorithm     string                 `protobuf:"bytes,3,opt,name=algorithm,proto3" json:"algorithm,omitempty"` // the algorithm of the purpose: "ES384", "ES256" or "RS256"
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -376,8 +376,14 @@ func (x *SignRequest) GetAlgorithm() string {
 type SignResponse struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// ASN.1 DER for ES384 and ES256 (a JWS wants the raw r||s of RFC 7518, section 3.4: key/signature converts, key/docs/algorithms.md);
-	// for RS256 the RSASSA-PKCS1-v1_5 octet string (RFC 8017, section 8.2.1), which has no DER form
-	SignatureDer  []byte `protobuf:"bytes,1,opt,name=signature_der,json=signatureDer,proto3" json:"signature_der,omitempty"`
+	// for RS256 the RSASSA-PKCS1-v1_5 octet string (RFC 8017, section 8.2.1), which has no DER form. The port normalises nothing: no
+	// low-S form, and the nonce is the driver's business.
+	SignatureDer []byte `protobuf:"bytes,1,opt,name=signature_der,json=signatureDer,proto3" json:"signature_der,omitempty"`
+	// The key that signed, so that a caller can publish the right public key (as the kid of a JWS, say) after a rotation. It is the same
+	// string that PublicKey returns for the purpose while that key is the purpose's, and it ends with the lower-case hex SHA-256 of the
+	// public key's SubjectPublicKeyInfo. In front of that: nothing (software), "<slot>:" with the two hex digits of the PIV slot
+	// (yubikey-piv), or the key ARN and "#" (aws-kms; an asymmetric KMS key has no versions, its ARN names the key). Compare it for equality.
+	KeyId         string `protobuf:"bytes,2,opt,name=key_id,json=keyId,proto3" json:"key_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -417,6 +423,13 @@ func (x *SignResponse) GetSignatureDer() []byte {
 		return x.SignatureDer
 	}
 	return nil
+}
+
+func (x *SignResponse) GetKeyId() string {
+	if x != nil {
+		return x.KeyId
+	}
+	return ""
 }
 
 // PublicKeyRequest asks for the public key of a purpose.
@@ -468,6 +481,7 @@ func (x *PublicKeyRequest) GetPurpose() string {
 type PublicKeyResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	SpkiDer       []byte                 `protobuf:"bytes,1,opt,name=spki_der,json=spkiDer,proto3" json:"spki_der,omitempty"` // the public key, SubjectPublicKeyInfo in DER
+	KeyId         string                 `protobuf:"bytes,2,opt,name=key_id,json=keyId,proto3" json:"key_id,omitempty"`       // the identifier of the key, the same as SignResponse.key_id of a signature made with it
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -507,6 +521,13 @@ func (x *PublicKeyResponse) GetSpkiDer() []byte {
 		return x.SpkiDer
 	}
 	return nil
+}
+
+func (x *PublicKeyResponse) GetKeyId() string {
+	if x != nil {
+		return x.KeyId
+	}
+	return ""
 }
 
 // EcdhRequest derives a shared secret with a peer.
@@ -1194,13 +1215,15 @@ const file_atoom_key_v1alpha1_keystore_proto_rawDesc = "" +
 	"\vSignRequest\x12\x18\n" +
 	"\apurpose\x18\x01 \x01(\tR\apurpose\x12\x16\n" +
 	"\x06digest\x18\x02 \x01(\fR\x06digest\x12\x1c\n" +
-	"\talgorithm\x18\x03 \x01(\tR\talgorithm\"3\n" +
+	"\talgorithm\x18\x03 \x01(\tR\talgorithm\"J\n" +
 	"\fSignResponse\x12#\n" +
-	"\rsignature_der\x18\x01 \x01(\fR\fsignatureDer\",\n" +
+	"\rsignature_der\x18\x01 \x01(\fR\fsignatureDer\x12\x15\n" +
+	"\x06key_id\x18\x02 \x01(\tR\x05keyId\",\n" +
 	"\x10PublicKeyRequest\x12\x18\n" +
-	"\apurpose\x18\x01 \x01(\tR\apurpose\".\n" +
+	"\apurpose\x18\x01 \x01(\tR\apurpose\"E\n" +
 	"\x11PublicKeyResponse\x12\x19\n" +
-	"\bspki_der\x18\x01 \x01(\fR\aspkiDer\"H\n" +
+	"\bspki_der\x18\x01 \x01(\fR\aspkiDer\x12\x15\n" +
+	"\x06key_id\x18\x02 \x01(\tR\x05keyId\"H\n" +
 	"\vEcdhRequest\x12\x18\n" +
 	"\apurpose\x18\x01 \x01(\tR\apurpose\x12\x1f\n" +
 	"\vpeer_public\x18\x02 \x01(\fR\n" +

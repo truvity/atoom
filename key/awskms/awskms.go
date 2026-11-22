@@ -123,6 +123,7 @@ type Service struct {
 // key is a KMS key that the driver has found or made, as it was read once.
 type key struct {
 	id        string // the ARN, so that no alias is looked up again
+	keyID     string // the key_id of the port: the ARN and the fingerprint of the public key (key/keyid)
 	algorithm string
 	spki      []byte
 	createdAt time.Time

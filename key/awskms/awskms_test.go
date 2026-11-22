@@ -10,6 +10,7 @@ import (
 	"crypto/sha512"
 	"crypto/x509"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -592,4 +593,21 @@ func TestAnAgreementPurposeNeedsTheOperation(t *testing.T) {
 	eph, _ := ecdh.P384().GenerateKey(rand.Reader)
 	_, err := c.Ecdh(context.Background(), connect.NewRequest(&keyv1alpha1.EcdhRequest{Purpose: "no-agree", PeerPublic: eph.PublicKey().Bytes()}))
 	want(t, err, connect.CodeInvalidArgument, "purpose")
+}
+
+// The key_id of a KMS key is its ARN and the fingerprint of its public key, in Sign and in PublicKey.
+func TestTheKeyIDIsTheARNAndTheFingerprint(t *testing.T) {
+	f := kmsfake.New()
+	c, _ := start(t, f, awskms.Options{CreateKeys: true})
+	e := ensure(t, c, "token-signing", "ES384")
+	arn := f.KeyByAlias("alias/atoom/token-signing").ARN()
+	want := arn + "#" + fmt.Sprintf("%x", sha256.Sum256(e.GetSpkiDer()))
+	pub, err := c.PublicKey(context.Background(), connect.NewRequest(&keyv1alpha1.PublicKeyRequest{Purpose: "token-signing"}))
+	if err != nil || pub.Msg.GetKeyId() != want {
+		t.Fatalf("PublicKey key_id %q, want %q (%v)", pub.Msg.GetKeyId(), want, err)
+	}
+	res, err := c.Sign(context.Background(), connect.NewRequest(&keyv1alpha1.SignRequest{Purpose: "token-signing", Algorithm: "ES384", Digest: digest384()}))
+	if err != nil || res.Msg.GetKeyId() != want {
+		t.Fatalf("Sign key_id %q, want %q (%v)", res.Msg.GetKeyId(), want, err)
+	}
 }

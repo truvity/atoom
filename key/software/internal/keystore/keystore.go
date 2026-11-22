@@ -270,11 +270,23 @@ func (s *Store) Sign(name string, digest []byte) ([]byte, error) {
 	if len(digest) != want {
 		return nil, ErrDigest
 	}
-	var opts crypto.SignerOpts // nil: an ECDSA key signs the digest as it is
+	// An ECDSA signature is deterministic (RFC 6979, which crypto/ecdsa does when the reader is nil): the nonce is derived from the key
+	// and the digest, so no signature depends on the quality of a random source, and the same digest gives the same bytes. That is a
+	// property of this driver and not of the port (KMS and the card sign with their own nonces), so nothing may compare the bytes of a
+	// signature: a test verifies it. The signature is as ecdsa makes it, with no low-S normalisation. The RSA signature of PKCS#1 v1.5
+	// is deterministic by its construction.
 	if _, ok := k.(*rsa.PrivateKey); ok {
-		opts = crypto.SHA256
+		sig, err := k.Sign(rand.Reader, digest, crypto.SHA256)
+		if err != nil {
+			return nil, fmt.Errorf("keystore: sign: %w", err)
+		}
+		return sig, nil
 	}
-	sig, err := k.Sign(rand.Reader, digest, opts)
+	hash := crypto.SHA384
+	if decl.Algorithm == ES256 {
+		hash = crypto.SHA256
+	}
+	sig, err := k.Sign(nil, digest, hash)
 	if err != nil {
 		return nil, fmt.Errorf("keystore: sign: %w", err)
 	}

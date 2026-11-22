@@ -17,6 +17,8 @@ One key for each purpose that the host declared, in its own file in the state di
 
 The driver holds no list of purposes: the host declares them (`Options.Purposes`, or `--purposes FILE` on the thin main; [the declaration](../../docs/key-port.md#the-declaration-of-purposes)), and each purpose has one algorithm for its life. A call that names a purpose the host did not declare is refused with the reason `purpose`, and so is `Sign` of a purpose declared without `sign` and `Ecdh` of one declared without `agree`. `Capabilities` lists the declared purposes.
 
+ECDSA signatures are made with RFC 6979 deterministic nonces (`crypto/ecdsa` with a nil reader), so that no signature depends on a random source; the signature is returned as made, with no low-S normalisation. The nonce is this driver's business and not the port's (KMS and the card use their own), so a test verifies a signature and never compares its bytes. `Sign` and `PublicKey` return the `key_id`, the hex SHA-256 of the public key.
+
 A key is generated in memory with the system's random source and written straight into its file. It never goes to a plain file on the way, and it is never replaced: `Ensure` for a purpose that has a key returns the public key and `created` false.
 
 ## The state directory

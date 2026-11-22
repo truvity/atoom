@@ -11,6 +11,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/kms"
 	"github.com/aws/aws-sdk-go-v2/service/kms/types"
 
+	"github.com/truvity/atoom/key/keyid"
 	"github.com/truvity/atoom/key/purpose"
 )
 
@@ -103,6 +104,7 @@ func (s *Service) load(ctx context.Context, name, algorithm string, create bool)
 		return nil, false, err
 	}
 	k = &key{id: aws(meta.Arn), algorithm: want, spki: bytes.Clone(pub.PublicKey)}
+	k.keyID = keyid.KMS(k.id, k.spki)
 	if meta.CreationDate != nil {
 		k.createdAt = *meta.CreationDate
 	}
