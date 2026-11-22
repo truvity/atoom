@@ -14,7 +14,7 @@ use tokio::net::{UnixListener, UnixStream};
 use tower::Service;
 
 use crate::call::Inherit;
-use crate::guard::{Allow, Guard, Peer};
+use crate::guard::{Allow, Guard, OnRefused, Peer};
 
 /// How long a graceful shutdown waits for calls in flight.
 const GRACE: Duration = Duration::from_secs(5);
@@ -39,6 +39,9 @@ pub struct ServerConfig {
     /// The deadline of a call that carries none. A call that carries one keeps it (`Connect-Timeout-Ms`, honoured by the server), and the
     /// handler hands what is left to the calls it makes (`docs/call-context.md`).
     pub default_deadline: Duration,
+    /// The host's observer of the calls the guard refuses, or `None`: the guard logs every refusal either way. A host that audits its
+    /// refusals sets it ([`OnRefused`]).
+    pub on_refused: Option<OnRefused>,
 }
 
 impl ServerConfig {
@@ -52,7 +55,22 @@ impl ServerConfig {
             socket_gid: None,
             allow: Allow::SameUid,
             default_deadline: DEFAULT_DEADLINE,
+            on_refused: None,
         }
+    }
+
+    /// The same configuration with the host's own rule of who may call ([`Allow::check`]).
+    #[must_use]
+    pub fn with_allow(mut self, allow: Allow) -> Self {
+        self.allow = allow;
+        self
+    }
+
+    /// The same configuration with an observer of the calls the guard refuses.
+    #[must_use]
+    pub fn with_on_refused(mut self, f: impl Fn(&crate::Refused) + Send + Sync + 'static) -> Self {
+        self.on_refused = Some(OnRefused::new(f));
+        self
     }
 }
 
@@ -60,8 +78,8 @@ impl ServerConfig {
 ///
 /// The socket is made fresh: a stale socket file is replaced, a symlink or any other file is refused, and a socket that still has a
 /// listener is never taken over. Each connection's peer credentials are read once; every call passes the guard (`cfg.allow`) before
-/// its message is decoded, and a caller outside the set is `permission_denied` with the reason `caller`. A handler reads the caller
-/// with [`peer`](crate::peer).
+/// its message is decoded, and a caller outside the set is `permission_denied` with the reason `caller` (or the reason of the host's
+/// rule, [`Allow::check`]), and `cfg.on_refused` is told of it. A handler reads the caller with [`peer`](crate::peer).
 ///
 /// # Errors
 ///
@@ -75,9 +93,9 @@ pub async fn serve(
     let mut service = ConnectRpcService::new(router)
         .with_deadline_policy(DeadlinePolicy::new().with_default_timeout(cfg.default_deadline));
     // A server that admits every uid that can open the socket has nothing to check.
-    let any = cfg.allow == Allow::Any;
+    let any = matches!(cfg.allow, Allow::Any);
     if !any {
-        service = service.with_interceptor(Guard::new(cfg.allow.clone()));
+        service = service.with_interceptor(Guard::new(cfg.allow.clone(), cfg.on_refused.clone()));
     }
     // After the guard, so that a refused call is refused before its headers are read. Every server hands the call down.
     service = service.with_interceptor(Inherit);

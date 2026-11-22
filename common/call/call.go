@@ -11,6 +11,7 @@ package call
 import (
 	"context"
 	"net/http"
+	"time"
 
 	"connectrpc.com/connect"
 )
@@ -103,4 +104,44 @@ func (propagate) WrapStreamingClient(next connect.StreamingClientFunc) connect.S
 
 func (propagate) WrapStreamingHandler(next connect.StreamingHandlerFunc) connect.StreamingHandlerFunc {
 	return next
+}
+
+// DefaultDeadline is an interceptor that gives a call that has no deadline the deadline d; a call that has one keeps it, so a default
+// never extends a caller's deadline. On a client it covers unary calls (the life of a stream is its caller's); on a handler it
+// covers unary and streaming methods. A zero or negative d gives nothing. A host that wants every call of a client to carry a
+// deadline adds it beside [ClientOptions]:
+//
+//	c := storev1alpha1connect.NewItemServiceClient(hc, url, append(call.ClientOptions(), connect.WithInterceptors(call.DefaultDeadline(30*time.Second)))...)
+func DefaultDeadline(d time.Duration) connect.Interceptor { return defaultDeadline{d} }
+
+type defaultDeadline struct{ d time.Duration }
+
+func (dd defaultDeadline) apply(ctx context.Context) (context.Context, context.CancelFunc) {
+	if dd.d <= 0 {
+		return ctx, func() {}
+	}
+	if _, ok := ctx.Deadline(); ok {
+		return ctx, func() {}
+	}
+	return context.WithTimeout(ctx, dd.d)
+}
+
+func (dd defaultDeadline) WrapUnary(next connect.UnaryFunc) connect.UnaryFunc {
+	return func(ctx context.Context, req connect.AnyRequest) (connect.AnyResponse, error) {
+		ctx, cancel := dd.apply(ctx)
+		defer cancel()
+		return next(ctx, req)
+	}
+}
+
+func (defaultDeadline) WrapStreamingClient(next connect.StreamingClientFunc) connect.StreamingClientFunc {
+	return next
+}
+
+func (dd defaultDeadline) WrapStreamingHandler(next connect.StreamingHandlerFunc) connect.StreamingHandlerFunc {
+	return func(ctx context.Context, conn connect.StreamingHandlerConn) error {
+		ctx, cancel := dd.apply(ctx)
+		defer cancel()
+		return next(ctx, conn)
+	}
 }

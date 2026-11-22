@@ -5,6 +5,15 @@ libraries changed. `just release-prepare X.Y.Z` writes the section.
 
 <!-- release-prepare: new sections go below this line -->
 
+## Unreleased
+
+**Breaking in the Rust API of `socket`** (a new `Allow` variant and a new `ServerConfig` field); the Go API only grows; the wire does not change ([record 0018](docs/decisions/0018-a-hosts-rule-on-the-socket-guard.md)).
+
+- **The socket guard runs a host's own rule**: Rust `Allow::check(|peer, procedure| ...)`, Go `socket.AllowFunc(...)`. It is asked for every call with the whole peer and the procedure before the message is decoded, and a refusal carries the reason the rule names.
+- **The guard tells the host of every refusal**: Rust `ServerConfig::on_refused` (`with_on_refused`), Go `Config.OnRefused`, with the reason, the peer and the procedure.
+- **Go default deadline**: `socket.Config.DefaultDeadline` for a call that carries none (0, no default, unless set), and the interceptor `call.DefaultDeadline(d)` in `common/call` for clients and handlers.
+- **The restart back-off**: `atoom_socket::restart` and `github.com/truvity/atoom/socket/restart`, the sleep of a program under systemd before an exit with a failure, by the count of failures in a row in a file the unit names.
+
 ## 0.3.0 - 2026-11-22
 
 One version for the whole repository: every library is tagged 0.3.0, changed or not.

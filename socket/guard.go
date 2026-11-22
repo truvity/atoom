@@ -21,14 +21,16 @@ const (
 	sameUID allowKind = iota // the zero value
 	listedUIDs
 	anyUID
+	hostRule
 )
 
 // Allow says who may call a socket. The file mode of the socket is the first wall and this is the second: a process that can open the
 // socket is still refused (permission_denied, reason "caller") unless its uid is admitted. The zero value admits the uid this process
 // runs as, which is what the default mode 0600 allowed already, except that root is refused too.
 type Allow struct {
-	kind allowKind
-	uids []uint32
+	kind  allowKind
+	uids  []uint32
+	admit func(p Peer, procedure string) (refuse string)
 }
 
 // AllowSameUID admits the uid this process runs as, and no other.
@@ -40,37 +42,83 @@ func AllowUIDs(uids ...uint32) Allow { return Allow{kind: listedUIDs, uids: slic
 // AllowAnyUID admits every uid that can open the socket: the file permission is the only guard.
 func AllowAnyUID() Allow { return Allow{kind: anyUID} }
 
-// Admits reports whether a caller with this uid is admitted by a process that runs as own.
+// AllowFunc admits the callers that the host's own rule admits: for every call, admit is asked with the peer the kernel reported and
+// the procedure (the path the caller sent: what was asked, not who asked), before the message is read. It returns "" to admit the
+// call, or the reason of the refusal: the call is then answered permission_denied with a Refusal of that reason. A call whose peer
+// could not be read is refused with the reason "caller" without asking it. admit runs on the goroutine of the request: it decides
+// from what it is handed, and does not block. A nil admit admits nobody.
+func AllowFunc(admit func(p Peer, procedure string) (refuse string)) Allow {
+	if admit == nil {
+		return AllowUIDs()
+	}
+	return Allow{kind: hostRule, admit: admit}
+}
+
+// Admits reports whether a caller with this uid is admitted by a process that runs as own. A rule of [AllowFunc] is asked with a peer
+// that carries only the uid and an empty procedure; the server asks it with the whole peer.
 func (a Allow) Admits(uid, own uint32) bool {
+	return a.decide(Peer{UID: uid}, own, "") == ""
+}
+
+// decide returns "" when the call is admitted, and the reason of its refusal otherwise.
+func (a Allow) decide(p Peer, own uint32, procedure string) string {
+	var ok bool
 	switch a.kind {
 	case listedUIDs:
-		return slices.Contains(a.uids, uid)
+		ok = slices.Contains(a.uids, p.UID)
 	case anyUID:
-		return true
+		ok = true
+	case hostRule:
+		if reason := a.admit(p, procedure); reason != "" {
+			return reason
+		}
+		ok = true
 	default:
-		return uid == own
+		ok = p.UID == own
 	}
+	if ok {
+		return ""
+	}
+	return ReasonCaller
+}
+
+// Refused is a call the guard refused, as Config.OnRefused is told of it: the reason, the peer the kernel reported (Known is false
+// when the credentials could not be read) and the procedure, which is whatever the caller sent and not a name the host can trust.
+// Never a byte of the message.
+type Refused struct {
+	Reason    string
+	Peer      Peer
+	Known     bool
+	Procedure string
 }
 
 // guard is the check of one server: who is the caller, and is it admitted.
 type guard struct {
-	allow Allow
-	own   uint32
+	allow     Allow
+	own       uint32
+	onRefused func(Refused)
 }
 
-// check returns nil when the caller of ctx is admitted, and the refusal otherwise. It looks at the transport only: ctx carries the
-// credentials the server read from the socket.
-func (g guard) check(ctx context.Context) *connect.Error {
+// check returns nil when the caller of ctx may call procedure, and the refusal otherwise. It looks at the transport only: ctx carries
+// the credentials the server read from the socket.
+func (g guard) check(ctx context.Context, procedure string) *connect.Error {
 	if g.allow.kind == anyUID {
 		return nil
 	}
 	p, ok := PeerFromContext(ctx)
-	if ok && g.allow.Admits(p.UID, g.own) {
-		return nil
+	reason := ReasonCaller
+	if ok {
+		reason = g.allow.decide(p, g.own, procedure)
+		if reason == "" {
+			return nil
+		}
 	}
 	// The path is what the caller sent, so it is not logged.
-	slog.Info("call refused", "reason", ReasonCaller, "known", ok, "uid", p.UID, "pid", p.PID)
-	return refusal.New(connect.CodePermissionDenied, ReasonCaller, "")
+	slog.Info("call refused", "reason", reason, "known", ok, "uid", p.UID, "pid", p.PID)
+	if g.onRefused != nil {
+		g.onRefused(Refused{Reason: reason, Peer: p, Known: ok, Procedure: procedure})
+	}
+	return refusal.New(connect.CodePermissionDenied, reason, "")
 }
 
 // denyHandlers answer a refused call without decoding it. A Connect handler decodes a unary message before any interceptor runs, so
@@ -127,7 +175,7 @@ func (d denyHandlers) serve(w http.ResponseWriter, r *http.Request, err *connect
 // middleware refuses a call before its handler, and so before its message, is reached.
 func (g guard) middleware(d denyHandlers, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if err := g.check(r.Context()); err != nil {
+		if err := g.check(r.Context(), r.URL.Path); err != nil {
 			d.serve(w, r, err)
 			return
 		}

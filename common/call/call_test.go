@@ -197,3 +197,50 @@ func TestAStreamingCallCarriesTheIDAndTheDeadlineToo(t *testing.T) {
 	_, _ = c.CallServerStream(ctx, connect.NewRequest(&commonv1alpha1.Refusal{}))
 	rec.AssertCarried(t, "stream-1", 5*time.Second)
 }
+
+func TestTheDefaultDeadlineIsGivenToAClientCallThatHasNone(t *testing.T) {
+	srv := serve(t, "")
+	opts := append(call.ClientOptions(), connect.WithInterceptors(call.DefaultDeadline(3*time.Second)))
+	c := connect.NewClient[commonv1alpha1.Refusal, commonv1alpha1.Refusal](srv.Client(), srv.URL+see, opts...)
+	res, err := c.CallUnary(context.Background(), connect.NewRequest(&commonv1alpha1.Refusal{}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n := leftMS(t, res.Msg); n < 1000 || n > 3000 {
+		t.Errorf("the handler has %d ms left of the default 3000", n)
+	}
+	// A call that has a deadline keeps it, longer or shorter.
+	for _, own := range []time.Duration{time.Second, 10 * time.Second} {
+		ctx, cancel := context.WithTimeout(context.Background(), own)
+		res, err := c.CallUnary(ctx, connect.NewRequest(&commonv1alpha1.Refusal{}))
+		cancel()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if n := leftMS(t, res.Msg); n > own.Milliseconds() || n < own.Milliseconds()-2000 {
+			t.Errorf("own %v: the handler has %d ms left", own, n)
+		}
+	}
+	// A zero default gives nothing.
+	c = connect.NewClient[commonv1alpha1.Refusal, commonv1alpha1.Refusal](srv.Client(), srv.URL+see, connect.WithInterceptors(call.DefaultDeadline(0)))
+	res, err = c.CallUnary(context.Background(), connect.NewRequest(&commonv1alpha1.Refusal{}))
+	if err != nil || res.Msg.GetFieldPath() != "none" {
+		t.Fatalf("a zero default: %v %v", res, err)
+	}
+}
+
+func TestTheDefaultDeadlineOnAHandlerCoversACallThatHasNone(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.Handle(see, connect.NewUnaryHandler(see, func(ctx context.Context, _ *connect.Request[commonv1alpha1.Refusal]) (*connect.Response[commonv1alpha1.Refusal], error) {
+		return connect.NewResponse(saw(ctx)), nil
+	}, connect.WithInterceptors(call.DefaultDeadline(2*time.Second))))
+	srv := httptest.NewServer(call.Inherit(mux))
+	t.Cleanup(srv.Close)
+	got, err := ask(context.Background(), srv, see)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n := leftMS(t, got); n < 500 || n > 2000 {
+		t.Errorf("the handler has %d ms left of the default 2000", n)
+	}
+}
