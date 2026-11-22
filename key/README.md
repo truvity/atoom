@@ -4,10 +4,10 @@ The key port of atoom: a service that holds private keys and signs, agrees and a
 
 | | |
 | --- | --- |
-| Go module | `github.com/truvity/atoom/key` (the contract, its stubs and two small packages: `purpose`, the host's declaration of purposes, and `signature`, the DER to raw conversion of a JWS; it requires the ConnectRPC and Protobuf runtimes and nothing else) |
+| Go module | `github.com/truvity/atoom/key` (the contract, its stubs and three small packages: `purpose`, the host's declaration of purposes, `signature`, the DER to raw conversion of a JWS, and `keyid`, the `key_id` of a key; it requires the ConnectRPC and Protobuf runtimes and nothing else) |
 | Contract | [proto/atoom/key/v1alpha1/keystore.proto](proto/atoom/key/v1alpha1/keystore.proto), [unlock.proto](proto/atoom/key/v1alpha1/unlock.proto) |
 | Purposes | any purpose a host declares: a name, an algorithm (`ES256`, `ES384`, `RS256`, `ECDH-P384`) and the operations allowed, as `purpose.Declaration` or the JSON file of a thin main's `--purposes`; the contract holds no list ([the declaration](docs/key-port.md#the-declaration-of-purposes)) |
-| Signatures | `Sign` returns ASN.1 DER; `signature.DERToRaw` makes the raw `r||s` of a JWS ([DER and raw](docs/algorithms.md#der-and-raw-signatures)) |
+| Signatures | `Sign` takes a digest only (a wrong length is refused) and returns the plain signature, ASN.1 DER for ECDSA, with the `key_id` of the key that signed ([record 0016](../docs/decisions/0016-the-key-port-signs-digests.md)); `signature.DERToRaw` makes the raw `r||s` of a JWS ([DER and raw](docs/algorithms.md#der-and-raw-signatures)) |
 | Stubs | `github.com/truvity/atoom/key/gen/atoom/key/v1alpha1` and `.../keyv1alpha1connect` (committed; `just gen` makes them) |
 | Documentation | [docs/key-port.md](docs/key-port.md) (the key port: the rules of the contract), [docs/key-stores.md](docs/key-stores.md), [docs/algorithms.md](docs/algorithms.md), [docs/research](docs/research) |
 | Where it came from | [provenance](../docs/provenance.md#key) |

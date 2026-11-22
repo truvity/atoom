@@ -24,6 +24,7 @@ import (
 	"github.com/truvity/atoom/common/refusal"
 	keyv1alpha1 "github.com/truvity/atoom/key/gen/atoom/key/v1alpha1"
 	"github.com/truvity/atoom/key/gen/atoom/key/v1alpha1/keyv1alpha1connect"
+	"github.com/truvity/atoom/key/keyid"
 	"github.com/truvity/atoom/key/purpose"
 	"github.com/truvity/atoom/key/software/internal/keystore"
 )
@@ -227,7 +228,12 @@ func (s *Service) Sign(ctx context.Context, req *connect.Request[keyv1alpha1.Sig
 	if err != nil {
 		return nil, s.failed(ctx, "Sign", err)
 	}
-	return connect.NewResponse(&keyv1alpha1.SignResponse{SignatureDer: sig}), nil
+	// A key is never replaced, so the public key read now is the one that signed.
+	spki, err := s.store.PublicKey(name)
+	if err != nil {
+		return nil, s.failed(ctx, "Sign", err)
+	}
+	return connect.NewResponse(&keyv1alpha1.SignResponse{SignatureDer: sig, KeyId: keyid.Software(spki)}), nil
 }
 
 // PublicKey returns the public key of a purpose.
@@ -240,7 +246,7 @@ func (s *Service) PublicKey(ctx context.Context, req *connect.Request[keyv1alpha
 	if err != nil {
 		return nil, s.failed(ctx, "PublicKey", err)
 	}
-	return connect.NewResponse(&keyv1alpha1.PublicKeyResponse{SpkiDer: spki}), nil
+	return connect.NewResponse(&keyv1alpha1.PublicKeyResponse{SpkiDer: spki, KeyId: keyid.Software(spki)}), nil
 }
 
 // Ecdh derives the shared secret of the key-agreement key with a peer.

@@ -12,6 +12,7 @@ import (
 	"crypto/sha512"
 	"crypto/x509"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -503,7 +504,7 @@ func TestConformancePassesAgainstItself(t *testing.T) {
 	if err := conformance.Run(context.Background(), r.client, &out); err != nil {
 		t.Fatalf("%v\n%s", err, out.String())
 	}
-	if !strings.Contains(out.String(), "12 cases, 11 ok, 0 failed, 1 skipped") || !strings.Contains(out.String(), "skip the PIN release key") {
+	if !strings.Contains(out.String(), "15 cases, 14 ok, 0 failed, 1 skipped") || !strings.Contains(out.String(), "skip the PIN release key") {
 		t.Fatalf("report: %s", out.String())
 	}
 }
@@ -652,4 +653,27 @@ func TestThePINReleaseCallsAreRefusedByReason(t *testing.T) {
 	wantRefused(t, err, connect.CodeFailedPrecondition, "no_pin")
 	_, err = r.client.FinishPinRelease(ctx, connect.NewRequest(&keyv1alpha1.FinishPinReleaseRequest{}))
 	wantRefused(t, err, connect.CodeFailedPrecondition, "unlocked")
+}
+
+// The key_id names the key that signed: the hex SHA-256 of its public key (the whole id for a key in a file), the same in Sign and in
+// PublicKey, and another for another key. The signatures are verified and never compared byte for byte: the driver signs with RFC 6979
+// nonces, which is its own business and not the port's, so no test of any driver may depend on the bytes.
+func TestTheKeyIDIsTheFingerprintOfThePublicKey(t *testing.T) {
+	r := start(t, "development")
+	e := ensure(t, r.client, "token-signing", "ES384")
+	want := fmt.Sprintf("%x", sha256.Sum256(e.GetSpkiDer()))
+	pub, err := r.client.PublicKey(context.Background(), connect.NewRequest(&keyv1alpha1.PublicKeyRequest{Purpose: "token-signing"}))
+	if err != nil || pub.Msg.GetKeyId() != want {
+		t.Fatalf("PublicKey key_id %q, want %q (%v)", pub.Msg.GetKeyId(), want, err)
+	}
+	d := sha512.Sum384([]byte("x"))
+	res, err := r.client.Sign(context.Background(), connect.NewRequest(&keyv1alpha1.SignRequest{Purpose: "token-signing", Algorithm: "ES384", Digest: d[:]}))
+	if err != nil || res.Msg.GetKeyId() != want {
+		t.Fatalf("Sign key_id %q, want %q (%v)", res.Msg.GetKeyId(), want, err)
+	}
+	ensure(t, r.client, "ssh-user", "ES384")
+	other, _ := r.client.PublicKey(context.Background(), connect.NewRequest(&keyv1alpha1.PublicKeyRequest{Purpose: "ssh-user"}))
+	if other.Msg.GetKeyId() == want || other.Msg.GetKeyId() == "" {
+		t.Fatalf("another key has key_id %q", other.Msg.GetKeyId())
+	}
 }

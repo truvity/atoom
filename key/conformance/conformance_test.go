@@ -126,7 +126,7 @@ func TestTheCapabilitiesCase(t *testing.T) {
 }
 
 func TestTheSuiteHasItsCases(t *testing.T) {
-	if n := len(conformance.Suite()); n != 12 {
+	if n := len(conformance.Suite()); n != 15 {
 		t.Fatalf("%d cases", n)
 	}
 }

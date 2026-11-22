@@ -25,6 +25,7 @@ The records were rewritten once, in a clean state, on 2026-11-21, so that each s
 | [0013](0013-what-moves-from-sluis.md) | What moves from sluis into atoom, and what goes to truvity/audit | 2026-11-20 |
 | [0014](0014-what-atoom-proves.md) | What atoom proves, and what each consumer proves | 2026-11-19 |
 | [0015](0015-versioning-and-consumption.md) | Versioning and consumption | 2026-11-21 |
+| [0016](0016-the-key-port-signs-digests.md) | The key port signs digests and returns the plain signature; envelopes belong to the blocks | 2026-11-22 |
 
 ## Renumbered in the clean rewrite of 2026-11-21
 

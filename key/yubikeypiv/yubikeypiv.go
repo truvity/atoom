@@ -37,6 +37,7 @@ import (
 	"github.com/truvity/atoom/common/refusal"
 	keyv1alpha1 "github.com/truvity/atoom/key/gen/atoom/key/v1alpha1"
 	"github.com/truvity/atoom/key/gen/atoom/key/v1alpha1/keyv1alpha1connect"
+	"github.com/truvity/atoom/key/keyid"
 	"github.com/truvity/atoom/key/purpose"
 	"github.com/truvity/atoom/key/slotplan"
 	"github.com/truvity/atoom/key/yubikeypiv/internal/card"
@@ -591,7 +592,7 @@ func (s *Service) PublicKey(ctx context.Context, req *connect.Request[keyv1alpha
 	if !ok {
 		return nil, s.refuse(ctx, "PublicKey", connect.CodeNotFound, reasonAbsent, "purpose")
 	}
-	return connect.NewResponse(&keyv1alpha1.PublicKeyResponse{SpkiDer: k.spki}), nil
+	return connect.NewResponse(&keyv1alpha1.PublicKeyResponse{SpkiDer: k.spki, KeyId: keyid.Card(k.slot.String(), k.spki)}), nil
 }
 
 // pinSource is what the card asks when it is logged out and the key needs the PIN. It runs inside a card call, which
@@ -696,7 +697,7 @@ func (s *Service) Sign(ctx context.Context, req *connect.Request[keyv1alpha1.Sig
 		slog.Error("the card's signature does not verify with its public key", "purpose", purpose)
 		return nil, refusal.New(connect.CodeInternal, reasonStore, "")
 	}
-	return connect.NewResponse(&keyv1alpha1.SignResponse{SignatureDer: sig}), nil
+	return connect.NewResponse(&keyv1alpha1.SignResponse{SignatureDer: sig, KeyId: keyid.Card(k.slot.String(), k.spki)}), nil
 }
 
 // busy refuses an RSA signature that finds the card's places taken. A flood of them must not flood the journal as well: the
@@ -761,7 +762,7 @@ func (s *Service) signRS256(ctx context.Context, purpose string, digest []byte) 
 		slog.Error("the card's RSA signature does not verify with its public key", "purpose", purpose)
 		return nil, refusal.New(connect.CodeInternal, reasonStore, "")
 	}
-	return connect.NewResponse(&keyv1alpha1.SignResponse{SignatureDer: sig}), nil
+	return connect.NewResponse(&keyv1alpha1.SignResponse{SignatureDer: sig, KeyId: keyid.Card(k.slot.String(), k.spki)}), nil
 }
 
 // Ecdh derives the shared secret of the key-agreement key (slot 9d) with a peer.

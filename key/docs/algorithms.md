@@ -62,6 +62,10 @@ The port stays with DER and the conversion is a helper, `github.com/truvity/atoo
 
 `RS256` needs nothing: its signature is the octet string of RFC 8017, section 8.2.1, which is the form a JWS carries.
 
+**The other envelopes** (an SSH certificate's signature blob, an OpenPGP signature packet, a CMS `SignerInfo`) are built by the code that makes the envelope from the plain signature, and the port has no form for them ([record 0016](../../docs/decisions/0016-the-key-port-signs-digests.md)). The port signs digests only and returns the signature as the signer made it: **no low-S normalisation** (a verifier that wants one checks or normalises on its side), and the nonce is the driver's. The software driver signs with RFC 6979 deterministic nonces (`crypto/ecdsa` with a nil reader); KMS and the card use their own, so **a test verifies a signature and never compares its bytes**.
+
+**Which key signed.** `Sign` and `PublicKey` return the same `key_id`, so that a caller can set the `kid` of a JWS to the key that signed it and publish the matching public key after a rotation. It ends with the lower-case hex SHA-256 of the key's SubjectPublicKeyInfo; in front of it: nothing (`key/software`), the PIV slot and a colon (`key/yubikeypiv`, for example `9a:`), or the key ARN and `#` (`key/awskms`; an asymmetric KMS key has no versions, so its ARN names the key). The helper `key/keyid` makes the ids.
+
 ## Timings
 
 These were measured on a YubiKey 5 (firmware 5.8) through the card driver. They are the cost of the card, not of the host.

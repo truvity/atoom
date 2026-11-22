@@ -10,6 +10,7 @@ import (
 	"crypto/sha512"
 	"crypto/x509"
 	"errors"
+	"fmt"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -234,7 +235,7 @@ func TestTheKitPassesOnTheFakeCardOnceUnlocked(t *testing.T) {
 	if err := conformance.Run(context.Background(), r.key, &out); err != nil {
 		t.Fatalf("the kit failed: %v\n%s", err, out.String())
 	}
-	if !strings.Contains(out.String(), "12 cases, 12 ok, 0 failed, 0 skipped") {
+	if !strings.Contains(out.String(), "15 cases, 15 ok, 0 failed, 0 skipped") {
 		t.Fatalf("report:\n%s", out.String())
 	}
 }
@@ -846,5 +847,21 @@ func TestACardThatHoldsAnotherAlgorithmThanTheDeclaredOneRefusesTheStart(t *test
 	}
 	if err := open(purpose.ES256); err != nil {
 		t.Fatalf("the same declaration finds its key again: %v", err)
+	}
+}
+
+// The key_id of a card key is its slot and the fingerprint of its public key, in Sign and in PublicKey.
+func TestTheKeyIDIsTheSlotAndTheFingerprint(t *testing.T) {
+	r := start(t, yubikeypiv.Development)
+	r.unlock(t, "123456")
+	e := ensure(t, r.key, "token-signing", "ES384")
+	want := fmt.Sprintf("9a:%x", sha256.Sum256(e.GetSpkiDer()))
+	pub, err := r.key.PublicKey(context.Background(), connect.NewRequest(&keyv1alpha1.PublicKeyRequest{Purpose: "token-signing"}))
+	if err != nil || pub.Msg.GetKeyId() != want {
+		t.Fatalf("PublicKey key_id %q, want %q (%v)", pub.Msg.GetKeyId(), want, err)
+	}
+	res, err := sign(r.key, "token-signing", "ES384", digest384())
+	if err != nil || res.GetKeyId() != want {
+		t.Fatalf("Sign key_id %q, want %q (%v)", res.GetKeyId(), want, err)
 	}
 }
