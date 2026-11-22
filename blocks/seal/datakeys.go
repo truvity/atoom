@@ -124,10 +124,20 @@ func (b *Block) openOwn(ctx context.Context, ref keyRef) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
+	// The listing is read after the Get, so a key that another caller made in between shows up here, its wrap for this instance
+	// included: open that one rather than answer that there is none.
+	notWrapped := false
 	for _, o := range others {
-		if o.ref == ref {
-			return nil, errNotWrapped
+		if o.ref != ref {
+			continue
 		}
+		if o.recipient == b.recipient {
+			return b.unwrap(ctx, ref, o.wrap)
+		}
+		notWrapped = true
+	}
+	if notWrapped {
+		return nil, errNotWrapped
 	}
 	return nil, errNoKey
 }
