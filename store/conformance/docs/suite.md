@@ -5,6 +5,8 @@ The cases of `item_suite`, in the order they run. Each one speaks the contract a
 | Case | What it holds a driver to |
 | --- | --- |
 | `capabilities` | the driver names its engine; one that does not serve the call is taken to offer every call |
+| `durability` | the driver declares a durability of [record 0012](../../../docs/decisions/0012-store-durability.md), `strict` or `lossy`, and the one the run expects (`--durability`); a driver that declares none (a store for tests) is skipped unless the run expects none, and a value the record does not name fails |
+| `durability_survives_restart` | always skipped here, with the reason: the kit cannot crash an engine behind a socket. A driver's own test runs `durability_before_crash`, crashes and restarts its engine, and runs `durability_after_restart`, which finds every acknowledged write at its version (the rqlite driver's test does) |
 | `item_round_trip` | a put is read back with its bytes, version 1 and its index entries |
 | `create_if_absent_twice` | a conditional create succeeds once; the second is `aborted/version` |
 | `update_at_version_and_stale` | an update at the current version succeeds and raises the version; a stale one is refused |
@@ -40,11 +42,11 @@ These are the choices the contract left open. Every engine makes them, and a con
 
 ## What the suite cannot test
 
-It cannot reset a driver's log, so that a log made again has another epoch is the test of each driver (the memory driver and the rqlite driver each have one). It cannot make an engine unavailable, so the `unavailable/engine` refusal is a driver test too.
+It cannot reset a driver's log, so that a log made again has another epoch is the test of each driver (the memory driver and the rqlite driver each have one). It cannot make an engine unavailable, so the `unavailable/engine` refusal is a driver test too. It cannot crash and restart an engine, so a declared `strict` is tested by the driver around a crash, with the two functions of the kit named above (the rqlite driver kills `rqlited` with SIGKILL and starts it on the same data directory; DynamoDB cannot be crashed from a test, and its `strict` is the service's).
 
 ## Running it
 
-Against a socket: `store-conformance --socket PATH`. From Rust: `atoom_store_conformance::item_suite(atoom_socket::dial(path)).await`, then `report`. A driver in Go can run the binary as a test step; the contract is the same in every language.
+Against a socket: `store-conformance --socket PATH [--durability strict|lossy|none]`. From Rust: `atoom_store_conformance::item_suite(atoom_socket::dial(path)).await` (or `item_suite_expecting(client, Claims { durability })`), then `report`. `tools/scripts/conformance-store.sh` passes `none` for the memory driver and `strict` for the DynamoDB and rqlite drivers. A driver in Go can run the binary as a test step; the contract is the same in every language.
 
 ## The one retry
 

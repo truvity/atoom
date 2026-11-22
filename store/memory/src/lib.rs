@@ -212,6 +212,8 @@ impl ItemService for MemoryEngine {
         Response::ok(CapabilitiesResponse {
             store: "memory".to_owned(),
             tail_log: true,
+            // No durability is declared (record 0012): the driver is for tests, and a restart loses every write. A consumer that
+            // requires a durability refuses it.
             ..CapabilitiesResponse::default()
         })
     }

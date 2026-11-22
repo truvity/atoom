@@ -12,9 +12,9 @@ use anyhow::{Context, bail};
 use atoom_common::refusal;
 use atoom_store::atoom::common::v1alpha1::IndexEntry;
 use atoom_store::atoom::store::v1alpha1::{
-    CapabilitiesRequest, CapabilitiesResponse, DriverItem, ItemGetRequest, ItemGetResponse,
-    ItemService, ItemServiceExt, QueryRequest, QueryResponse, TailLogRequest, TailLogResponse,
-    TransactRequest, TransactResponse,
+    CapabilitiesRequest, CapabilitiesResponse, DriverItem, Durability, ItemGetRequest,
+    ItemGetResponse, ItemService, ItemServiceExt, QueryRequest, QueryResponse, TailLogRequest,
+    TailLogResponse, TransactRequest, TransactResponse,
 };
 use atoom_store_conformance::rules::{self, now_ms};
 use connectrpc::error::ErrorCode;
@@ -209,6 +209,9 @@ impl ItemService for Driver {
         Response::ok(CapabilitiesResponse {
             store: "rqlite".to_owned(),
             tail_log: true,
+            // Strict (record 0012): rqlite acknowledges a write once a quorum of the Raft cluster has it in its log on disk, so a
+            // crash of a node or a change of leader keeps it.
+            durability: Durability::DURABILITY_STRICT.into(),
             ..CapabilitiesResponse::default()
         })
     }

@@ -229,8 +229,8 @@ func TestCapabilitiesDeclareNoChangeLog(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if res.Msg.GetStore() != "dynamodb" || res.Msg.GetTailLog() {
-		t.Fatalf("capabilities %v: want store dynamodb and tail_log false", res.Msg)
+	if res.Msg.GetStore() != "dynamodb" || res.Msg.GetTailLog() || res.Msg.GetDurability() != storev1alpha1.Durability_DURABILITY_STRICT {
+		t.Fatalf("capabilities %v: want store dynamodb, tail_log false and durability strict", res.Msg)
 	}
 	stream, err := e.client.TailLog(context.Background(), connect.NewRequest(&storev1alpha1.TailLogRequest{}))
 	if err == nil {

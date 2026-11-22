@@ -27,9 +27,13 @@ func tsToMs(t *timestamppb.Timestamp) int64 {
 
 func (s *Service) nowMs() int64 { return s.now().UnixMilli() }
 
-// Capabilities says what the driver offers: DynamoDB keeps no change log the contract could use, so tail_log is false.
+// Capabilities says what the driver offers: DynamoDB keeps no change log the contract could use, so tail_log is false. Its durability is
+// strict (record 0012): DynamoDB acknowledges a write once it is stored in more than one availability zone, so a crash or a failover
+// keeps it.
 func (*Service) Capabilities(context.Context, *connect.Request[storev1alpha1.CapabilitiesRequest]) (*connect.Response[storev1alpha1.CapabilitiesResponse], error) {
-	return connect.NewResponse(&storev1alpha1.CapabilitiesResponse{Store: "dynamodb", TailLog: false}), nil
+	return connect.NewResponse(&storev1alpha1.CapabilitiesResponse{
+		Store: "dynamodb", TailLog: false, Durability: storev1alpha1.Durability_DURABILITY_STRICT,
+	}), nil
 }
 
 // Get reads one item. A strongly consistent read is DynamoDB's ConsistentRead, which is what linearizable asks for.

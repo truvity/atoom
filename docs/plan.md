@@ -11,7 +11,7 @@ atoom 0.2.0 is released. It holds:
 - thirteen drivers, each released as a tarball, a `.deb` and an `.rpm` package and an OCI image ([packages](packages.md));
 - the release flow ([releasing](release.md)) and the dependency checks (`just check`).
 
-Built since: B1 (the in-process helper of `socket`, [in process](../socket/docs/in-process.md)), B2 (the Go `source/file`, [its page](../source/file/docs/go.md)) and B13 (the key port takes any purpose a host declares, [the key port](../key/docs/key-port.md#the-declaration-of-purposes)); all are in the next release.
+Built since: B1 (the in-process helper of `socket`, [in process](../socket/docs/in-process.md)), B2 (the Go `source/file`, [its page](../source/file/docs/go.md)) and B13 (the key port takes any purpose a host declares, [the key port](../key/docs/key-port.md#the-declaration-of-purposes)), in 0.3.0; B3 (the durability of a store driver, [the store port](../store/docs/store-port.md#capabilities)), in the next release.
 
 Not built: blocks, Lambda extension zips, the drivers marked planned, and the changes of steps B12 and B14 below.
 
@@ -23,7 +23,7 @@ In order. Each step is one pull request or a few. The sluis and session pull req
 | --- | --- | --- |
 | B1 | `socket`: the in-process helper in Rust (the probe of [0009](decisions/0009-connectrpc-in-process.md) becomes its test); the Go in-process helper documented next to it | Every block and in-process consumer uses it |
 | B2 | `source/file` in Go, passing the source kit | session reads its site file and policy bundle in-process |
-| B3 | `Capabilities` gains `durability` ([0012](decisions/0012-store-durability.md)); every store driver declares it | session and sluis choose bindings by it |
+| B3 | `Capabilities` gains `durability` ([0012](decisions/0012-store-durability.md)); every store driver declares it (built: `strict` for dynamodb and rqlite, none for memory, which is for tests) | session and sluis choose bindings by it |
 | B13 | The key port takes any purpose a host declares (below; built) | `seal` declares its own purposes |
 | B4 | `seal` block in Go, moved from sluis key@ ([0013](decisions/0013-what-moves-from-sluis.md): sluis 0006 and the storage part of 0047), with its kit over the memory drivers; it declares its purposes | session seals with it; sluis key@ becomes its host |
 | B5 | The Cedar loading rules, the signed bundle format, loaders in Go and Rust, and the decision test set ([0011](decisions/0011-cedar-as-a-library.md)) | session, sluis and audit load policies the same way |

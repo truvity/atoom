@@ -33,7 +33,10 @@ mod suite;
 use std::future::Future;
 use std::io::Write;
 
-pub use suite::item_suite;
+pub use suite::{
+    Claims, Survivors, durability_after_restart, durability_before_crash, item_suite,
+    item_suite_expecting,
+};
 
 /// The result of one case.
 #[derive(Clone, Debug)]

@@ -1,4 +1,5 @@
-use atoom_store_conformance::{item_suite, report};
+use atoom_store::atoom::store::v1alpha1::Durability;
+use atoom_store_conformance::{Claims, item_suite, item_suite_expecting, report};
 
 use super::*;
 
@@ -22,7 +23,11 @@ async fn the_memory_engine_passes_the_item_suite() {
         }
         tokio::time::sleep(Duration::from_millis(20)).await;
     }
-    let cases = item_suite(atoom_socket::dial(&socket)).await;
+    // The memory driver declares no durability: it is for tests (record 0012).
+    let expect = Claims {
+        durability: Some(Durability::DURABILITY_UNSPECIFIED),
+    };
+    let cases = item_suite_expecting(atoom_socket::dial(&socket), expect).await;
     let mut out = Vec::new();
     let verdict = report(&cases, &mut out);
     print!("{}", String::from_utf8_lossy(&out));

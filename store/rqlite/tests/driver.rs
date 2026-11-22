@@ -15,7 +15,7 @@ use std::time::Duration;
 use atoom_common::refusal::reason as refusal_reason;
 use atoom_socket::{ServerConfig, dial};
 use atoom_store::atoom::store::v1alpha1::{
-    ItemServiceClient, Put, TailLogRequest, TransactRequest,
+    Durability, ItemServiceClient, Put, TailLogRequest, TransactRequest,
 };
 use atoom_store_rqlite::Driver;
 use atoom_store_rqlite::client::{Level, Param, Rq, Stmt};
@@ -49,7 +49,46 @@ fn rqlited() -> Option<PathBuf> {
 struct Node {
     child: Child,
     url: String,
+    /// The command that started it, to start it again on the same data directory and ports.
+    restart: Command,
+    log: PathBuf,
     _dir: tempfile::TempDir,
+}
+
+impl Node {
+    /// Kills rqlited with SIGKILL, which is a crash to it (nothing is flushed on the way out), and starts it again on the same
+    /// data directory and ports, then waits for it to lead its one-node cluster again.
+    async fn crash_and_restart(&mut self) {
+        self.child.kill().unwrap();
+        self.child.wait().unwrap();
+        let out = std::fs::OpenOptions::new()
+            .append(true)
+            .open(&self.log)
+            .unwrap();
+        self.child = self
+            .restart
+            .stdout(out.try_clone().unwrap())
+            .stderr(out)
+            .spawn()
+            .expect("start rqlited again");
+        let rq = Rq::new(&self.url, None).unwrap();
+        for _ in 0..300 {
+            if let Some(status) = self.child.try_wait().unwrap() {
+                panic!(
+                    "rqlited exited after the restart with {status}: {}",
+                    said(&self.log)
+                );
+            }
+            if rq.is_leader().await.unwrap_or(false) {
+                return;
+            }
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+        panic!(
+            "rqlited led nothing 30 s after the restart: {}",
+            said(&self.log)
+        );
+    }
 }
 
 impl Drop for Node {
@@ -113,8 +152,10 @@ async fn try_start_node(bin: &Path, auth: Option<(&str, &str)>) -> Result<Node, 
         cmd.arg("-auth").arg(file);
     }
     let out = std::fs::File::create(&log).unwrap();
+    cmd.arg(dir.path().join("data"));
+    let mut restart = Command::new(cmd.get_program());
+    restart.args(cmd.get_args());
     let child = cmd
-        .arg(dir.path().join("data"))
         .stdout(out.try_clone().unwrap())
         .stderr(out)
         .spawn()
@@ -122,6 +163,8 @@ async fn try_start_node(bin: &Path, auth: Option<(&str, &str)>) -> Result<Node, 
     let mut node = Node {
         child,
         url: format!("http://127.0.0.1:{http}"),
+        restart,
+        log: log.clone(),
         _dir: dir,
     };
     let creds = auth.map(|(u, p)| format!("{u}:{p}"));
@@ -194,6 +237,28 @@ fn rqlite_command(args: &[&str]) -> std::process::Output {
         .expect("run the store-rqlite binary")
 }
 
+/// The driver declares strict durability (record 0012), and the store kit cannot crash an engine behind a socket, so this test
+/// does it: what the driver acknowledged before rqlited was killed is there, at the same versions, once it has started again on
+/// the same data directory.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn an_acknowledged_write_survives_a_crash_and_a_restart_of_the_node() {
+    let Some(bin) = rqlited() else { return };
+    let mut node = start_node(&bin, None).await;
+    let d = driver(&node, "durable");
+    d.ensure_schema().await.unwrap();
+    let served = serve(&d).await;
+    let survivors = atoom_store_conformance::durability_before_crash(dial(&served.socket))
+        .await
+        .unwrap();
+    served.stop().await;
+    node.crash_and_restart().await;
+    let served = serve(&driver(&node, "durable")).await;
+    atoom_store_conformance::durability_after_restart(dial(&served.socket), &survivors)
+        .await
+        .unwrap();
+    served.stop().await;
+}
+
 /// The suite includes the log head of a query: never 0, and a tail from it misses nothing written after the page.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn the_driver_passes_the_item_suite_on_both_ports() {
@@ -205,7 +270,12 @@ async fn the_driver_passes_the_item_suite_on_both_ports() {
         d.ensure_schema().await.expect("the schema is idempotent");
         let served = serve(&d).await;
 
-        let cases = atoom_store_conformance::item_suite(dial(&served.socket)).await;
+        // The driver declares strict durability on both namespaces (record 0012).
+        let expect = atoom_store_conformance::Claims {
+            durability: Some(Durability::DURABILITY_STRICT),
+        };
+        let cases =
+            atoom_store_conformance::item_suite_expecting(dial(&served.socket), expect).await;
         let mut out = Vec::new();
         let verdict = atoom_store_conformance::report(&cases, &mut out);
         print!("[{ns}]\n{}", String::from_utf8_lossy(&out));

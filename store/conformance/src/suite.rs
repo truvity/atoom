@@ -14,8 +14,9 @@ use atoom_socket::{Client, Transport};
 use atoom_store::atoom::common::v1alpha1::IndexEntry;
 use atoom_store::atoom::store::v1alpha1::__buffa::oneof::condition::Expect;
 use atoom_store::atoom::store::v1alpha1::{
-    CapabilitiesRequest, Condition, Delete, DriverItem, ItemGetRequest, ItemServiceClient, Put,
-    QueryRequest, TailLogRequest, TailLogResponse, TransactRequest,
+    CapabilitiesRequest, CapabilitiesResponse, Condition, Delete, DriverItem, Durability,
+    ItemGetRequest, ItemServiceClient, Put, QueryRequest, TailLogRequest, TailLogResponse,
+    TransactRequest,
 };
 use connectrpc::ConnectError;
 use connectrpc::error::ErrorCode;
@@ -32,6 +33,11 @@ const SILENT: Duration = Duration::from_millis(700);
 /// Runs every case against the engine behind `client` and returns their results. The caller
 /// decides what a failure means ([`crate::report`] fails on any failed case and on none run).
 pub async fn item_suite(client: Client) -> Vec<Case> {
+    item_suite_expecting(client, Claims::default()).await
+}
+
+/// [`item_suite`], holding the driver also to what `expect` says of it (the durability its documentation gives it).
+pub async fn item_suite_expecting(client: Client, expect: Claims) -> Vec<Case> {
     let s = Suite::new(client);
     // What the driver declares decides which cases run (plan R4). A driver that does not serve `Capabilities` offers every call, as
     // the drivers did before the call existed; a driver that answers it must answer it truthfully, which the first case holds it to.
@@ -55,6 +61,14 @@ pub async fn item_suite(client: Client) -> Vec<Case> {
     let no_tail = "the driver does not declare the change log (capabilities.tail_log is false)";
     let mut cases = vec![
         caps_case,
+        durability_case(caps.as_ref(), expect.durability).await,
+        // A crash and a restart are out of the kit's reach through a socket; a test that can restart the engine runs
+        // durability_before_crash and durability_after_restart around one (the rqlite driver's tests do).
+        skip_case(
+            "durability_survives_restart",
+            "the kit cannot crash or restart the engine behind a socket; a driver's own test does, with \
+             durability_before_crash and durability_after_restart",
+        ),
         run_case("item_round_trip", s.item_round_trip()).await,
         run_case("create_if_absent_twice", s.create_if_absent_twice()).await,
         run_case("update_at_version_and_stale", s.update_versions()).await,
@@ -112,6 +126,124 @@ pub async fn item_suite(client: Client) -> Vec<Case> {
     // that cannot delete does not pass.
     cases.push(run_case("cleanup", s.cleanup()).await);
     cases
+}
+
+/// What a run holds a driver to beyond the contract.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct Claims {
+    /// The durability the driver must declare (record 0012): `Some(Durability::DURABILITY_UNSPECIFIED)` for a driver that
+    /// declares none (`store/memory`). `None` holds it only to the closed list: strict, lossy, or none declared.
+    pub durability: Option<Durability>,
+}
+
+/// The case `durability`: the driver declares one of the values of record 0012, `strict` or `lossy`, and the one `expect`
+/// names when it names one. A driver that declares none (a store for tests) is skipped unless it was expected to declare
+/// none; a value outside the list fails.
+async fn durability_case(caps: Option<&CapabilitiesResponse>, expect: Option<Durability>) -> Case {
+    let Some(caps) = caps else {
+        return skip_case(
+            "durability",
+            "the driver does not serve Capabilities, so it declares no durability",
+        );
+    };
+    let declared = caps.durability.as_known();
+    match (declared, expect) {
+        (Some(Durability::DURABILITY_UNSPECIFIED), None) => skip_case(
+            "durability",
+            "the driver declares no durability (capabilities.durability is unset): a store for tests, record 0012",
+        ),
+        _ => {
+            run_case("durability", async move {
+                let Some(d) = declared else {
+                    bail!(
+                        "capabilities.durability is {:?}, a value record 0012 does not name",
+                        caps.durability
+                    )
+                };
+                if let Some(want) = expect {
+                    ensure!(
+                        d == want,
+                        "capabilities.durability is {d:?}; this driver must declare {want:?}"
+                    );
+                }
+                Ok(())
+            })
+            .await
+        }
+    }
+}
+
+/// The items a crash must not lose: what [`durability_before_crash`] wrote and saw acknowledged.
+#[derive(Clone, Debug)]
+pub struct Survivors {
+    base: String,
+    items: Vec<DriverItem>,
+}
+
+/// How many items [`durability_before_crash`] writes.
+const SURVIVORS: usize = 20;
+
+/// Writes items one transaction at a time and returns what the driver acknowledged, for [`durability_after_restart`] to find
+/// again after the engine has crashed and come back. A driver that declares `strict` (record 0012) loses none of them.
+///
+/// # Errors
+///
+/// A write that the driver does not acknowledge as written.
+pub async fn durability_before_crash(client: Client) -> anyhow::Result<Survivors> {
+    let s = Suite::new(client);
+    let mut items = Vec::with_capacity(SURVIVORS);
+    for i in 0..SURVIVORS {
+        let k = s.key("durability", &format!("{i:02}"));
+        let value = format!("acknowledged before the crash {i}").into_bytes();
+        let wrote = s
+            .transact(vec![absent(&k)], vec![put(&k, &value)], vec![])
+            .await
+            .context("a write before the crash")?;
+        ensure!(
+            wrote.len() == 1 && wrote[0].version == 1,
+            "the write was not acknowledged at version 1"
+        );
+        items.push(DriverItem {
+            key: k,
+            version: 1,
+            value,
+            ..DriverItem::default()
+        });
+    }
+    Ok(Survivors {
+        base: s.base,
+        items,
+    })
+}
+
+/// Reads back, at `linearizable: true`, every item [`durability_before_crash`] wrote, through a client of the engine after its
+/// restart, and removes them. Every item must be there with its value and version.
+///
+/// # Errors
+///
+/// An item that is gone or changed, or a read or a removal that fails.
+pub async fn durability_after_restart(client: Client, survivors: &Survivors) -> anyhow::Result<()> {
+    let s = Suite {
+        client,
+        base: survivors.base.clone(),
+    };
+    for want in &survivors.items {
+        let name = String::from_utf8_lossy(&want.key).into_owned();
+        let got = s
+            .get(&want.key, true)
+            .await
+            .with_context(|| format!("{name}, acknowledged before the crash, after the restart"))?;
+        ensure!(
+            got.value == want.value && got.version == want.version,
+            "{name} came back changed after the restart (version {})",
+            got.version
+        );
+    }
+    let deletes = survivors.items.iter().map(|i| del(&i.key)).collect();
+    s.transact(vec![], vec![], deletes)
+        .await
+        .context("removing what durability_before_crash wrote")?;
+    Ok(())
 }
 
 struct Suite {
@@ -1530,5 +1662,58 @@ mod tests {
         .await;
         assert!(r.is_err());
         assert_eq!(calls.get(), 1);
+    }
+}
+
+#[cfg(test)]
+mod durability_tests {
+    use super::*;
+
+    fn caps(d: Durability) -> CapabilitiesResponse {
+        CapabilitiesResponse {
+            store: "fake".to_owned(),
+            durability: d.into(),
+            ..CapabilitiesResponse::default()
+        }
+    }
+
+    #[tokio::test]
+    async fn each_value_of_the_record_passes_and_an_expected_one_must_match() {
+        for d in [Durability::DURABILITY_STRICT, Durability::DURABILITY_LOSSY] {
+            let c = durability_case(Some(&caps(d)), None).await;
+            assert!(c.passed && !c.skipped, "{d:?}: {c:?}");
+            let c = durability_case(Some(&caps(d)), Some(d)).await;
+            assert!(c.passed && !c.skipped, "{d:?} expected: {c:?}");
+        }
+        let c = durability_case(
+            Some(&caps(Durability::DURABILITY_LOSSY)),
+            Some(Durability::DURABILITY_STRICT),
+        )
+        .await;
+        assert!(!c.passed, "lossy where strict is expected: {c:?}");
+    }
+
+    #[tokio::test]
+    async fn none_declared_is_skipped_unless_it_was_expected_and_fails_where_a_value_was() {
+        let none = caps(Durability::DURABILITY_UNSPECIFIED);
+        let c = durability_case(Some(&none), None).await;
+        assert!(
+            c.skipped && c.detail.contains("declares no durability"),
+            "{c:?}"
+        );
+        let c = durability_case(Some(&none), Some(Durability::DURABILITY_UNSPECIFIED)).await;
+        assert!(c.passed && !c.skipped, "{c:?}");
+        let c = durability_case(Some(&none), Some(Durability::DURABILITY_STRICT)).await;
+        assert!(!c.passed, "{c:?}");
+        let c = durability_case(None, None).await;
+        assert!(c.skipped, "{c:?}");
+    }
+
+    #[tokio::test]
+    async fn a_value_the_record_does_not_name_fails() {
+        let mut c = caps(Durability::DURABILITY_STRICT);
+        c.durability = buffa::EnumValue::Unknown(7);
+        let case = durability_case(Some(&c), None).await;
+        assert!(!case.passed, "{case:?}");
     }
 }

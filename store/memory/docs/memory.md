@@ -4,6 +4,7 @@ What it does and does not do, for a consumer that links it.
 
 - **Everything the contract says** ([item port](../../docs/store-port.md)): versions, conditions, expiry at read time, indexes, the change log with its epoch, linearizable reads (a single mutex makes every read linearizable).
 - **Nothing is kept across a restart**, and a restart is a log made again: the new log has a new epoch, so a position saved before it is refused, as with any driver.
+- **It declares no durability** (`Capabilities.durability` is unset, [record 0012](../../../docs/decisions/0012-store-durability.md)): it is for tests, and a consumer that requires `strict` or `lossy` refuses it.
 - **The sweeper is a method**, `sweep()`. A real engine runs one on a timer; here a tail runs it when it looks for rows, and a test may call it to make an expired item leave its delete row at a moment of its choosing.
 - **`reset()`** starts again with an empty engine and a new log. A test uses it to prove that a consumer handles a log made again (the rqlite driver has the same proof against a real database).
 - **No guard on the socket** beyond its mode. `serve` is plain: the owner of the process is the only caller. A consumer that guards its sockets (peer credentials, a call graph) registers `router()` on a server of its own.

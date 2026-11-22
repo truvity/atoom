@@ -3,7 +3,8 @@
 # through the socket of its own thin main: the memory driver; the DynamoDB driver (a Go thin main) against DynamoDB Local, which runs in a
 # container (one at a time, removed at the end), when a container runtime is there; and the rqlite driver (both namespaces) when an rqlited
 # is fetched (`just rqlite-fetch`; rqlite publishes no macOS build, so there the rqlite driver is skipped and the run says so). The Go tests of
-# the DynamoDB driver that need DynamoDB Local run against the same container.
+# the DynamoDB driver that need DynamoDB Local run against the same container. Each run holds the driver to the durability its documentation gives it (record 0012):
+# none for the memory driver, strict for the DynamoDB and rqlite drivers.
 #
 #   tools/scripts/conformance-store.sh
 #
@@ -35,16 +36,16 @@ wait_for() { # description command...
     return 1
 }
 
-run_kit() { # name socket
-    echo "conformance-store: store-conformance against $1"
-    "$bin/store-conformance" --socket "$2"
+run_kit() { # name socket durability
+    echo "conformance-store: store-conformance against $1 (durability: $3)"
+    "$bin/store-conformance" --socket "$2" --durability "$3"
 }
 
 # The memory driver.
 "$bin/store-memory" --socket "$tmp/memory.sock" &
 pids+=($!)
 wait_for "the memory driver" test -S "$tmp/memory.sock"
-run_kit "store-memory" "$tmp/memory.sock"
+run_kit "store-memory" "$tmp/memory.sock" none
 
 # The DynamoDB driver, against DynamoDB Local. The image is the multi-arch index of amazon/dynamodb-local 3.3.2, pinned by digest (it has
 # linux/amd64 and linux/arm64 manifests, so each native runner pulls its own); it runs in memory, with no data volume, on a random loopback
@@ -67,7 +68,7 @@ if command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
     wait_for "the DynamoDB driver" test -S "$tmp/dynamodb.sock"
     # The cases version_never_decreases and expiry are retried once on DynamoDB Local, which sweeps expired items in the background (issue #14); the kit
     # reads this variable, and it is set for this run and no other.
-    ATOOM_CONFORMANCE_DYNAMODB_LOCAL=1 run_kit "store-dynamodb (DynamoDB Local)" "$tmp/dynamodb.sock"
+    ATOOM_CONFORMANCE_DYNAMODB_LOCAL=1 run_kit "store-dynamodb (DynamoDB Local)" "$tmp/dynamodb.sock" strict
     echo "conformance-store: the Go tests of the DynamoDB driver against DynamoDB Local"
     (cd store/dynamodb && ATOOM_REQUIRE_DYNAMODB_LOCAL=1 go test -count=1 ./...)
     ddb_cleanup
@@ -111,6 +112,6 @@ for ns in durable temp; do
     "$bin/store-rqlite" serve --socket "$tmp/rqlite-$ns.sock" --rqlite-url "http://127.0.0.1:$http" --namespace "$ns" &
     pids+=($!)
     wait_for "store-rqlite ($ns)" test -S "$tmp/rqlite-$ns.sock"
-    run_kit "store-rqlite ($ns)" "$tmp/rqlite-$ns.sock"
+    run_kit "store-rqlite ($ns)" "$tmp/rqlite-$ns.sock" strict
 done
 echo "conformance-store: done"
