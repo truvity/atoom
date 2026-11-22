@@ -368,6 +368,7 @@ dependencies = [
  "atoom-common",
  "atoom-socket",
  "atoom-store",
+ "buffa",
  "buffa-types",
  "clap",
  "connectrpc",

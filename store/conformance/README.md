@@ -4,8 +4,8 @@ The conformance kit of the [item port](../docs/store-port.md): the cases every i
 
 | | |
 | --- | --- |
-| Library | crate `atoom-store-conformance`: `item_suite(client)` runs the cases and returns their results, `report(&cases, out)` prints them and fails on a failed case and on none run; `rules` holds what every Rust engine decides in the same way (keys, page sizes, timestamps, the checks of a `Transact`, the epoch of a log) |
-| Binary | `store-conformance --socket PATH` runs the suite against the driver that serves on the UNIX socket PATH, whatever its language; the exit status is 0 only when no case failed and at least one ran (a case the driver does not declare is skipped) |
+| Library | crate `atoom-store-conformance`: `item_suite(client)` runs the cases and returns their results (`item_suite_expecting(client, Claims)` also holds the driver to the durability it must declare), `report(&cases, out)` prints them and fails on a failed case and on none run; `durability_before_crash` and `durability_after_restart` are the two halves of a crash test that a driver which can restart its engine runs around the restart; `rules` holds what every Rust engine decides in the same way (keys, page sizes, timestamps, the checks of a `Transact`, the epoch of a log) |
+| Binary | `store-conformance --socket PATH [--durability strict\|lossy\|none]` runs the suite against the driver that serves on the UNIX socket PATH, whatever its language; the exit status is 0 only when no case failed and at least one ran (a case the driver does not declare is skipped) |
 
 ```sh
 cargo build -p atoom-store-memory -p atoom-store-conformance

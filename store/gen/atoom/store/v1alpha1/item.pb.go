@@ -26,6 +26,56 @@ const (
 	_ = protoimpl.EnforceVersion(protoimpl.MaxVersion - 20)
 )
 
+// Durability is what an acknowledged write survives (record 0012). A consumer refuses a binding that is weaker than its data needs.
+type Durability int32
+
+const (
+	Durability_DURABILITY_UNSPECIFIED Durability = 0 // the driver declares none: a store for tests (store/memory), or a driver from before the field existed
+	Durability_DURABILITY_STRICT      Durability = 1 // an acknowledged write survives a crash and a failover
+	Durability_DURABILITY_LOSSY       Durability = 2 // a failover can lose acknowledged writes
+)
+
+// Enum value maps for Durability.
+var (
+	Durability_name = map[int32]string{
+		0: "DURABILITY_UNSPECIFIED",
+		1: "DURABILITY_STRICT",
+		2: "DURABILITY_LOSSY",
+	}
+	Durability_value = map[string]int32{
+		"DURABILITY_UNSPECIFIED": 0,
+		"DURABILITY_STRICT":      1,
+		"DURABILITY_LOSSY":       2,
+	}
+)
+
+func (x Durability) Enum() *Durability {
+	p := new(Durability)
+	*p = x
+	return p
+}
+
+func (x Durability) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (Durability) Descriptor() protoreflect.EnumDescriptor {
+	return file_atoom_store_v1alpha1_item_proto_enumTypes[0].Descriptor()
+}
+
+func (Durability) Type() protoreflect.EnumType {
+	return &file_atoom_store_v1alpha1_item_proto_enumTypes[0]
+}
+
+func (x Durability) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use Durability.Descriptor instead.
+func (Durability) EnumDescriptor() ([]byte, []int) {
+	return file_atoom_store_v1alpha1_item_proto_rawDescGZIP(), []int{0}
+}
+
 // CapabilitiesRequest asks what the driver offers.
 type CapabilitiesRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
@@ -68,8 +118,9 @@ func (*CapabilitiesRequest) Descriptor() ([]byte, []int) {
 // unimplemented) is taken to offer every optional call, as the drivers did before this call existed.
 type CapabilitiesResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Store         string                 `protobuf:"bytes,1,opt,name=store,proto3" json:"store,omitempty"`                     // the engine behind the driver: "memory", "rqlite" or "dynamodb"
-	TailLog       bool                   `protobuf:"varint,2,opt,name=tail_log,json=tailLog,proto3" json:"tail_log,omitempty"` // true when the driver keeps the change log: TailLog is served, a put or delete with log set is accepted, and a query names a log head and epoch
+	Store         string                 `protobuf:"bytes,1,opt,name=store,proto3" json:"store,omitempty"`                                                 // the engine behind the driver: "memory", "rqlite" or "dynamodb"
+	TailLog       bool                   `protobuf:"varint,2,opt,name=tail_log,json=tailLog,proto3" json:"tail_log,omitempty"`                             // true when the driver keeps the change log: TailLog is served, a put or delete with log set is accepted, and a query names a log head and epoch
+	Durability    Durability             `protobuf:"varint,3,opt,name=durability,proto3,enum=atoom.store.v1alpha1.Durability" json:"durability,omitempty"` // what an acknowledged write survives (record 0012); unset for a store that declares none (store/memory, for tests)
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -116,6 +167,13 @@ func (x *CapabilitiesResponse) GetTailLog() bool {
 		return x.TailLog
 	}
 	return false
+}
+
+func (x *CapabilitiesResponse) GetDurability() Durability {
+	if x != nil {
+		return x.Durability
+	}
+	return Durability_DURABILITY_UNSPECIFIED
 }
 
 // DriverItem is an item as a driver keeps it; the driver never knows what a kind means.
@@ -910,10 +968,13 @@ var File_atoom_store_v1alpha1_item_proto protoreflect.FileDescriptor
 const file_atoom_store_v1alpha1_item_proto_rawDesc = "" +
 	"\n" +
 	"\x1fatoom/store/v1alpha1/item.proto\x12\x14atoom.store.v1alpha1\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\"atoom/common/v1alpha1/common.proto\"\x15\n" +
-	"\x13CapabilitiesRequest\"G\n" +
+	"\x13CapabilitiesRequest\"\x89\x01\n" +
 	"\x14CapabilitiesResponse\x12\x14\n" +
 	"\x05store\x18\x01 \x01(\tR\x05store\x12\x19\n" +
-	"\btail_log\x18\x02 \x01(\bR\atailLog\"\xc6\x01\n" +
+	"\btail_log\x18\x02 \x01(\bR\atailLog\x12@\n" +
+	"\n" +
+	"durability\x18\x03 \x01(\x0e2 .atoom.store.v1alpha1.DurabilityR\n" +
+	"durability\"\xc6\x01\n" +
 	"\n" +
 	"DriverItem\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\fR\x03key\x12\x18\n" +
@@ -971,7 +1032,12 @@ const file_atoom_store_v1alpha1_item_proto_rawDesc = "" +
 	"\bsequence\x18\x01 \x01(\x04R\bsequence\x12\x10\n" +
 	"\x03key\x18\x02 \x01(\fR\x03key\x12\x18\n" +
 	"\aversion\x18\x03 \x01(\x04R\aversion\x12\x18\n" +
-	"\adeleted\x18\x04 \x01(\bR\adeleted2\xcf\x03\n" +
+	"\adeleted\x18\x04 \x01(\bR\adeleted*U\n" +
+	"\n" +
+	"Durability\x12\x1a\n" +
+	"\x16DURABILITY_UNSPECIFIED\x10\x00\x12\x15\n" +
+	"\x11DURABILITY_STRICT\x10\x01\x12\x14\n" +
+	"\x10DURABILITY_LOSSY\x10\x022\xcf\x03\n" +
 	"\vItemService\x12e\n" +
 	"\fCapabilities\x12).atoom.store.v1alpha1.CapabilitiesRequest\x1a*.atoom.store.v1alpha1.CapabilitiesResponse\x12R\n" +
 	"\x03Get\x12$.atoom.store.v1alpha1.ItemGetRequest\x1a%.atoom.store.v1alpha1.ItemGetResponse\x12P\n" +
@@ -992,51 +1058,54 @@ func file_atoom_store_v1alpha1_item_proto_rawDescGZIP() []byte {
 	return file_atoom_store_v1alpha1_item_proto_rawDescData
 }
 
+var file_atoom_store_v1alpha1_item_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
 var file_atoom_store_v1alpha1_item_proto_msgTypes = make([]protoimpl.MessageInfo, 14)
 var file_atoom_store_v1alpha1_item_proto_goTypes = []any{
-	(*CapabilitiesRequest)(nil),   // 0: atoom.store.v1alpha1.CapabilitiesRequest
-	(*CapabilitiesResponse)(nil),  // 1: atoom.store.v1alpha1.CapabilitiesResponse
-	(*DriverItem)(nil),            // 2: atoom.store.v1alpha1.DriverItem
-	(*ItemGetRequest)(nil),        // 3: atoom.store.v1alpha1.ItemGetRequest
-	(*ItemGetResponse)(nil),       // 4: atoom.store.v1alpha1.ItemGetResponse
-	(*QueryRequest)(nil),          // 5: atoom.store.v1alpha1.QueryRequest
-	(*QueryResponse)(nil),         // 6: atoom.store.v1alpha1.QueryResponse
-	(*TransactRequest)(nil),       // 7: atoom.store.v1alpha1.TransactRequest
-	(*Condition)(nil),             // 8: atoom.store.v1alpha1.Condition
-	(*Put)(nil),                   // 9: atoom.store.v1alpha1.Put
-	(*Delete)(nil),                // 10: atoom.store.v1alpha1.Delete
-	(*TransactResponse)(nil),      // 11: atoom.store.v1alpha1.TransactResponse
-	(*TailLogRequest)(nil),        // 12: atoom.store.v1alpha1.TailLogRequest
-	(*TailLogResponse)(nil),       // 13: atoom.store.v1alpha1.TailLogResponse
-	(*timestamppb.Timestamp)(nil), // 14: google.protobuf.Timestamp
-	(*v1alpha1.IndexEntry)(nil),   // 15: atoom.common.v1alpha1.IndexEntry
+	(Durability)(0),               // 0: atoom.store.v1alpha1.Durability
+	(*CapabilitiesRequest)(nil),   // 1: atoom.store.v1alpha1.CapabilitiesRequest
+	(*CapabilitiesResponse)(nil),  // 2: atoom.store.v1alpha1.CapabilitiesResponse
+	(*DriverItem)(nil),            // 3: atoom.store.v1alpha1.DriverItem
+	(*ItemGetRequest)(nil),        // 4: atoom.store.v1alpha1.ItemGetRequest
+	(*ItemGetResponse)(nil),       // 5: atoom.store.v1alpha1.ItemGetResponse
+	(*QueryRequest)(nil),          // 6: atoom.store.v1alpha1.QueryRequest
+	(*QueryResponse)(nil),         // 7: atoom.store.v1alpha1.QueryResponse
+	(*TransactRequest)(nil),       // 8: atoom.store.v1alpha1.TransactRequest
+	(*Condition)(nil),             // 9: atoom.store.v1alpha1.Condition
+	(*Put)(nil),                   // 10: atoom.store.v1alpha1.Put
+	(*Delete)(nil),                // 11: atoom.store.v1alpha1.Delete
+	(*TransactResponse)(nil),      // 12: atoom.store.v1alpha1.TransactResponse
+	(*TailLogRequest)(nil),        // 13: atoom.store.v1alpha1.TailLogRequest
+	(*TailLogResponse)(nil),       // 14: atoom.store.v1alpha1.TailLogResponse
+	(*timestamppb.Timestamp)(nil), // 15: google.protobuf.Timestamp
+	(*v1alpha1.IndexEntry)(nil),   // 16: atoom.common.v1alpha1.IndexEntry
 }
 var file_atoom_store_v1alpha1_item_proto_depIdxs = []int32{
-	14, // 0: atoom.store.v1alpha1.DriverItem.expires_at:type_name -> google.protobuf.Timestamp
-	15, // 1: atoom.store.v1alpha1.DriverItem.indexes:type_name -> atoom.common.v1alpha1.IndexEntry
-	2,  // 2: atoom.store.v1alpha1.ItemGetResponse.item:type_name -> atoom.store.v1alpha1.DriverItem
-	2,  // 3: atoom.store.v1alpha1.QueryResponse.items:type_name -> atoom.store.v1alpha1.DriverItem
-	8,  // 4: atoom.store.v1alpha1.TransactRequest.conditions:type_name -> atoom.store.v1alpha1.Condition
-	9,  // 5: atoom.store.v1alpha1.TransactRequest.puts:type_name -> atoom.store.v1alpha1.Put
-	10, // 6: atoom.store.v1alpha1.TransactRequest.deletes:type_name -> atoom.store.v1alpha1.Delete
-	14, // 7: atoom.store.v1alpha1.Put.expires_at:type_name -> google.protobuf.Timestamp
-	15, // 8: atoom.store.v1alpha1.Put.indexes:type_name -> atoom.common.v1alpha1.IndexEntry
-	2,  // 9: atoom.store.v1alpha1.TransactResponse.items:type_name -> atoom.store.v1alpha1.DriverItem
-	0,  // 10: atoom.store.v1alpha1.ItemService.Capabilities:input_type -> atoom.store.v1alpha1.CapabilitiesRequest
-	3,  // 11: atoom.store.v1alpha1.ItemService.Get:input_type -> atoom.store.v1alpha1.ItemGetRequest
-	5,  // 12: atoom.store.v1alpha1.ItemService.Query:input_type -> atoom.store.v1alpha1.QueryRequest
-	7,  // 13: atoom.store.v1alpha1.ItemService.Transact:input_type -> atoom.store.v1alpha1.TransactRequest
-	12, // 14: atoom.store.v1alpha1.ItemService.TailLog:input_type -> atoom.store.v1alpha1.TailLogRequest
-	1,  // 15: atoom.store.v1alpha1.ItemService.Capabilities:output_type -> atoom.store.v1alpha1.CapabilitiesResponse
-	4,  // 16: atoom.store.v1alpha1.ItemService.Get:output_type -> atoom.store.v1alpha1.ItemGetResponse
-	6,  // 17: atoom.store.v1alpha1.ItemService.Query:output_type -> atoom.store.v1alpha1.QueryResponse
-	11, // 18: atoom.store.v1alpha1.ItemService.Transact:output_type -> atoom.store.v1alpha1.TransactResponse
-	13, // 19: atoom.store.v1alpha1.ItemService.TailLog:output_type -> atoom.store.v1alpha1.TailLogResponse
-	15, // [15:20] is the sub-list for method output_type
-	10, // [10:15] is the sub-list for method input_type
-	10, // [10:10] is the sub-list for extension type_name
-	10, // [10:10] is the sub-list for extension extendee
-	0,  // [0:10] is the sub-list for field type_name
+	0,  // 0: atoom.store.v1alpha1.CapabilitiesResponse.durability:type_name -> atoom.store.v1alpha1.Durability
+	15, // 1: atoom.store.v1alpha1.DriverItem.expires_at:type_name -> google.protobuf.Timestamp
+	16, // 2: atoom.store.v1alpha1.DriverItem.indexes:type_name -> atoom.common.v1alpha1.IndexEntry
+	3,  // 3: atoom.store.v1alpha1.ItemGetResponse.item:type_name -> atoom.store.v1alpha1.DriverItem
+	3,  // 4: atoom.store.v1alpha1.QueryResponse.items:type_name -> atoom.store.v1alpha1.DriverItem
+	9,  // 5: atoom.store.v1alpha1.TransactRequest.conditions:type_name -> atoom.store.v1alpha1.Condition
+	10, // 6: atoom.store.v1alpha1.TransactRequest.puts:type_name -> atoom.store.v1alpha1.Put
+	11, // 7: atoom.store.v1alpha1.TransactRequest.deletes:type_name -> atoom.store.v1alpha1.Delete
+	15, // 8: atoom.store.v1alpha1.Put.expires_at:type_name -> google.protobuf.Timestamp
+	16, // 9: atoom.store.v1alpha1.Put.indexes:type_name -> atoom.common.v1alpha1.IndexEntry
+	3,  // 10: atoom.store.v1alpha1.TransactResponse.items:type_name -> atoom.store.v1alpha1.DriverItem
+	1,  // 11: atoom.store.v1alpha1.ItemService.Capabilities:input_type -> atoom.store.v1alpha1.CapabilitiesRequest
+	4,  // 12: atoom.store.v1alpha1.ItemService.Get:input_type -> atoom.store.v1alpha1.ItemGetRequest
+	6,  // 13: atoom.store.v1alpha1.ItemService.Query:input_type -> atoom.store.v1alpha1.QueryRequest
+	8,  // 14: atoom.store.v1alpha1.ItemService.Transact:input_type -> atoom.store.v1alpha1.TransactRequest
+	13, // 15: atoom.store.v1alpha1.ItemService.TailLog:input_type -> atoom.store.v1alpha1.TailLogRequest
+	2,  // 16: atoom.store.v1alpha1.ItemService.Capabilities:output_type -> atoom.store.v1alpha1.CapabilitiesResponse
+	5,  // 17: atoom.store.v1alpha1.ItemService.Get:output_type -> atoom.store.v1alpha1.ItemGetResponse
+	7,  // 18: atoom.store.v1alpha1.ItemService.Query:output_type -> atoom.store.v1alpha1.QueryResponse
+	12, // 19: atoom.store.v1alpha1.ItemService.Transact:output_type -> atoom.store.v1alpha1.TransactResponse
+	14, // 20: atoom.store.v1alpha1.ItemService.TailLog:output_type -> atoom.store.v1alpha1.TailLogResponse
+	16, // [16:21] is the sub-list for method output_type
+	11, // [11:16] is the sub-list for method input_type
+	11, // [11:11] is the sub-list for extension type_name
+	11, // [11:11] is the sub-list for extension extendee
+	0,  // [0:11] is the sub-list for field type_name
 }
 
 func init() { file_atoom_store_v1alpha1_item_proto_init() }
@@ -1053,13 +1122,14 @@ func file_atoom_store_v1alpha1_item_proto_init() {
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_atoom_store_v1alpha1_item_proto_rawDesc), len(file_atoom_store_v1alpha1_item_proto_rawDesc)),
-			NumEnums:      0,
+			NumEnums:      1,
 			NumMessages:   14,
 			NumExtensions: 0,
 			NumServices:   1,
 		},
 		GoTypes:           file_atoom_store_v1alpha1_item_proto_goTypes,
 		DependencyIndexes: file_atoom_store_v1alpha1_item_proto_depIdxs,
+		EnumInfos:         file_atoom_store_v1alpha1_item_proto_enumTypes,
 		MessageInfos:      file_atoom_store_v1alpha1_item_proto_msgTypes,
 	}.Build()
 	File_atoom_store_v1alpha1_item_proto = out.File

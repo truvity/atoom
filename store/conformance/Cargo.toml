@@ -30,5 +30,6 @@ futures = "0.3"
 tokio = { version = "1", features = ["rt-multi-thread", "time", "sync", "macros"] }
 
 [dev-dependencies]
+buffa = "=0.9.2"
 atoom-socket = { path = "../../socket", features = ["testing"] }
 tempfile = "3"

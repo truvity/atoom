@@ -27,7 +27,7 @@ One table, on-demand billing, no secondary index, two binary key attributes.
 | `Query` by index | `Query` on the entry partition of (name, value) and `begins_with(sk, prefix)`, then `BatchGetItem` of the items they name | an entry whose item is gone, expired, or no longer declares it is skipped |
 | `Transact` | `BatchGetItem` of every key it touches, the conditions judged, then `TransactWriteItems` (or one `PutItem` or `DeleteItem`) | see below |
 | `TailLog` | none | `unimplemented`; see "The change log" |
-| `Capabilities` | none | `store: dynamodb`, `tail_log: false` |
+| `Capabilities` | none | `store: dynamodb`, `tail_log: false`, `durability: strict` (record 0012: DynamoDB acknowledges a write once it is stored in several availability zones) |
 
 `Transact` in detail:
 
