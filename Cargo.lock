@@ -86,7 +86,7 @@ checksum = "1505bd5d3d116872e7271a6d4e16d81d0c8570876c8de68093a09ac269d8aac0"
 
 [[package]]
 name = "atoom-blob"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "buffa",
  "buffa-types",
@@ -97,7 +97,7 @@ dependencies = [
 
 [[package]]
 name = "atoom-blob-conformance"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "anyhow",
  "atoom-blob",
@@ -111,7 +111,7 @@ dependencies = [
 
 [[package]]
 name = "atoom-blob-fs"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "anyhow",
  "atoom-blob",
@@ -129,7 +129,7 @@ dependencies = [
 
 [[package]]
 name = "atoom-blob-fsdir"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "anyhow",
  "atoom-blob",
@@ -144,7 +144,7 @@ dependencies = [
 
 [[package]]
 name = "atoom-blob-fsreadonly"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "anyhow",
  "atoom-blob",
@@ -163,7 +163,7 @@ dependencies = [
 
 [[package]]
 name = "atoom-common"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "base64",
  "buffa",
@@ -174,7 +174,7 @@ dependencies = [
 
 [[package]]
 name = "atoom-destination"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "atoom-common",
  "buffa",
@@ -186,7 +186,7 @@ dependencies = [
 
 [[package]]
 name = "atoom-destination-conformance"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "anyhow",
  "atoom-common",
@@ -202,7 +202,7 @@ dependencies = [
 
 [[package]]
 name = "atoom-destination-dir"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "anyhow",
  "atoom-common",
@@ -221,7 +221,7 @@ dependencies = [
 
 [[package]]
 name = "atoom-index"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "buffa",
  "buffa-types",
@@ -232,7 +232,7 @@ dependencies = [
 
 [[package]]
 name = "atoom-index-conformance"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "anyhow",
  "atoom-common",
@@ -247,7 +247,7 @@ dependencies = [
 
 [[package]]
 name = "atoom-index-sqlite"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "anyhow",
  "atoom-common",
@@ -267,7 +267,7 @@ dependencies = [
 
 [[package]]
 name = "atoom-socket"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "anyhow",
  "atoom-common",
@@ -288,7 +288,7 @@ dependencies = [
 
 [[package]]
 name = "atoom-source"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "buffa",
  "buffa-types",
@@ -299,7 +299,7 @@ dependencies = [
 
 [[package]]
 name = "atoom-source-conformance"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "anyhow",
  "atoom-common",
@@ -313,7 +313,7 @@ dependencies = [
 
 [[package]]
 name = "atoom-source-credential"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "anyhow",
  "atoom-common",
@@ -331,7 +331,7 @@ dependencies = [
 
 [[package]]
 name = "atoom-source-file"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "anyhow",
  "atoom-common",
@@ -351,7 +351,7 @@ dependencies = [
 
 [[package]]
 name = "atoom-store"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "buffa",
  "buffa-types",
@@ -362,7 +362,7 @@ dependencies = [
 
 [[package]]
 name = "atoom-store-conformance"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "anyhow",
  "atoom-common",
@@ -378,7 +378,7 @@ dependencies = [
 
 [[package]]
 name = "atoom-store-memory"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "anyhow",
  "atoom-common",
@@ -395,7 +395,7 @@ dependencies = [
 
 [[package]]
 name = "atoom-store-rqlite"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "anyhow",
  "atoom-common",
@@ -419,7 +419,7 @@ dependencies = [
 
 [[package]]
 name = "atoom-transport"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "buffa",
  "buffa-types",
@@ -430,7 +430,7 @@ dependencies = [
 
 [[package]]
 name = "atoom-transport-conformance"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "anyhow",
  "atoom-common",
@@ -445,7 +445,7 @@ dependencies = [
 
 [[package]]
 name = "atoom-transport-spool"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "anyhow",
  "atoom-common",

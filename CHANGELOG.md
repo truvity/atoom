@@ -5,6 +5,56 @@ libraries changed. `just release-prepare X.Y.Z` writes the section.
 
 <!-- release-prepare: new sections go below this line -->
 
+## 0.3.0 - 2026-11-22
+
+One version for the whole repository: every library is tagged 0.3.0, changed or not.
+
+**Breaking in the Go API and the command lines; compatible on the wire** (`buf breaking` against v0.2.0 passes). A consumer of the key drivers declares its purposes when it moves to 0.3.0; sluis passes `purpose.Reference()`, which keeps its eleven purposes unchanged.
+
+- **The key port takes any purpose its host declares** (B13, [record 0016](docs/decisions/0016-the-key-port-signs-digests.md)). A declaration is a name, an algorithm (ES256, ES384, RS256 or ECDH-P384) and the operations it allows. A driver serves the declared purposes and refuses any other; the closed purpose lists are gone from the contract, the three drivers and the kit. `CapabilitiesResponse` lists the declared purposes. All three drivers support all four algorithms; the card maps a purpose to a free slot and refuses an impossible declaration before it touches the card.
+- **`key_id` in `SignResponse` and `PublicKeyResponse`**: the same id for the same key, ending with the SHA-256 of the key's SPKI (`<slot>:` in front on the card, `<key ARN>#` on AWS KMS). Use it as the JWS `kid`.
+- **Signatures stay in DER** for ECDSA and the PKCS#1 v1.5 octet string for RS256; the port signs digests only and refuses a digest of the wrong length. Envelope formats belong to the blocks that build them; `key/signature` converts DER to and from the raw `r||s` of JWS.
+- **The software driver signs ECDSA with RFC 6979 nonces.** KMS and the card do not, so tests verify signatures and never compare their bytes.
+- **In-process ConnectRPC in Rust** (B1): `atoom_socket::in_process(router)` and `in_process_with`, a client over the server's router with no socket.
+- **The Go `source/file` library** (B2), for Go hosts that read a file source in-process.
+- Documentation: the clean rewrite of the records and pages, and records 0008 to 0016 (the blocks layer, Cedar as a library, store durability, what moves from sluis, versioning and consumption, the key port).
+- Fix: the candidate scope check read the changelog through a pipe that could exit 141.
+
+Libraries that changed since v0.2.0:
+- `blob`
+- `blob/conformance`
+- `blob/fs`
+- `blob/fsdir`
+- `blob/fsreadonly`
+- `common`
+- `destination`
+- `destination/conformance`
+- `destination/dir`
+- `index`
+- `index/conformance`
+- `index/sqlite`
+- `key`
+- `key/awskms`
+- `key/conformance`
+- `key/pinrelease`
+- `key/slotplan`
+- `key/software`
+- `key/yubikeypiv`
+- `socket`
+- `source`
+- `source/conformance`
+- `source/credential`
+- `source/file`
+- `store`
+- `store/conformance`
+- `store/dynamodb`
+- `store/memory`
+- `store/rqlite`
+- `transport`
+- `transport/conformance`
+- `transport/spool`
+
+
 ## 0.2.0 - 2026-11-20 (second candidate, after #27)
 
 One version for the whole repository: every library is tagged 0.2.0, changed or not. This release adds the packages and the container images that 0.1.0 left for it, the call context of every port client, the destination client in its port crate, the card bench, and a dependency security fix.
