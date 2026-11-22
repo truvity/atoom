@@ -5,8 +5,8 @@ The YubiKey PIV key driver of atoom: the [key port](../README.md) over the keys 
 | | |
 | --- | --- |
 | Go module | `github.com/truvity/atoom/key/yubikeypiv` (requires the port, the common types, `key/slotplan`, `key/pinrelease`, piv-go, and the kit for its tests; no other driver) |
-| Library | package `yubikeypiv`: `New(Options)` opens the card and returns a `Service` (`Handler()`, `Close()`); `Run(ctx, opts, host, admin)` serves the key socket through the host and the unlock service on the admin socket; `Check(opts)` |
-| Thin main | `cmd/yubikeypiv`: `yubikeypiv serve` (the key socket is mode 0600 and admits this process's uid), `yubikeypiv check`, `yubikeypiv version`; `--reader NAME` names the PC/SC reader of the card ([which card it opens](#which-card-it-opens)) |
+| Library | package `yubikeypiv`: `New(Options)` (with `Options.Purposes`, the host's declaration) opens the card and returns a `Service` (`Handler()`, `Close()`); `Run(ctx, opts, host, admin)` serves the key socket through the host and the unlock service on the admin socket; `Check(opts)` |
+| Thin main | `cmd/yubikeypiv`: `yubikeypiv serve ... --purposes FILE` (the key socket is mode 0600 and admits this process's uid), `yubikeypiv check --purposes FILE`, `yubikeypiv version`; `--reader NAME` names the PC/SC reader of the card ([which card it opens](#which-card-it-opens)) |
 | Guard flags | `--allow-uid UID` (repeatable; without it only this process's uid may call), `--allow-any-uid`, `--socket-gid GID`, `--socket-mode MODE`: the [socket guard](../../docs/socket-guard.md) |
 | C code | behind the build tag **`atoom_card`** (cgo, libpcsclite). Without the tag the driver builds everywhere with no C code, and refuses to open a card |
 | Documentation | [docs/](docs/) (below) |
@@ -15,7 +15,7 @@ The YubiKey PIV key driver of atoom: the [key port](../README.md) over the keys 
 ## What it does
 
 - **Starts locked.** The driver holds the card exclusively and has no PIN until an administrator delivers it on the local admin socket (`UnlockService`); a key that needs the PIN is refused with the reason `locked` until then. A wrong PIN is tried once and never retried, and the driver does not send a PIN to a card with one attempt left.
-- **Keeps one slot for each key.** The slot plan gives each purpose a PIV slot, a policy for PIN and touch, and an algorithm. A key is made on the card in development with the factory management key and in no other environment (a staging or production card is provisioned by its owner before the driver sees it). It verifies the attestation of every key it adopts against Yubico's roots, refuses a firmware below 5.7 (the EUCLEAK fix) and a card whose serial is not the one it was told, and refuses an imported key.
+- **Keeps one slot for each key.** The host declares its purposes (a name, an algorithm, the operations, and a slot where the reference map has none), and the slot plan gives each a PIV slot, a policy for PIN and touch, and an algorithm. A key is made on the card in development with the factory management key and in no other environment (a staging or production card is provisioned by its owner before the driver sees it). It verifies the attestation of every key it adopts against Yubico's roots, refuses a firmware below 5.7 (the EUCLEAK fix) and a card whose serial is not the one it was told, and refuses an imported key.
 - **Resets the card's session** at start and exit, so that a card left PIN-verified by an earlier process is never trusted.
 - **Takes part in the PIN release** between cards (`BeginPinRelease`, `SealPin`, `FinishPinRelease`) when its host gives it a way to check the other node's key (below).
 

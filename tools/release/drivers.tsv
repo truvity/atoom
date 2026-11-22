@@ -11,7 +11,7 @@
 #   deb_dep, rpm_dep, deb_rec, rpm_rec   the runtime dependencies and recommendations of the packages, comma separated; - for none
 #   summary     the one line of the package, the image and the tarball
 # `tools/release/check-table.sh` holds this file to the tree: a thin main that is neither here nor in its exceptions fails the check.
-key-software	go	key/software	./cmd/software	portable	linux,darwin	-	-	-	-	The software key driver of the key port: P-384 keys held in files, served on a UNIX socket
+key-software	go	key/software	./cmd/software	portable	linux,darwin	-	-	-	-	The software key driver of the key port: keys held in files, served on a UNIX socket
 key-yubikeypiv	go	key/yubikeypiv	./cmd/yubikeypiv	native:atoom_card	linux	pcscd, libpcsclite1, libc6 (>= 2.34)	pcsc-lite, pcsc-lite-libs, glibc >= 2.34	libccid	pcsc-lite-ccid	The YubiKey PIV driver of the key port: the keys of a card over PC/SC, served on a UNIX socket
 key-awskms	go	key/awskms	./cmd/awskms	portable	linux,darwin	-	-	-	-	The AWS KMS driver of the key port: KMS keys served on a UNIX socket
 store-dynamodb	go	store/dynamodb	./cmd/dynamodb	portable	linux,darwin	-	-	-	-	The DynamoDB driver of the item port: a DynamoDB table served on a UNIX socket

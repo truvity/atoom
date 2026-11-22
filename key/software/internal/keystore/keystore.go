@@ -4,9 +4,8 @@
 // A software key can be read by anyone who can read its volume. That is the accepted risk of the local
 // installation: the volume is the boundary, so the package adds no passphrase, no import and no export.
 //
-// Every key is P-384 except the one of the audit-log purpose, which is P-256 (ADR 0006, "Named exceptions": the
-// C2SP signed-note signature type 0x02 that generic witnesses verify; D-25), and the one of the RS256 purpose, which
-// is RSA-2048 with the public exponent 65537 (ADR 0006, "Named exceptions": the per-audience RS256 key).
+// The purposes are the host's: a purpose.Set that the host declared says each purpose's algorithm, and a key is P-256 for ES256, RSA-2048
+// with the public exponent 65537 for RS256 and P-384 for ES384 and ECDH-P384.
 package keystore
 
 import (
@@ -29,43 +28,25 @@ import (
 	"sync"
 	"syscall"
 	"time"
+
+	"github.com/truvity/atoom/key/purpose"
 )
 
 // The algorithms of the key-store port (keystore.proto).
 const (
-	ES384        = "ES384"     // ECDSA over P-384 with SHA-384 (RFC 7518, section 3.4)
-	ES256        = "ES256"     // ECDSA over P-256 with SHA-256 (RFC 7518, section 3.4); the audit-log purpose only
-	RS256        = "RS256"     // RSASSA-PKCS1-v1_5 with SHA-256 over an RSA-2048 key (RFC 7518, section 3.3); the RS256 purpose only
-	ECDHP384     = "ECDH-P384" // ECDH over P-384 (NIST SP 800-56A)
-	fileExt      = ".p8"       // a PKCS#8 DER private key (RFC 5208)
-	tempMark     = ".tmp-"     // the prefix of a key file that is being written
-	dirMode      = 0o700       // the state directory
-	fileMode     = 0o600       // a key file
-	modeMask     = fs.ModePerm | fs.ModeSetuid | fs.ModeSetgid | fs.ModeSticky
-	maxKeyFile   = 4096
-	digestLen    = 48 // SHA-384
-	digestLen256 = 32 // SHA-256
-	rsaBits      = 2048
-	rsaExponent  = 65537
+	ES384       = purpose.ES384    // ECDSA over P-384 with SHA-384 (RFC 7518, section 3.4)
+	ES256       = purpose.ES256    // ECDSA over P-256 with SHA-256 (RFC 7518, section 3.4)
+	RS256       = purpose.RS256    // RSASSA-PKCS1-v1_5 with SHA-256 over an RSA-2048 key (RFC 7518, section 3.3)
+	ECDHP384    = purpose.ECDHP384 // ECDH over P-384 (NIST SP 800-56A)
+	fileExt     = ".p8"            // a PKCS#8 DER private key (RFC 5208)
+	tempMark    = ".tmp-"          // the prefix of a key file that is being written
+	dirMode     = 0o700            // the state directory
+	fileMode    = 0o600            // a key file
+	modeMask    = fs.ModePerm | fs.ModeSetuid | fs.ModeSetgid | fs.ModeSticky
+	maxKeyFile  = 4096
+	rsaBits     = 2048
+	rsaExponent = 65537
 )
-
-// purposeAlgorithm maps the key purposes that a key store holds (docs/architecture/keys.yaml) to the algorithm
-// of their key. The key-agreement key is the wrapping purpose (slot 9d on a card); every other one signs.
-var purposeAlgorithm = map[string]string{
-	"wrapping":          ECDHP384,
-	"token-signing":     ES384,
-	"audit-log":         ES256,
-	"pin-release":       ES384,
-	"workload-issuer":   ES384,
-	"x509-intermediate": ES384,
-	"ssh-user":          ES384,
-	"ssh-host":          ES384,
-	"issuance-log":      ES384,
-	"release-signing":   ES384,
-	// The RS256 purpose (keys.yaml token-signing-rs256): an audience that needs RS256 has a key of its own, never the
-	// token key.
-	"token-signing-rs256": RS256,
-}
 
 // curveOf is the curve of the key of an algorithm.
 func curveOf(algorithm string) elliptic.Curve {
@@ -73,22 +54,6 @@ func curveOf(algorithm string) elliptic.Curve {
 		return elliptic.P256()
 	}
 	return elliptic.P384()
-}
-
-// AlgorithmFor returns the algorithm of the key of a purpose, and false when a key store holds no key for it.
-func AlgorithmFor(purpose string) (string, bool) {
-	a, ok := purposeAlgorithm[purpose]
-	return a, ok
-}
-
-// Purposes returns the purposes a key store holds, sorted.
-func Purposes() []string {
-	out := make([]string, 0, len(purposeAlgorithm))
-	for p := range purposeAlgorithm {
-		out = append(out, p)
-	}
-	slices.Sort(out)
-	return out
 }
 
 // ProblemsError is a state directory or a key file that the driver refuses. Each problem names a path and what is
@@ -107,15 +72,17 @@ var (
 
 // Store is the set of keys of one state directory. It is safe for concurrent use by one process.
 type Store struct {
-	dir  string
-	mu   sync.Mutex
-	keys map[string]crypto.Signer // an *ecdsa.PrivateKey or, for the RS256 purpose, an *rsa.PrivateKey
+	dir      string
+	purposes *purpose.Set
+	mu       sync.Mutex
+	keys     map[string]crypto.Signer // an *ecdsa.PrivateKey or, for an RS256 purpose, an *rsa.PrivateKey
 }
 
-// Check verifies the state directory and the key files in it, and returns the keys it read. It writes nothing.
-// The problems are paths with a reason; a directory or file that is not owned by this process's user, or that
-// is not mode 0700 (directory) or 0600 (file), is a problem.
-func Check(dir string) (map[string]crypto.Signer, []string) {
+// Check verifies the state directory and the key files in it against the host's purposes, and returns the keys it read. It writes
+// nothing. The problems are paths with a reason; a directory or file that is not owned by this process's user, or that
+// is not mode 0700 (directory) or 0600 (file), is a problem, and so is a key file of a purpose the host did not declare, or whose key is
+// not of the algorithm the host declared.
+func Check(dir string, purposes *purpose.Set) (map[string]crypto.Signer, []string) {
 	var problems []string
 	if p := checkDir(dir); p != "" {
 		return nil, []string{p}
@@ -127,7 +94,7 @@ func Check(dir string) (map[string]crypto.Signer, []string) {
 	keys := make(map[string]crypto.Signer)
 	for _, e := range entries {
 		path := filepath.Join(dir, e.Name())
-		purpose, isKey := strings.CutSuffix(e.Name(), fileExt)
+		name, isKey := strings.CutSuffix(e.Name(), fileExt)
 		switch {
 		case strings.HasPrefix(e.Name(), tempMark):
 			continue // a write that did not finish; Open removes it
@@ -135,17 +102,17 @@ func Check(dir string) (map[string]crypto.Signer, []string) {
 			problems = append(problems, path+": not a key file")
 			continue
 		}
-		if _, ok := AlgorithmFor(purpose); !ok {
-			problems = append(problems, path+": not the file of a key purpose")
+		decl, ok := purposes.Lookup(name)
+		if !ok {
+			problems = append(problems, path+": not the file of a declared purpose")
 			continue
 		}
-		alg, _ := AlgorithmFor(purpose)
-		k, p := readKey(path, alg)
+		k, p := readKey(path, decl.Algorithm)
 		if p != "" {
 			problems = append(problems, p)
 			continue
 		}
-		keys[purpose] = k
+		keys[name] = k
 	}
 	if len(problems) > 0 {
 		return nil, problems
@@ -155,7 +122,7 @@ func Check(dir string) (map[string]crypto.Signer, []string) {
 
 // Open creates the state directory when it is absent (its parent must exist), removes the leftovers of an
 // unfinished write, and loads the keys. It refuses a directory or a file that Check refuses.
-func Open(dir string) (*Store, error) {
+func Open(dir string, purposes *purpose.Set) (*Store, error) {
 	if _, err := os.Lstat(dir); errors.Is(err, fs.ErrNotExist) {
 		if err := os.Mkdir(dir, dirMode); err != nil {
 			return nil, fmt.Errorf("keystore: create %s: %w", dir, err)
@@ -164,7 +131,7 @@ func Open(dir string) (*Store, error) {
 			return nil, fmt.Errorf("keystore: chmod %s: %w", dir, err)
 		}
 	}
-	keys, problems := Check(dir)
+	keys, problems := Check(dir, purposes)
 	if len(problems) > 0 {
 		return nil, &ProblemsError{Problems: problems}
 	}
@@ -175,7 +142,7 @@ func Open(dir string) (*Store, error) {
 			}
 		}
 	}
-	return &Store{dir: dir, keys: keys}, nil
+	return &Store{dir: dir, purposes: purposes, keys: keys}, nil
 }
 
 // Present returns the purposes that have a key, sorted.
@@ -192,46 +159,46 @@ func (s *Store) Present() []string {
 
 // Ensure returns the public key of the purpose, SPKI in DER, and makes the key when it is absent. The algorithm
 // must be the one of the purpose; an existing key is never replaced.
-func (s *Store) Ensure(purpose, algorithm string) (spki []byte, created bool, err error) {
-	want, ok := AlgorithmFor(purpose)
-	if !ok || algorithm != want {
+func (s *Store) Ensure(name, algorithm string) (spki []byte, created bool, err error) {
+	decl, ok := s.purposes.Lookup(name)
+	if !ok || algorithm != decl.Algorithm {
 		return nil, false, ErrAlgorithm
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if k, ok := s.keys[purpose]; ok {
+	if k, ok := s.keys[name]; ok {
 		spki, err = marshalPublic(k)
 		return spki, false, err
 	}
-	k, err := generate(want)
+	k, err := generate(decl.Algorithm)
 	if err != nil {
 		return nil, false, fmt.Errorf("keystore: generate: %w", err)
 	}
-	if err := s.write(purpose, k); err != nil {
+	if err := s.write(name, k); err != nil {
 		return nil, false, err
 	}
-	s.keys[purpose] = k
+	s.keys[name] = k
 	spki, err = marshalPublic(k)
 	return spki, true, err
 }
 
 // CreatedAt is when the key of the purpose was made: the time of its file, which is written once and never replaced.
-func (s *Store) CreatedAt(purpose string) (time.Time, error) {
+func (s *Store) CreatedAt(name string) (time.Time, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if _, ok := s.keys[purpose]; !ok {
+	if _, ok := s.keys[name]; !ok {
 		return time.Time{}, ErrAbsent
 	}
-	fi, err := os.Stat(filepath.Join(s.dir, purpose+fileExt))
+	fi, err := os.Stat(filepath.Join(s.dir, name+fileExt))
 	if err != nil {
-		return time.Time{}, fmt.Errorf("keystore: stat %s: %w", purpose, err)
+		return time.Time{}, fmt.Errorf("keystore: stat %s: %w", name, err)
 	}
 	return fi.ModTime(), nil
 }
 
 // write puts the key in a temporary file made with O_EXCL, syncs it, links it to its name (which fails when the
 // name is taken, so a key is never replaced), and syncs the directory.
-func (s *Store) write(purpose string, k crypto.Signer) error {
+func (s *Store) write(name string, k crypto.Signer) error {
 	der, err := x509.MarshalPKCS8PrivateKey(k)
 	if err != nil {
 		return fmt.Errorf("keystore: marshal: %w", err)
@@ -262,7 +229,7 @@ func (s *Store) write(purpose string, k crypto.Signer) error {
 	if err := f.Close(); err != nil {
 		return fmt.Errorf("keystore: close %s: %w", tmp, err)
 	}
-	final := filepath.Join(s.dir, purpose+fileExt)
+	final := filepath.Join(s.dir, name+fileExt)
 	if err := os.Link(tmp, final); err != nil {
 		return fmt.Errorf("keystore: place %s: %w", final, err)
 	}
@@ -278,8 +245,8 @@ func (s *Store) write(purpose string, k crypto.Signer) error {
 }
 
 // PublicKey returns the public key of the purpose, SPKI in DER, or ErrAbsent.
-func (s *Store) PublicKey(purpose string) ([]byte, error) {
-	k, err := s.get(purpose)
+func (s *Store) PublicKey(name string) ([]byte, error) {
+	k, err := s.get(name)
 	if err != nil {
 		return nil, err
 	}
@@ -288,19 +255,16 @@ func (s *Store) PublicKey(purpose string) ([]byte, error) {
 
 // Sign signs a digest with the ES384 key of the purpose (a SHA-384 digest, 48 octets) or its ES256 key (a SHA-256
 // digest, 32 octets), and returns the ASN.1 DER signature (RFC 7518, section 3.4 shows the JOSE form; the DER form
-// is what the port carries). The RS256 key signs a SHA-256 digest and returns the RSASSA-PKCS1-v1_5 signature (RFC
+// is what the port carries, and key/signature converts it). The RS256 key signs a SHA-256 digest and returns the RSASSA-PKCS1-v1_5 signature (RFC
 // 8017, section 8.2.1), 256 octets, which has no DER form. The nonce of an ECDSA signature comes from crypto/rand.
-func (s *Store) Sign(purpose string, digest []byte) ([]byte, error) {
-	k, err := s.get(purpose)
+func (s *Store) Sign(name string, digest []byte) ([]byte, error) {
+	k, err := s.get(name)
 	if err != nil {
 		return nil, err
 	}
-	want := digestLen
-	switch a, _ := AlgorithmFor(purpose); a {
-	case ES384:
-	case ES256, RS256:
-		want = digestLen256
-	default:
+	decl, _ := s.purposes.Lookup(name)
+	want := purpose.DigestLen(decl.Algorithm)
+	if want == 0 {
 		return nil, ErrAlgorithm
 	}
 	if len(digest) != want {
@@ -319,12 +283,12 @@ func (s *Store) Sign(purpose string, digest []byte) ([]byte, error) {
 
 // Ecdh returns the raw shared secret of the ECDH-P384 key of the purpose and a peer public key, an uncompressed
 // SEC1 point (SEC 1, section 2.3.3). crypto/ecdh checks that the point is on the curve.
-func (s *Store) Ecdh(purpose string, peer []byte) ([]byte, error) {
-	k, err := s.get(purpose)
+func (s *Store) Ecdh(name string, peer []byte) ([]byte, error) {
+	k, err := s.get(name)
 	if err != nil {
 		return nil, err
 	}
-	if a, _ := AlgorithmFor(purpose); a != ECDHP384 {
+	if decl, _ := s.purposes.Lookup(name); decl.Algorithm != ECDHP384 {
 		return nil, ErrAlgorithm
 	}
 	pub, err := ecdh.P384().NewPublicKey(peer)
@@ -346,10 +310,10 @@ func (s *Store) Ecdh(purpose string, peer []byte) ([]byte, error) {
 	return secret, nil
 }
 
-func (s *Store) get(purpose string) (crypto.Signer, error) {
+func (s *Store) get(name string) (crypto.Signer, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	k, ok := s.keys[purpose]
+	k, ok := s.keys[name]
 	if !ok {
 		return nil, ErrAbsent
 	}
@@ -386,9 +350,9 @@ func checkDir(dir string) string {
 }
 
 // readKey reads and parses one key file, after it checks the file. It returns the problem, or "". A key of
-// another kind than the purpose's is refused, never replaced: an audit-log key that an older driver made as a
-// P-384 key must be removed by the person, because a new key changes the verifier key of the log. The RS256 key must
-// be RSA-2048 with the exponent 65537, the only key the signer and the key set know.
+// another kind than the purpose's is refused, never replaced: a key that an earlier declaration made as a
+// P-384 key for a purpose that is now ES256 must be removed by the person, because a new key changes the verifier key of everything it
+// signed. The RS256 key must be RSA-2048 with the exponent 65537, the only RSA key the port knows.
 func readKey(path, algorithm string) (crypto.Signer, string) {
 	f, err := os.OpenFile(path, os.O_RDONLY|syscall.O_NOFOLLOW, 0) //nolint:gosec // a path in the state directory
 	if err != nil {

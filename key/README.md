@@ -4,8 +4,10 @@ The key port of atoom: a service that holds private keys and signs, agrees and a
 
 | | |
 | --- | --- |
-| Go module | `github.com/truvity/atoom/key` (the contract and its stubs; it requires the ConnectRPC and Protobuf runtimes and nothing else) |
+| Go module | `github.com/truvity/atoom/key` (the contract, its stubs and two small packages: `purpose`, the host's declaration of purposes, and `signature`, the DER to raw conversion of a JWS; it requires the ConnectRPC and Protobuf runtimes and nothing else) |
 | Contract | [proto/atoom/key/v1alpha1/keystore.proto](proto/atoom/key/v1alpha1/keystore.proto), [unlock.proto](proto/atoom/key/v1alpha1/unlock.proto) |
+| Purposes | any purpose a host declares: a name, an algorithm (`ES256`, `ES384`, `RS256`, `ECDH-P384`) and the operations allowed, as `purpose.Declaration` or the JSON file of a thin main's `--purposes`; the contract holds no list ([the declaration](docs/key-port.md#the-declaration-of-purposes)) |
+| Signatures | `Sign` returns ASN.1 DER; `signature.DERToRaw` makes the raw `r||s` of a JWS ([DER and raw](docs/algorithms.md#der-and-raw-signatures)) |
 | Stubs | `github.com/truvity/atoom/key/gen/atoom/key/v1alpha1` and `.../keyv1alpha1connect` (committed; `just gen` makes them) |
 | Documentation | [docs/key-port.md](docs/key-port.md) (the key port: the rules of the contract), [docs/key-stores.md](docs/key-stores.md), [docs/algorithms.md](docs/algorithms.md), [docs/research](docs/research) |
 | Where it came from | [provenance](../docs/provenance.md#key) |
@@ -17,14 +19,14 @@ Each is its own Go module with its own README and documentation; a consumer that
 | Directory | What it is | Needs |
 | --- | --- | --- |
 | [conformance](conformance/README.md) | the conformance kit: the cases every key driver must pass, through its ConnectRPC endpoint; the command `key-conformance --socket` | the port |
-| [software](software/README.md) | driver: P-384 keys held in files; library and a thin main | the port, the kit (tests only) |
+| [software](software/README.md) | driver: keys held in files (P-256, P-384, RSA-2048); library and a thin main | the port, the kit (tests only) |
 | [yubikeypiv](yubikeypiv/README.md) | driver: the keys of a YubiKey 5 over PIV; library and a thin main; the C code is behind the build tag `atoom_card` | the port, the kit (tests only), `slotplan`, `pinrelease` |
 | [awskms](awskms/README.md) | driver: asymmetric keys in AWS KMS, found by alias; library (links into a Lambda function) and a thin main; no attestation | the port, the kit (tests only), the AWS SDK |
-| [slotplan](slotplan/README.md) | the check of a card slot map: which slot each purpose lives in; its `Default` is a reference map that holds the purposes of sluis | nothing |
+| [slotplan](slotplan/README.md) | the check of a card slot map: which slot each purpose lives in, which the card driver uses to place the purposes of its host; its `Default` is a reference map that holds the purposes of sluis | nothing |
 | [pinrelease](pinrelease/README.md) | the wire format of the PIN release between boards: signed texts and a sealed PIN | nothing |
 
 ## A driver of your own
 
-Serve `keyv1alpha1connect.KeyStoreServiceHandler` (Go) or the generated service trait (Rust), say what you offer in `Capabilities`, and run `key-conformance --socket PATH` against your endpoint. You need nothing from this repository but the contract and the kit. See [docs/key-port.md](docs/key-port.md).
+Serve `keyv1alpha1connect.KeyStoreServiceHandler` (Go) or the generated service trait (Rust), take your purposes from your host, say what you offer in `Capabilities` (the purposes included), start yourself with the declaration of the kit (`key-conformance --print-declaration`) and run `key-conformance --socket PATH` against your endpoint. You need nothing from this repository but the contract and the kit. See [docs/key-port.md](docs/key-port.md).
 
 Status: v1alpha1. A field may change until the contract becomes v1beta1; a breaking change raises the minor version of the repository.

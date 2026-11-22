@@ -7,7 +7,8 @@
 // not failed for it, and it is not passed for it either. A run in which no case ran fails: a green result that tested nothing is not
 // green.
 //
-// The cases use the reference purposes of the contract: token-signing (ES384), wrapping (ECDH-P384), audit-log (ES256),
-// token-signing-rs256 (RS256) and pin-release. They make the keys of the purposes they use when those are absent, so a run belongs on
-// a state of its own, not on an installation's.
+// The kit declares its own purposes (Declaration): conformance-es384, conformance-es256, conformance-rs256, conformance-agree,
+// conformance-made-only and the PIN release key's name pin-release. The host starts the driver under test with that declaration, and a
+// case fails when the driver does not serve the purposes it needs. No name in it is one that a driver ever held in a list. The cases make
+// the keys of the purposes they use when those are absent, so a run belongs on a state of its own, not on an installation's.
 package conformance

@@ -1,11 +1,14 @@
-// Command software is the thin main of the software key driver: it serves the key port over P-384 keys held in files, on a UNIX
+// Command software is the thin main of the software key driver: it serves the key port over keys held in files, on a UNIX
 // socket, and does nothing else. The library (github.com/truvity/atoom/key/software) is the driver; a larger system that needs names for
 // its callers or a command line of its own wraps the library instead (sluis does, until its host is deleted).
 //
-//	software serve --socket PATH --state-dir DIR [--environment development|staging|production] [--refuse-production]
+//	software serve --socket PATH --state-dir DIR --purposes FILE [--environment development|staging|production] [--refuse-production]
 //	               [--allow-uid UID]... [--allow-any-uid] [--socket-gid GID] [--socket-mode MODE]
-//	software check --state-dir DIR
+//	software check --state-dir DIR --purposes FILE
 //	software version  (also --version)
+//
+// --purposes names the JSON file in which the host declares its purposes: a name, an algorithm (ES384, ES256, RS256 or ECDH-P384) and
+// the operations (sign or agree) of each (github.com/truvity/atoom/key/purpose). The driver holds a key for those names and no other.
 //
 // The socket is guarded (github.com/truvity/atoom/socket, docs/socket-guard.md): mode 0600 and the uid of the process by default, so
 // that no other process may use the keys; --allow-uid names the callers, and a caller outside the set is refused with the reason
@@ -24,6 +27,7 @@ import (
 	"runtime/debug"
 	"syscall"
 
+	"github.com/truvity/atoom/key/purpose"
 	"github.com/truvity/atoom/key/software"
 	atoomsocket "github.com/truvity/atoom/socket"
 )
@@ -73,11 +77,17 @@ func serve(args []string, stderr io.Writer) int {
 	state := fs.String("state-dir", "", "the directory of the key files, mode 0700 (required)")
 	env := fs.String("environment", "", "development, staging or production; staging logs a warning")
 	refuse := fs.Bool("refuse-production", false, "refuse the environment production (the floor of a system that wants it)")
+	purposes := fs.String("purposes", "", "the JSON file of the purposes the host declares (required)")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
-	if *socket == "" || *state == "" || fs.NArg() != 0 {
-		_, _ = fmt.Fprintln(stderr, "software serve: --socket and --state-dir are required")
+	if *socket == "" || *state == "" || *purposes == "" || fs.NArg() != 0 {
+		_, _ = fmt.Fprintln(stderr, "software serve: --socket, --state-dir and --purposes are required")
+		return 2
+	}
+	decls, err := readPurposes(*purposes)
+	if err != nil {
+		_, _ = fmt.Fprintln(stderr, "software serve:", err)
 		return 2
 	}
 	cfg, err := guard.Config(*socket)
@@ -90,7 +100,7 @@ func serve(args []string, stderr io.Writer) int {
 	host := software.Host{Serve: func(ctx context.Context, path string, h http.Handler) error {
 		return atoomsocket.Serve(ctx, cfg, path, h)
 	}}
-	opts := software.Options{StateDir: *state, Environment: *env, RefuseProduction: *refuse}
+	opts := software.Options{StateDir: *state, Environment: *env, RefuseProduction: *refuse, Purposes: decls}
 	if err := software.Run(ctx, opts, host); err != nil {
 		_, _ = fmt.Fprintln(stderr, "software:", err)
 		if errors.Is(err, software.ErrEnvironment) {
@@ -105,16 +115,37 @@ func check(args []string, stderr io.Writer) int {
 	fs := flag.NewFlagSet("software check", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	state := fs.String("state-dir", "", "the directory of the key files (required)")
+	purposes := fs.String("purposes", "", "the JSON file of the purposes the host declares (required)")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
-	if *state == "" || fs.NArg() != 0 {
-		_, _ = fmt.Fprintln(stderr, "software check: --state-dir is required")
+	if *state == "" || *purposes == "" || fs.NArg() != 0 {
+		_, _ = fmt.Fprintln(stderr, "software check: --state-dir and --purposes are required")
 		return 2
 	}
-	if err := software.Check(*state); err != nil {
+	decls, err := readPurposes(*purposes)
+	if err != nil {
+		_, _ = fmt.Fprintln(stderr, "software check:", err)
+		return 2
+	}
+	if err := software.Check(*state, decls); err != nil {
 		_, _ = fmt.Fprintln(stderr, "software:", err)
 		return 1
 	}
 	return 0
+}
+
+// readPurposes reads the declaration file and checks it, and returns the declarations. A file that cannot be read or is not a
+// declaration is a refusal of the command line (status 2), and the message names a path and a word, never a value of the file.
+func readPurposes(path string) ([]purpose.Declaration, error) {
+	f, err := os.Open(path) //nolint:gosec // the path is the operator's flag
+	if err != nil {
+		return nil, fmt.Errorf("--purposes: %s cannot be read", path)
+	}
+	defer func() { _ = f.Close() }()
+	set, err := purpose.Parse(f)
+	if err != nil {
+		return nil, fmt.Errorf("--purposes %s: %w", path, err)
+	}
+	return set.List(), nil
 }

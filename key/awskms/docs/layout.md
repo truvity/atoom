@@ -6,22 +6,22 @@ The driver ([README](../README.md)) is a thin mapping of the [key contract](../.
 
 | Contract | KMS | Notes |
 | --- | --- | --- |
-| a purpose | one KMS key, found by `alias/<prefix>/<purpose>` or by the identifier in `Options.KeyIDs` | the purposes are the closed list of the other drivers, without `pin-release` (a KMS key has no PIN); a list that a host declares is planned |
+| a purpose | one KMS key, found by `alias/<prefix>/<purpose>` or by the identifier in `Options.KeyIDs` | the purposes are the host's: `Options.Purposes` (or `--purposes FILE`) declares each name with its algorithm and operations, and no other name is served. A KMS key has no PIN, so a purpose named `pin-release` is only a name here and the PIN release calls answer `unimplemented` |
 | `Ensure` | `DescribeKey` on the alias; when absent and `Options.CreateKeys` is on: `CreateKey` (with tags), `CreateAlias`; then `GetPublicKey` | `created` is true only for the call that made the key; `created_at` is the key's `CreationDate` |
 | `Sign` | `Sign` with `MessageType: DIGEST` | the digest length is checked first (48 octets for `ES384`, 32 for `ES256` and `RS256`) |
 | `PublicKey` | `GetPublicKey` | SubjectPublicKeyInfo in DER, as the contract says; kept after the first read |
 | `Ecdh` | `DeriveSharedSecret` with `ECDH` on a `KEY_AGREEMENT` key | the raw secret; the peer's SEC1 point is checked here and sent as SubjectPublicKeyInfo |
-| `Capabilities` | none | `store: aws-kms`, the four algorithms, `attests: false` |
+| `Capabilities` | none | `store: aws-kms`, the four algorithms, the declared purposes, `attests: false` |
 | `Attest`, `VerifyAttestation`, `BeginPinRelease`, `SealPin`, `FinishPinRelease` | none | `unimplemented`; not declared in `Capabilities` |
 
 | Algorithm | KMS key spec | Key usage | Signing algorithm | Purposes |
 | --- | --- | --- | --- | --- |
-| `ES384` | `ECC_NIST_P384` | `SIGN_VERIFY` | `ECDSA_SHA_384` | every signing purpose but two |
-| `ES256` | `ECC_NIST_P256` | `SIGN_VERIFY` | `ECDSA_SHA_256` | `audit-log` |
-| `RS256` | `RSA_2048` | `SIGN_VERIFY` | `RSASSA_PKCS1_V1_5_SHA_256` | `token-signing-rs256` |
-| `ECDH-P384` | `ECC_NIST_P384` | `KEY_AGREEMENT` | (none) | `wrapping` |
+| `ES384` | `ECC_NIST_P384` | `SIGN_VERIFY` | `ECDSA_SHA_384` | any purpose declared `ES384` |
+| `ES256` | `ECC_NIST_P256` | `SIGN_VERIFY` | `ECDSA_SHA_256` | any purpose declared `ES256` |
+| `RS256` | `RSA_2048` | `SIGN_VERIFY` | `RSASSA_PKCS1_V1_5_SHA_256` | any purpose declared `RS256` |
+| `ECDH-P384` | `ECC_NIST_P384` | `KEY_AGREEMENT` | (none) | any purpose declared `ECDH-P384` |
 
-An ECDSA signature from KMS is ASN.1 DER and an RSA signature is the octet string of RFC 8017, which is what the contract says; the driver passes them through.
+An ECDSA signature from KMS is ASN.1 DER and an RSA signature is the octet string of RFC 8017, which is what the contract says; the driver passes them through (a JWS wants the raw `r||s` of an ECDSA signature: [DER and raw](../../docs/algorithms.md#der-and-raw-signatures)).
 
 ## Finding and making a key
 
@@ -44,7 +44,7 @@ An ECDSA signature from KMS is ASN.1 DER and an RSA signature is the octet strin
 
 ## The layout a host such as sluis uses
 
-The driver does not fix how many keys an account holds. A host decides that. The driver holds one key for each purpose of its list. sluis (an identity product, the first consumer; [its decision on keys](https://github.com/truvity/sluis/blob/main/docs/decisions/0006-keys-and-sealing.md)) asks for **one symmetric key and five asymmetric keys** in a boundary: four P-384 keys (token signing, the X.509 intermediate, the SSH user CA, the SSH host CA) and the audit log's P-256 key. Each further trust domain adds a P-384 key and each further audit writer a P-256 key. This driver serves the **five asymmetric keys** as the purposes `token-signing`, `x509-intermediate`, `ssh-user`, `ssh-host` and `audit-log`. The backup recovery key (a P-384 key-agreement key in an anchor account) is the purpose `wrapping`.
+The driver does not fix how many keys an account holds. A host decides that. The driver holds one key for each purpose that its host declares. sluis (an identity product, the first consumer; [its decision on keys](https://github.com/truvity/sluis/blob/main/docs/decisions/0006-keys-and-sealing.md)) asks for **one symmetric key and five asymmetric keys** in a boundary: four P-384 keys (token signing, the X.509 intermediate, the SSH user CA, the SSH host CA) and the audit log's P-256 key. Each further trust domain adds a P-384 key and each further audit writer a P-256 key. This driver serves the **five asymmetric keys** as the purposes `token-signing`, `x509-intermediate`, `ssh-user`, `ssh-host` and `audit-log`. The backup recovery key (a P-384 key-agreement key in an anchor account) is the purpose `wrapping`.
 
 A host that holds keys this way wants these properties of them. The driver leaves each to the deployment, because they are policy and not mapping:
 

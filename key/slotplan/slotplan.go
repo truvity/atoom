@@ -2,8 +2,9 @@
 // signed key plan lives in. Every program that takes a slot map asks it the same question, so that they refuse the same maps:
 // sluis's key service when it starts and in its check command, and the commands that read a configuration before it is used.
 //
-// Default is the reference map: the purposes of sluis, which the card driver serves (docs/slot-plan.md). A consumer with other
-// purposes brings its own table; the mechanism (Resolve, Check, CheckCard) is the part that is not sluis's.
+// Default is the reference map: the purposes of sluis, the first host (docs/slot-plan.md). A host with other purposes declares them to the
+// card driver (key/purpose), with the slot of each named or taken from here; the mechanism (Resolve, Check, CheckCard) is the part that
+// is not sluis's, and the card driver builds its slot plan with Resolve.
 //
 // The map is the default one (version 2) with the installation's overrides: a purpose names its slot in the KeyPlan, or
 // takes the default. A purpose the KeyPlan does not list is not enabled, needs no slot and gets no key (REQ-PKI-042).
@@ -46,10 +47,10 @@ var Default = map[string]string{
 	"audit-log-second":    "8f",
 }
 
-// CardServed is the set of purposes of Default that the card driver has a row for, which is the whole of what a card serves:
-// the ten rows of version 1. The purposes of the slots 89 to 8f have their slot in the map and no row in the driver yet, so
-// CheckCard refuses a plan that enables one on a card until the driver serves it (separate work of the boards milestone).
-// The driver's own table is held to this set by its tests.
+// CardServed is the set of purposes of Default whose key a card holds: every one whose algorithm is ES384, ES256, RS256 or ECDH-P384,
+// which is the whole of what a YubiKey 5 with the firmware floor of the driver generates. The card driver serves any purpose that a host
+// declares with such an algorithm and a slot (key/purpose), so this is no limit of the driver: it says which rows of the reference
+// map a card can hold, and the three that it cannot are the ones with PS256 (8b) and EdDSA (8d, 8e), for which CheckCard refuses a plan.
 var CardServed = map[string]bool{
 	"x509-intermediate":   true,
 	"token-signing":       true,
@@ -61,19 +62,28 @@ var CardServed = map[string]bool{
 	"workload-issuer":     true,
 	"pin-release":         true,
 	"token-signing-rs256": true,
+	"issuance-log":        true,
+	"enrolment":           true,
+	"token-signing-es256": true,
+	"audit-log-second":    true,
 }
+
+// cardless are the algorithms of a key that lives in a slot and that a card driver does not hold: RSA-PSS and Ed25519. A plan that
+// names one for a card is refused by CheckCard. A YubiKey 5 with firmware 5.7 or newer does generate Ed25519 (docs/algorithms.md), but
+// the port has no algorithm for it yet; both join onCard and the port together.
+var cardless = map[string]bool{"PS256": true, "EdDSA": true}
 
 // Purpose is one entry of a KeyPlan: a purpose, the algorithm of its key and the slot it names ("" for the default).
 type Purpose struct {
 	Name, Algorithm, Slot string
 }
 
-// onCard says whether the algorithm is one of an asymmetric key that lives in a card slot. A data key purpose names
+// onCard says whether the algorithm is one of an asymmetric key that lives in a card slot, and the card holds. A data key purpose names
 // AES-256-GCM and has no slot. RS256 is listed: a purpose that is left out here skips every slot check, so two purposes
 // could be planned in one slot and a card would be given a plan it silently does not follow. Listed, it has the slot 88 by default
-// and a slot of its own like the others. PS256 and EdDSA are not listed: no key@ holds a key for them yet (its plan check refuses
-// both), and the keys of NATS and of the cloud federations are Ed25519 and are not card keys at all; they join this list with the
-// card driver's rows for the slots 8b, 8d and 8e.
+// and a slot of its own like the others. PS256 and EdDSA are not listed: the port has no algorithm for them yet, and the keys of NATS
+// and of the cloud federations are Ed25519 and are not card keys at all; they join this list with the port and the card driver's rows
+// for the slots 8b, 8d and 8e.
 func onCard(algorithm string) bool {
 	switch algorithm {
 	case "ES384", "ES256", "RS256", "ECDH-P384", "ECDH-P-384":
@@ -144,23 +154,15 @@ func Check(purposes []Purpose) error {
 	return err
 }
 
-// CheckCard is the check of a plan against the card driver, which serves the rows of CardServed and nothing else: it keeps no
-// override of a slot and has no key for a purpose without a row. A plan that names another slot for a purpose it serves, or
-// lists a card-key purpose it does not serve (one of the slots 89 to 8f, or a purpose the map does not hold), is refused, so
-// that the plan and the card never say different things. The refusal names the entry and the word, never a key. Call Check first; this adds the card's own limit.
+// CheckCard is the check of a plan against the card driver. The driver serves any purpose that a host declares with an algorithm that a
+// card holds, in any slot of a board that Check accepts, so what is left of its limit is the algorithm: a plan that enables a purpose
+// whose algorithm a card does not hold (PS256, EdDSA) is refused. The refusal names the entry and the word, never a key. Call Check
+// first; this adds the card's own limit.
 func CheckCard(purposes []Purpose) error {
 	var problems []string
 	for i, p := range purposes {
-		if !onCard(p.Algorithm) {
-			continue
-		}
-		where := fmt.Sprintf("purposes[%d]", i)
-		def := Default[p.Name]
-		switch {
-		case !CardServed[p.Name]:
-			problems = append(problems, where+": the card driver serves no slot for this purpose")
-		case p.Slot != "" && p.Slot != def:
-			problems = append(problems, where+".slot: differs from the slot of the card driver")
+		if cardless[p.Algorithm] {
+			problems = append(problems, fmt.Sprintf("purposes[%d].algorithm: the card driver holds no key of it", i))
 		}
 	}
 	if len(problems) > 0 {

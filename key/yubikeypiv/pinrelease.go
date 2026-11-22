@@ -60,7 +60,7 @@ type oneTime struct {
 // Attest returns the attestation of the key of a purpose, for the slot map of the KeyPlan.
 func (s *Service) Attest(ctx context.Context, req *connect.Request[keyv1alpha1.AttestRequest]) (*connect.Response[keyv1alpha1.AttestResponse], error) {
 	purpose := req.Msg.GetPurpose()
-	if _, ok := planFor(purpose); !ok {
+	if _, ok := s.planFor(purpose); !ok {
 		return nil, s.refuse(ctx, "Attest", connect.CodeInvalidArgument, reasonPurpose, "purpose")
 	}
 	s.mu.Lock()

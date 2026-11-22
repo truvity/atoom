@@ -95,7 +95,7 @@ func TestTheRealVerificationOfAttestations(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			c := cardtest.New()
 			tt.setup(c)
-			s, err := yubikeypiv.New(yubikeypiv.Options{Environment: yubikeypiv.Production, Serial: c.SerialNo, Open: realOpener(t, c)})
+			s, err := yubikeypiv.New(yubikeypiv.Options{Purposes: refPurposes(), Environment: yubikeypiv.Production, Serial: c.SerialNo, Open: realOpener(t, c)})
 			if tt.want == "" {
 				if err != nil {
 					t.Fatalf("refused: %v", err)

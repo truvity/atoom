@@ -26,6 +26,8 @@ import (
 	"github.com/truvity/atoom/key/conformance"
 	keyv1alpha1 "github.com/truvity/atoom/key/gen/atoom/key/v1alpha1"
 	"github.com/truvity/atoom/key/gen/atoom/key/v1alpha1/keyv1alpha1connect"
+	"github.com/truvity/atoom/key/purpose"
+	"github.com/truvity/atoom/key/signature"
 	"github.com/truvity/atoom/key/yubikeypiv"
 	"github.com/truvity/atoom/key/yubikeypiv/internal/card"
 	"github.com/truvity/atoom/key/yubikeypiv/internal/card/cardtest"
@@ -84,7 +86,7 @@ func (h *inProcess) host() yubikeypiv.Host {
 // startWith serves the driver over a fake card. allowAdmin decides who is an administrator.
 func startWith(t *testing.T, c *cardtest.Card, environment string, allowAdmin func(uint32) bool) running {
 	t.Helper()
-	return startOpts(t, c, environment, allowAdmin, yubikeypiv.Options{Node: "node-a"})
+	return startOpts(t, c, environment, allowAdmin, yubikeypiv.Options{Purposes: refPurposes(), Node: "node-a"})
 }
 
 // startOpts is startWith with the options of the PIN release: the node, the key plan check and the state directory.
@@ -225,13 +227,14 @@ func digest384() []byte { d := sha512.Sum384([]byte("x")); return d[:] }
 // The kit of the port passes against the driver over the fake card once it is unlocked: every case runs, the one that needs a store
 // that attests included.
 func TestTheKitPassesOnTheFakeCardOnceUnlocked(t *testing.T) {
-	r := start(t, yubikeypiv.Development)
+	c := cardtest.New()
+	r := startOpts(t, c, yubikeypiv.Development, self(), yubikeypiv.Options{Purposes: conformance.Declaration(), Node: "node-a"})
 	r.unlock(t, "123456")
 	var out bytes.Buffer
 	if err := conformance.Run(context.Background(), r.key, &out); err != nil {
 		t.Fatalf("the kit failed: %v\n%s", err, out.String())
 	}
-	if !strings.Contains(out.String(), "11 cases, 11 ok, 0 failed, 0 skipped") {
+	if !strings.Contains(out.String(), "12 cases, 12 ok, 0 failed, 0 skipped") {
 		t.Fatalf("report:\n%s", out.String())
 	}
 }
@@ -460,11 +463,30 @@ func TestTheAuditLogKeyIsP256AndSignsSHA256(t *testing.T) {
 	wantRefused(t, err, connect.CodeInvalidArgument, "algorithm")
 }
 
-func TestAPurposeWithNoSlotIsRefused(t *testing.T) {
+// A purpose with no slot, named or default, is refused when the driver starts, before it opens a card; issuance-log, which the card driver
+// had no row for, now takes the slot of the reference map (89) like any purpose a host declares.
+func TestAPurposeWithNoSlotIsRefusedAtTheStart(t *testing.T) {
+	c := cardtest.New()
+	opened := 0
+	open := func(sel card.Selector) (card.Card, error) { opened++; return c.Opener()(sel) }
+	_, err := yubikeypiv.New(yubikeypiv.Options{Environment: yubikeypiv.Development, Serial: c.SerialNo, Open: open, Purposes: []purpose.Declaration{
+		{Name: "second-intermediate", Algorithm: purpose.ES384, Operations: []purpose.Operation{purpose.Sign}},
+	}})
+	var p *yubikeypiv.Problems
+	if !errors.As(err, &p) || !strings.Contains(err.Error(), "no slot") {
+		t.Fatalf("err = %v", err)
+	}
+	if opened != 0 {
+		t.Fatalf("the card was opened %d times before the declaration was refused", opened)
+	}
+}
+
+func TestIssuanceLogIsServedInItsSlot(t *testing.T) {
 	r := start(t, yubikeypiv.Development)
-	// issuance-log takes a spare slot that the installation's KeyPlan names; the default map has none for it.
-	_, err := r.key.Ensure(context.Background(), connect.NewRequest(&keyv1alpha1.EnsureRequest{Purpose: "issuance-log", Algorithm: "ES384"}))
-	wantRefused(t, err, connect.CodeInvalidArgument, "purpose")
+	r.unlock(t, "123456")
+	if res := ensure(t, r.key, "issuance-log", "ES384"); len(res.GetSpkiDer()) == 0 {
+		t.Fatal("no public key")
+	}
 }
 
 func TestOnlyAnAdministratorReachesTheAdminSocket(t *testing.T) {
@@ -536,7 +558,7 @@ func TestDriverRefusesToStart(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			c := cardtest.New()
 			tt.setup(c)
-			_, err := yubikeypiv.New(yubikeypiv.Options{Environment: yubikeypiv.Production, Serial: c.SerialNo, Open: c.Opener()})
+			_, err := yubikeypiv.New(yubikeypiv.Options{Purposes: refPurposes(), Environment: yubikeypiv.Production, Serial: c.SerialNo, Open: c.Opener()})
 			if tt.want == "" {
 				if err != nil {
 					t.Fatalf("refused: %v", err)
@@ -556,7 +578,7 @@ func TestDriverRefusesToStart(t *testing.T) {
 
 func TestADifferentSerialIsRefused(t *testing.T) {
 	c := cardtest.New()
-	if _, err := yubikeypiv.New(yubikeypiv.Options{Environment: yubikeypiv.Development, Serial: c.SerialNo + 1, Open: c.Opener()}); err == nil {
+	if _, err := yubikeypiv.New(yubikeypiv.Options{Purposes: refPurposes(), Environment: yubikeypiv.Development, Serial: c.SerialNo + 1, Open: c.Opener()}); err == nil {
 		t.Fatal("a card with another serial was opened")
 	}
 }
@@ -572,7 +594,7 @@ func TestEnvironmentHasNoDefault(t *testing.T) {
 
 func TestCheckVerifiesAndWritesNothing(t *testing.T) {
 	c := cardtest.New()
-	if err := yubikeypiv.Check(yubikeypiv.Options{Environment: yubikeypiv.Staging, Serial: c.SerialNo, Open: c.Opener()}); err != nil {
+	if err := yubikeypiv.Check(yubikeypiv.Options{Purposes: refPurposes(), Environment: yubikeypiv.Staging, Serial: c.SerialNo, Open: c.Opener()}); err != nil {
 		t.Fatalf("Check: %v", err)
 	}
 	if !c.Closed() {
@@ -583,7 +605,7 @@ func TestCheckVerifiesAndWritesNothing(t *testing.T) {
 	}
 	c = cardtest.New()
 	c.Firmware = card.Version{Major: 5, Minor: 1}
-	if err := yubikeypiv.Check(yubikeypiv.Options{Environment: yubikeypiv.Staging, Serial: c.SerialNo, Open: c.Opener()}); !errors.As(err, new(*yubikeypiv.Problems)) {
+	if err := yubikeypiv.Check(yubikeypiv.Options{Purposes: refPurposes(), Environment: yubikeypiv.Staging, Serial: c.SerialNo, Open: c.Opener()}); !errors.As(err, new(*yubikeypiv.Problems)) {
 		t.Fatalf("Check on old firmware: %v, want a refusal (Problems)", err)
 	}
 }
@@ -618,17 +640,17 @@ func parseECDSA(spki []byte) (*ecdsa.PublicKey, error) {
 func TestOutsideDevelopmentTheDriverIsBoundToACard(t *testing.T) {
 	for _, env := range []string{yubikeypiv.Staging, yubikeypiv.Production} {
 		c := cardtest.New()
-		_, err := yubikeypiv.New(yubikeypiv.Options{Environment: env, Open: c.Opener()})
+		_, err := yubikeypiv.New(yubikeypiv.Options{Purposes: refPurposes(), Environment: env, Open: c.Opener()})
 		if !errors.Is(err, yubikeypiv.ErrSerial) {
 			t.Errorf("%s without a serial: %v, want ErrSerial", env, err)
 		}
 	}
 	// The serial names the card: another card is not opened, and development still takes the only one.
 	c := cardtest.New()
-	if _, err := yubikeypiv.New(yubikeypiv.Options{Environment: yubikeypiv.Production, Serial: c.SerialNo + 7, Open: c.Opener()}); err == nil {
+	if _, err := yubikeypiv.New(yubikeypiv.Options{Purposes: refPurposes(), Environment: yubikeypiv.Production, Serial: c.SerialNo + 7, Open: c.Opener()}); err == nil {
 		t.Error("a card with another serial was adopted")
 	}
-	if s, err := yubikeypiv.New(yubikeypiv.Options{Environment: yubikeypiv.Development, Open: c.Opener()}); err != nil {
+	if s, err := yubikeypiv.New(yubikeypiv.Options{Purposes: refPurposes(), Environment: yubikeypiv.Development, Open: c.Opener()}); err != nil {
 		t.Errorf("development without a serial: %v", err)
 	} else {
 		_ = s.Close()
@@ -644,7 +666,7 @@ func TestAnImportedKeyIsRefusedAndNeverReplaced(t *testing.T) {
 	}
 	// REQ-KEYS-026: the start refuses it, in every environment.
 	for _, env := range []string{yubikeypiv.Development, yubikeypiv.Production} {
-		_, err := yubikeypiv.New(yubikeypiv.Options{Environment: env, Serial: c.SerialNo, Open: c.Opener()})
+		_, err := yubikeypiv.New(yubikeypiv.Options{Purposes: refPurposes(), Environment: env, Serial: c.SerialNo, Open: c.Opener()})
 		var p *yubikeypiv.Problems
 		if !errors.As(err, &p) || !strings.Contains(strings.Join(p.List, ";"), "slots.9a.attestation: origin") {
 			t.Errorf("%s: err = %v, want the imported key refused", env, err)
@@ -665,7 +687,7 @@ func TestAnUnpluggedCardWipesThePINAndEndsTheDriver(t *testing.T) {
 	admin := yubikeypiv.AdminConfig{Socket: filepath.Join(base, "a.sock"), Allow: self()}
 	done := make(chan error, 1)
 	go func() {
-		done <- yubikeypiv.Run(ctx, yubikeypiv.Options{Environment: yubikeypiv.Development, Boundary: "test", Node: "n", Serial: c.SerialNo, Open: c.Opener()}, host.host(), admin)
+		done <- yubikeypiv.Run(ctx, yubikeypiv.Options{Purposes: refPurposes(), Environment: yubikeypiv.Development, Boundary: "test", Node: "n", Serial: c.SerialNo, Open: c.Opener()}, host.host(), admin)
 	}()
 	var key keyv1alpha1connect.KeyStoreServiceClient
 	select {
@@ -737,5 +759,92 @@ func TestABadUnlockCannotBlockTheCard(t *testing.T) {
 	wantRefused(t, err, connect.CodeFailedPrecondition, "pin_retries")
 	if c.Retries != 1 || c.LoginAttempts != 2 {
 		t.Fatalf("%d retries left after %d attempts, want 1 and 2", c.Retries, c.LoginAttempts)
+	}
+}
+
+// The purposes of a host that no driver ever knew (the target of step B13), with ES256 and ES384, in the spare slots that the host names:
+// each key is born on the card in its slot with the policies of the plan (PIN once, touch never), attested, signs for the caller once the
+// card is unlocked, and the signature converts to the raw r||s of a JWS. A key that the host declared without an operation is made and read
+// and never used.
+//
+// verifies: REQ-KEYS-026
+func TestAHostDeclaredPurposeIsServedByTheCardWithES256AndES384(t *testing.T) {
+	signs := []purpose.Operation{purpose.Sign}
+	r := startOpts(t, cardtest.New(), yubikeypiv.Development, self(), yubikeypiv.Options{Node: "node-a", Purposes: []purpose.Declaration{
+		{Name: "client-assertion", Algorithm: purpose.ES256, Operations: signs, Slot: "90"},
+		{Name: "identity-header", Algorithm: purpose.ES384, Operations: signs, Slot: "91"},
+		{Name: "made-only", Algorithm: purpose.ES256, Slot: "92"},
+	}})
+	r.unlock(t, "123456")
+	for _, w := range []struct {
+		purpose, alg string
+		slot         card.Slot
+		bits         int
+	}{{"client-assertion", "ES256", 0x90, 256}, {"identity-header", "ES384", 0x91, 384}, {"made-only", "ES256", 0x92, 256}} {
+		res := ensure(t, r.key, w.purpose, w.alg)
+		att, err := r.card.Attest(w.slot)
+		if err != nil {
+			t.Fatalf("%s: slot %s holds no key: %v", w.purpose, w.slot, err)
+		}
+		root, _ := r.card.AttestationCertificate()
+		a, err := r.card.VerifyAttestation(root, att)
+		if err != nil || a.Slot != w.slot || a.PIN != card.PINOnce || a.Touch != card.TouchNever {
+			t.Fatalf("%s: attested %+v, %v", w.purpose, a, err)
+		}
+		pub, err := parseECDSA(res.GetSpkiDer())
+		if err != nil || pub.Params().BitSize != w.bits {
+			t.Fatalf("%s: %v", w.purpose, err)
+		}
+	}
+	d256, d384 := sha256.Sum256([]byte("jws signing input")), sha512.Sum384([]byte("jws signing input"))
+	for _, w := range []struct {
+		purpose, alg string
+		digest       []byte
+	}{{"client-assertion", "ES256", d256[:]}, {"identity-header", "ES384", d384[:]}} {
+		pubRes, err := r.key.PublicKey(context.Background(), connect.NewRequest(&keyv1alpha1.PublicKeyRequest{Purpose: w.purpose}))
+		if err != nil {
+			t.Fatal(err)
+		}
+		pub, _ := parseECDSA(pubRes.Msg.GetSpkiDer())
+		sig, err := sign(r.key, w.purpose, w.alg, w.digest)
+		if err != nil || !ecdsa.VerifyASN1(pub, w.digest, sig.GetSignatureDer()) {
+			t.Fatalf("%s: Sign: %v", w.purpose, err)
+		}
+		if raw, err := signature.DERToRaw(w.alg, sig.GetSignatureDer()); err != nil || len(raw) != 2*signature.Size(w.alg) {
+			t.Fatalf("%s: raw form: %v", w.purpose, err)
+		}
+	}
+	_, err := sign(r.key, "made-only", "ES256", d256[:])
+	wantRefused(t, err, connect.CodeInvalidArgument, "purpose")
+	// The names of the old closed list that the host did not declare are not known.
+	_, err = r.key.Ensure(context.Background(), connect.NewRequest(&keyv1alpha1.EnsureRequest{Purpose: "token-signing", Algorithm: "ES384"}))
+	wantRefused(t, err, connect.CodeInvalidArgument, "purpose")
+	// Capabilities says the purposes and the slots stay the host's business.
+	caps, err := r.key.Capabilities(context.Background(), connect.NewRequest(&keyv1alpha1.CapabilitiesRequest{}))
+	if err != nil || len(caps.Msg.GetPurposes()) != 3 || caps.Msg.GetPurposes()[1].GetName() != "identity-header" || caps.Msg.GetPurposes()[2].GetOperations() != nil {
+		t.Fatalf("Capabilities: %v %v", caps, err)
+	}
+}
+
+// A card that already holds a key in the slot of a purpose adopts it only when it is the declared algorithm: a host that declares ES384
+// where the card holds P-256 is refused at the start, and a host that declares the same algorithm finds its key again.
+func TestACardThatHoldsAnotherAlgorithmThanTheDeclaredOneRefusesTheStart(t *testing.T) {
+	c := cardtest.New()
+	r := startOpts(t, c, yubikeypiv.Development, self(), yubikeypiv.Options{Node: "node-a", Purposes: []purpose.Declaration{
+		{Name: "client-assertion", Algorithm: purpose.ES256, Operations: []purpose.Operation{purpose.Sign}, Slot: "90"},
+	}})
+	ensure(t, r.key, "client-assertion", "ES256")
+	open := func(alg string) error {
+		_, err := yubikeypiv.New(yubikeypiv.Options{Environment: yubikeypiv.Development, Serial: c.SerialNo, Open: c.Opener(), Purposes: []purpose.Declaration{
+			{Name: "client-assertion", Algorithm: alg, Operations: []purpose.Operation{purpose.Sign}, Slot: "90"},
+		}})
+		return err
+	}
+	var p *yubikeypiv.Problems
+	if err := open(purpose.ES384); !errors.As(err, &p) || !strings.Contains(err.Error(), "algorithm") {
+		t.Fatalf("a card that holds P-256 where P-384 is declared: %v", err)
+	}
+	if err := open(purpose.ES256); err != nil {
+		t.Fatalf("the same declaration finds its key again: %v", err)
 	}
 }

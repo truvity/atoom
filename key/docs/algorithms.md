@@ -4,12 +4,12 @@ The algorithms the key port names, which driver supports which, the formats of w
 
 ## The algorithms of the contract
 
-The contract names four algorithms. The three drivers ([`key/software`](../software/README.md), [`key/yubikeypiv`](../yubikeypiv/README.md), [`key/awskms`](../awskms/README.md)) support all four, and each says so in `Capabilities`.
+The contract names four algorithms. The three drivers ([`key/software`](../software/README.md), [`key/yubikeypiv`](../yubikeypiv/README.md), [`key/awskms`](../awskms/README.md)) support all four, and each says so in `Capabilities`. A host assigns an algorithm to each purpose it declares ([the key port](key-port.md#the-declaration-of-purposes)).
 
 | Algorithm | What it is | `Sign` takes | The answer is | KMS key spec (`awskms`) |
 |---|---|---|---|---|
-| `ES384` | ECDSA over P-384 with SHA-384 (RFC 7518, section 3.4) | a SHA-384 digest, 48 octets | the signature, ASN.1 DER | `ECC_NIST_P384`, `ECDSA_SHA_384` |
-| `ES256` | ECDSA over P-256 with SHA-256 (RFC 7518, section 3.4) | a SHA-256 digest, 32 octets | the signature, ASN.1 DER | `ECC_NIST_P256`, `ECDSA_SHA_256` |
+| `ES384` | ECDSA over P-384 with SHA-384 (RFC 7518, section 3.4) | a SHA-384 digest, 48 octets | the signature, ASN.1 DER ([raw form](#der-and-raw-signatures), 96 octets) | `ECC_NIST_P384`, `ECDSA_SHA_384` |
+| `ES256` | ECDSA over P-256 with SHA-256 (RFC 7518, section 3.4) | a SHA-256 digest, 32 octets | the signature, ASN.1 DER ([raw form](#der-and-raw-signatures), 64 octets) | `ECC_NIST_P256`, `ECDSA_SHA_256` |
 | `RS256` | RSASSA-PKCS1-v1_5 over SHA-256 with an RSA-2048 key and the public exponent 65537 (RFC 7518, section 3.3) | a SHA-256 digest, 32 octets | the signature as the octet string of RFC 8017, section 8.2.1: 256 octets, no DER form | `RSA_2048`, `RSASSA_PKCS1_V1_5_SHA_256` |
 | `ECDH-P384` | ECDH over P-384 (NIST SP 800-56A), no `Sign` | the peer's public key, SEC1 uncompressed, in `Ecdh` | the raw shared secret, with no key-derivation function | `ECC_NIST_P384`, key usage `KEY_AGREEMENT` |
 
@@ -30,22 +30,37 @@ A host may want more than the four. The contract has no call for them and no dri
 | `ML-DSA-44` | A signature format that the C2SP tlog-cosignature specification allows for witnesses. Nothing here holds such a key. |
 | AES-256-GCM, HMAC-SHA384 | Symmetric operations. The key port has no call for them: a host does them with its own library, under data keys that it wraps (for example by `Ecdh`). |
 
-## What each driver holds, today
+## What each driver serves
 
-The purposes of the code are a closed list today, and each purpose has one algorithm. The port is meant to take any purpose that a host declares. That change is planned and not built. Purposes belong to the host (in atoom, to the `seal` block that uses the keys), so the table below is what the drivers hold now and not a list that the port prescribes.
+The port holds no list of purposes: the host declares each purpose with its algorithm and operations ([the declaration](key-port.md#the-declaration-of-purposes)), and a driver serves every purpose that the host declared with an algorithm it holds. Every driver holds all four algorithms, so `ES256` and `ES384` are available for any host-declared purpose on all three:
 
-| Class | Purposes held today | Algorithm | `software` | `yubikeypiv` | `awskms` |
-|---|---|---|---|---|---|
-| Signing | `token-signing`, `x509-intermediate`, `ssh-user`, `ssh-host`, `workload-issuer`, `release-signing` | `ES384` | yes | yes, PIN once, touch never | yes |
-| Signing | `issuance-log` | `ES384` | yes | no (no row in the card's plan) | yes |
-| Signing | `audit-log` | `ES256` | yes | yes, P-256, PIN once, touch never | yes |
-| Signing | `token-signing-rs256` | `RS256` | yes | yes, RSA-2048, PIN once, touch never; optional | yes |
-| Key agreement | `wrapping` | `ECDH-P384` | yes | yes, PIN once, touch never | yes |
-| Signing of the PIN release | `pin-release` | `ES384` | yes, but it holds no PIN and refuses the release calls | yes, PIN never, touch never | no (a KMS key has no PIN) |
+| Algorithm | `key/software` | `key/awskms` | `key/yubikeypiv` |
+|---|---|---|---|
+| `ES384` | yes, P-384 in a file | yes, `ECC_NIST_P384`, `ECDSA_SHA_384` | yes, P-384 in a slot, PIN once, touch never (about 150 ms a signature) |
+| `ES256` | yes, P-256 in a file | yes, `ECC_NIST_P256`, `ECDSA_SHA_256` | yes, P-256 in a slot, PIN once, touch never (about 81 ms a signature, raw card, measured 2026-10-30) |
+| `RS256` | yes, RSA-2048 | yes, `RSA_2048` | yes, RSA-2048 in a slot, PIN once, touch never; optional: a card whose slot holds a key that is not the plan's starts with the purpose absent; four at a time (`busy` beyond) |
+| `ECDH-P384` | yes | yes, `KEY_AGREEMENT` | yes, PIN once, touch never |
 
-- **Optional on the card.** A card whose slot for `token-signing-rs256` holds a key that is not the plan's still starts, with that purpose absent. Every other key of the plan refuses the start.
-- **The card's slots** are in the [slot plan](../slotplan/docs/slot-plan.md). The software driver holds each key in a file and ignores slots.
-- **`pin-release`** signs only the texts of the PIN release, which the driver writes itself. The card driver's `Sign` refuses its purpose ([pinrelease](../pinrelease/docs/README.md)).
+- **The card.** A YubiKey 5 with the firmware floor of the driver (5.7) generates ECDSA over P-256 and P-384, ECDH over P-384 and RSA-2048 in every slot of a board (`9a`, `9c`, `9d` and the retired slots `82` to `95`), so the driver refuses no algorithm of the port. It refuses a declaration the card cannot follow, before it opens the card: a slot that is no slot of a board, two purposes in one slot, a purpose with no slot, and an algorithm that a card does not hold (`PS256` and `EdDSA` are not algorithms of the port, and [the slot plan](../slotplan/README.md) refuses them for a card with its own reason). A card has 23 slots for a board (`9a`, `9c`, `9d` and `82` to `95`), so a host with more purposes than that has no card for them. The kit skips a case whose algorithm the store does not list, and says so.
+- **KMS.** A purpose is a KMS key of the spec and usage of its algorithm. A key of another spec under the alias is refused, never replaced.
+- **The software driver** generates the key with Go's `crypto`, and holds it in a file named after the purpose.
+- **PIN release.** The purpose named `pin-release` is the card's PIN release key: `ES384`, slot 87, PIN never, signing only the driver's own texts. It is an ordinary name on the other drivers.
+- **Optional on the card.** An `RS256` purpose is optional on a card: a card whose slot holds a key that is not the declared one still starts, with that purpose absent. Every other key of the plan refuses the start.
+- **The card's slots** are in the [slot plan](../slotplan/docs/slot-plan.md): the reference map gives sluis's purposes their slots, and a host names the slot of any other purpose, usually a rotation spare (`90` to `95`). The software driver holds each key in a file and ignores slots.
+
+## DER and raw signatures
+
+`Sign` returns an `ES256` or `ES384` signature as **ASN.1 DER** (`SEQUENCE { r INTEGER, s INTEGER }`), the form every driver and every verifier of this repository already speaks (`crypto/ecdsa.VerifyASN1`, KMS, the card). A JWS (RFC 7515) carries the **raw** form of RFC 7518, section 3.4: `r` then `s`, each a big-endian integer padded to the size of the curve, **64 octets for `ES256` and 96 for `ES384`**.
+
+The port stays with DER and the conversion is a helper, `github.com/truvity/atoom/key/signature`: `signature.DERToRaw("ES256", der)` and `signature.RawToDER("ES256", raw)` (Go; each refuses a signature that is not strict DER, has trailing bytes or whose `r` or `s` is zero or wider than the curve). It is the simpler of the two ways, for these reasons:
+
+- **A raw form in the contract changes every driver.** It would add a field to `SignRequest`, code in three drivers (each with its own signer: Go's `crypto`, KMS's DER answer, the card's DER answer) and a case of the kit for each, to save a caller a dozen lines. The helper changes none of them, and so changes no wire byte and breaks no consumer.
+- **The conversion is lossless and cheap.** It is two integers copied into fixed-width fields, against the tens or hundreds of milliseconds of a signature on a card.
+- **The caller is the one who knows it makes a JWS.** The same signature is DER for an X.509 certificate or an SSH certificate and raw for a JWS; only the caller knows which.
+- **The kit tests the helper against the drivers.** Its `ES256` and `ES384` cases convert each signature the driver makes and verify the raw form with `crypto/ecdsa`, and the helper's own tests hold the reading of `r||s` to the example of RFC 7515, appendix A.3.
+- **The key port has no Rust code** (the drivers are Go), so there is no Rust helper to write here. A Rust consumer that signs JWS through the port converts in the same way: parse the DER (`r` and `s` are two `INTEGER`s, minimal, with a `00` octet in front of a value whose top bit is set), strip that octet, and left-pad each value with zeros to 32 octets (`ES256`) or 48 (`ES384`); the reverse adds the `00` octet back and drops leading zeros. A crate that does this for every port that needs it can join the port crates when a Rust consumer asks.
+
+`RS256` needs nothing: its signature is the octet string of RFC 8017, section 8.2.1, which is the form a JWS carries.
 
 ## Timings
 
