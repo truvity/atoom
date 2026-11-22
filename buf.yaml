@@ -3,6 +3,7 @@ version: v2
 # The generated code of a port is committed next to it (<port>/gen), made by <port>/buf.gen.yaml (`just gen`).
 modules:
   - path: blob/proto
+  - path: blocks/seal/proto
   - path: common/proto
   - path: destination/proto
   - path: index/proto

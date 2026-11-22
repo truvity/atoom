@@ -63,15 +63,27 @@ func wantName(lang, dir string) string {
 	return cratePrefix + strings.ReplaceAll(dir, "/", "-")
 }
 
+// blocksDir holds the blocks (record 0008): blocks/<block>, a contract built from other ports and blocks.
+const blocksDir = "blocks"
+
+// isBlock reports whether dir is a block.
+func isBlock(dir string) bool { return strings.HasPrefix(dir, blocksDir+"/") }
+
 // allowedAtoom reports whether the library at dir may require the atoom library dep.
 //
 // A library may require: the common types; its own port; the conformance kit of its own port; and a library listed as shared.
 // It may not require another driver, another port's code, or itself.
+//
+// A block (blocks/<block>, record 0008) is built from ports and blocks only: it may require the common types, any port, the shared
+// libraries and another block, and never a driver. No library but a block may require a block, and the blocks have no cycle (checkAll).
 func allowedAtoom(dir, dep string, s shared) bool {
 	port := strings.SplitN(dir, "/", 2)[0]
 	switch {
 	case dep == dir:
 		return false
+	case isBlock(dir):
+		// A port or common is a library at the first level; a driver is at the second, and only another block is allowed there.
+		return (!strings.Contains(dep, "/") && dep != blocksDir && !isTool(dep)) || isBlock(dep) || s[dep]
 	case dep == "common":
 		return true
 	case dep == port:
@@ -102,11 +114,19 @@ func check(l lib, s shared) []string {
 		add("the name must be %s", want)
 	}
 	for _, dep := range l.Atoom {
-		if !allowedAtoom(l.Dir, dep, s) {
+		if allowedAtoom(l.Dir, dep, s) {
+			continue
+		}
+		if isBlock(l.Dir) {
+			add("requires %s: a block may require only common, the ports, the shared libraries and other blocks, never a driver", dep)
+		} else {
 			add("requires %s: a library may require only common, its own port, its port's conformance kit and the shared libraries, never another driver or port", dep)
 		}
 	}
-	if depth == 1 && !s[l.Dir] {
+	if l.Dir == blocksDir {
+		add("blocks holds the blocks, one directory each; it is not a library")
+	}
+	if depth == 1 && !s[l.Dir] && l.Dir != blocksDir {
 		// A port, or common: only the runtimes beside atoom's own. A library at the first level that the shared file lists (socket: the
 		// plain UNIX-socket host of the Rust mains) is plumbing and not a port, so it may require what it needs.
 		for _, dep := range l.External {
@@ -142,5 +162,41 @@ func checkAll(libs []lib, s shared) []string {
 			}
 		}
 	}
+	out = append(out, cycles(libs)...)
 	return slices.Compact(out)
+}
+
+// cycles names each library that requires itself through other libraries of the same language (a block that requires a block that
+// requires it). The rules above already keep ports and drivers out of a cycle; the blocks may require one another, so the graph is
+// walked.
+func cycles(libs []lib) []string {
+	deps := map[string][]string{}
+	for _, l := range libs {
+		deps[l.Lang+":"+l.Dir] = l.Atoom
+	}
+	var out []string
+	keys := make([]string, 0, len(deps))
+	for k := range deps {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	for _, start := range keys {
+		lang, dir, _ := strings.Cut(start, ":")
+		seen := map[string]bool{}
+		stack := append([]string(nil), deps[start]...)
+		for len(stack) > 0 {
+			d := stack[len(stack)-1]
+			stack = stack[:len(stack)-1]
+			if d == dir {
+				out = append(out, fmt.Sprintf("%s (%s): requires itself through other libraries: a cycle", dir, lang))
+				break
+			}
+			if seen[d] {
+				continue
+			}
+			seen[d] = true
+			stack = append(stack, deps[lang+":"+d]...)
+		}
+	}
+	return out
 }

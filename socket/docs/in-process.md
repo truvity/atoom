@@ -39,55 +39,21 @@ They come from the caller, as on a socket ([the call context](../../docs/call-co
 - **A peer.** A socket's peer credentials come from the kernel; a caller in the same process has none. `atoom_socket::peer(ctx.extensions())` is `None`, and the socket guard (`Allow`) is not there. **Who may call is the host's rule:** the host decides in an interceptor and adds it with `InProcessConfig::with_interceptor`. The interceptor runs before every call, in the order added, and may refuse it (`permission_denied`, reason `caller` by convention). A host that gives each in-process client to one consumer has already decided, by giving it. The test `there_is_no_peer_and_the_hosts_interceptor_decides_who_may_call` shows the shape.
 - **A second wall.** There is no socket file and no mode. Anything in the process that holds the `Client` can call the driver.
 
-## Go: the Connect handler on an in-memory transport
+## Go: `socket.InProcess`
 
-Go needs no helper: the generated Connect client takes an `http.Client`, so the handler is served on a listener whose connections are in memory and the client dials it. The driver gives its handler (`Service.Handler()` in `key/awskms`, `store/dynamodb` and `source/file`). The code below is the tested one, `source/file/memnet_test.go`, with `source/file/service_test.go` using it:
+The generated Connect client takes an `http.Client`, so the handler is served on a listener whose connections are in memory and the client dials it. `socket.InProcess(path, handler)` does that: it serves the handler (HTTP/1.1 and HTTP/2 without TLS) on a listener of `net.Pipe` pairs, wrapped in `call.Inherit`, and returns the `http.Client` that reaches it (HTTP/2, so a bidirectional stream works) and the function that stops it. A driver or a block gives its handler (`Service.Handler()` in `key/awskms`, `store/dynamodb` and `source/file`, `Block.Handler()` in `blocks/seal`):
 
 ```go
-// A listener whose connections are net.Pipe pairs.
-type memListener struct {
-    conns chan net.Conn
-    done  chan struct{}
-    once  sync.Once
-}
-
-func (l *memListener) Accept() (net.Conn, error) {
-    select {
-    case c := <-l.conns:
-        return c, nil
-    case <-l.done:
-        return nil, net.ErrClosed
-    }
-}
-func (l *memListener) Close() error   { l.once.Do(func() { close(l.done) }); return nil }
-func (l *memListener) Addr() net.Addr { return memAddr{} }
-
-func (l *memListener) dial(ctx context.Context, _, _ string) (net.Conn, error) {
-    client, server := net.Pipe()
-    select {
-    case l.conns <- server:
-        return client, nil
-    case <-l.done:
-        return nil, net.ErrClosed
-    case <-ctx.Done():
-        return nil, ctx.Err()
-    }
-}
-
-// Serve the handler on it, and reach it with a client.
-svc, _ := file.New(file.Options{Dir: dir})
-path, h := svc.Handler()
-mux := http.NewServeMux()
-mux.Handle(path, h)
-l := &memListener{conns: make(chan net.Conn), done: make(chan struct{})}
-srv := &http.Server{Handler: call.Inherit(mux), ReadHeaderTimeout: 10 * time.Second} // the id of the request reaches the handler
-go srv.Serve(l)
-hc := &http.Client{Transport: &http.Transport{DialContext: l.dial}}
-client := sourcev1alpha1connect.NewSourceServiceClient(hc, "http://source", call.ClientOptions()...)
+b, err := seal.New(ctx, opts)                  // or a driver: file.New, awskms.New, ...
+hc, stop := socket.InProcess(b.Handler())
+defer stop()
+client := sealv1alpha1connect.NewSealServiceClient(hc, "http://seal", call.ClientOptions()...)
 ```
 
+`socket.Client(path)` is the `http.Client` of the same handler behind a socket (HTTP/2 without TLS, as `socket.Serve` and the Rust thin mains serve), so a host switches between the two by configuration. `blocks/seal` uses both: its kit command hosts the block in its process over a key driver and a store driver on sockets, and calls the block in-process. `socket/inprocess_test.go` proves the correlation id, HTTP/2, many calls at once and the stop; `source/file/service_test.go` proves the deadline and the id through the same transport, written out by hand in `source/file/memnet_test.go`.
+
 - **One value switches it.** The client of a socket differs only in its `http.Client` (a transport that dials the socket, with unencrypted HTTP/2) and the URL; the generated client and every call are the same. A consumer builds the `http.Client` from its configuration.
-- **Streaming works** (a server stream such as `Watch` over HTTP/1.1 in the example); a bidirectional stream needs HTTP/2, which the net/http server and transport offer without TLS through `http.Protocols` (`SetUnencryptedHTTP2`), as the socket does.
+- **Streaming works**: a server stream such as `Watch`, and a bidirectional stream, which needs HTTP/2; `InProcess` and `Client` speak HTTP/2 without TLS (`http.Protocols`, `SetUnencryptedHTTP2`), as the socket does.
 - **The deadline and the correlation id come from the context.** The Connect client sends the deadline of the context of the call as `Connect-Timeout-Ms` and the Connect handler turns it back into the deadline of the handler's context, with no option. The id travels with `call.ClientOptions()` on the client and `call.Inherit` around the handler ([the call context](../../docs/call-context.md)). `TestTheDeadlineAndTheCorrelationIDOfTheCallersContextReachTheHandlerInProcess` in `source/file` proves both. Go sets no default deadline: a host that wants one wraps the context.
 - **There is no peer.** `socket.PeerFromContext` returns nothing, and `socket.Serve` and its guard are not involved. The host's rule is a Connect interceptor passed as a handler option (`Service.Handler(connect.WithInterceptors(...))`, or `Host.HandlerOptions`).
-- **No Go helper is provided.** The few lines above are the transport; the repository ships no wrapper for them, and a host that wants one writes it. If one is added, it belongs here, in the module `socket`, next to `Serve`.
+- **The helper is `socket.InProcess`**, in the module `socket` next to `Serve`.

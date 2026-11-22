@@ -45,6 +45,7 @@ From sluis `3f0afea`, cut down to the plain host. This is a new library, not a m
 | Go module (`doc.go`, `guard.go`, `serve.go`, `peer*.go`, `flags.go`) | `kits/go/rpc` (`guard.go`, `server.go`, `peer.go`, `peercred_*.go`) | the deny handlers answer a refused call in the shape of its protocol without decoding it; the socket is made fresh; `LOCAL_PEERCRED` added for macOS. `Allow` is `SameUid`, `Uids` or `Any` where sluis had `CallGraph`, `OwnerOnly` and `Exact` |
 | `src/call.rs` (the task-local, `scope`, `pass_on`, the interceptor `Inherit`), `src/testing.rs` | `kits/rust/sluis-kit/src/{correlation_impl,client,server}.rs`, with the id rule of `kits/go/rpc/correlation.go` | the one difference is that `Call` carries both the id and the deadline, so that code outside a handler can state them; `testing.rs` is new |
 | Go `common/call` and `inherit` in `socket.Serve` | `kits/go/rpc/correlation.go` and the client interceptor of `kits/go/rpc/client.go` | without the read limit and the default deadline of sluis's client |
+| Go `inprocess.go` (`InProcess`, `Client`) | new, with step B4 | the in-memory transport of `source/file/memnet_test.go` as a helper, and the HTTP/2 client of a socket |
 
 The correlation id header keeps sluis's name today; its rename is planned ([call context](call-context.md)). What stays in sluis: the registry, the call graph, the making of the id at `entry` and its echo in the response header, the Go server's default deadline, the read limit, and the audit of refusals.
 
@@ -263,3 +264,21 @@ From sluis `df108e5`.
 | `dir/src/{lib,suite,main}.rs`, `tests/port.rs` | `drivers/exporter/dir/` | the registry names are gone; the suite is the backend suite |
 
 What stayed in sluis: the wrapper `main` and exporter@, the actor that calls the port.
+
+## blocks/seal
+
+<a id="blocks-seal"></a>
+
+From sluis `main` at `d10ccf741d` (the `seal` block of [record 0013](decisions/0013-what-moves-from-sluis.md): sluis records 0006 and the storage part of 0047). The mechanics moved; sluis's policy stayed.
+
+| Here | From sluis | Changed |
+| --- | --- | --- |
+| `internal/envelope/` (with its Wycheproof vectors and their notice) | `actors/key/internal/envelope/` | the AAD prefix and the address are the host's (`domain`, parts of an address) instead of `sluis-seal-v1` and boundary, tenant, kind and id; the purpose codes are the host's; with sluis's domain and address the bytes are the same, and sluis's vector is a test here |
+| `internal/wrap/` (with its vector) | `actors/key/internal/wrap/` | the info prefix, the installation and the scope are the host's (`sluis-wrap-v1`, boundary and tenant in sluis); the same bytes for the same context, and sluis's vector is a test here |
+| `cache.go`, `datakeys.go` | `actors/key/internal/keyd/{cache,datakeys}.go` | keyed by scope instead of tenant; the current generation is the highest with a wrap, and `Rotate` makes the next (sluis seals at generation 1); one shared open per key on the first caller's context without its cancellation, in place of sluis's run context; the makers are serialized as in sluis |
+| `items.go` | `actors/key/internal/keyd/wraps.go` | the wraps are items of the store port (`<prefix>wrap/<scope>/<purpose>/<generation>/<recipient>`), not the kind `DataKeyWrap` of sluis's store@; the value is the same message |
+| `block.go` (`Seal`, `Open`, `Mac`, `Sign`, `PublicKey`) | `actors/key/internal/keyd/{seal,sign}.go` | the checks of sluis (the caller, its rule, the grant, which purposes fit which tenant and kind, the reserved labels, the content checks of a signature) are the host's rules hook; `Mac` is sluis's construction; `Sign` takes content, hashes it and signs the digest through the key port |
+| `thumbprint.go` | `actors/key/internal/keyd/{init,server}.go` (`thumbprint`, `recipientLabel`) | the label is computed from the key, not from a listed id |
+| `options.go`, `proto/`, `conformance/`, `Erase`, `Rewrap`'s recipients hook | new | the purposes, the rules and the recipients are the host's; erasure by scope stands for sluis's erasure of a tenant and of a KV store |
+
+What stayed in sluis: the key@ actor and its server, the `KeyPlan` and the `Boundary` with their signatures and marks, the recipients' certificates, the grants and their sealing, the registry rules, the content parsers of `Sign`, the token certificate, the PIN release, revocations, the rate limits and the audit facts.
