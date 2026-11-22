@@ -65,7 +65,7 @@ func TestInProcessReachesTheHandlerWithTheCallAndStops(t *testing.T) {
 
 // Client reaches a server of Serve on its socket.
 func TestClientReachesServe(t *testing.T) {
-	dir := t.TempDir()
+	dir := shortDir(t) // a socket path of at most 104 bytes on macOS
 	path := filepath.Join(dir, "s")
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
