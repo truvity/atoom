@@ -17,6 +17,8 @@ key-awskms	go	key/awskms	./cmd/awskms	portable	linux,darwin	-	-	-	-	The AWS KMS 
 store-dynamodb	go	store/dynamodb	./cmd/dynamodb	portable	linux,darwin	-	-	-	-	The DynamoDB driver of the item port: a DynamoDB table served on a UNIX socket
 store-rqlite	rust	store/rqlite	atoom-store-rqlite:store-rqlite	portable	linux	-	-	-	-	The rqlite driver of the item port: rqlite's HTTP API served on a UNIX socket
 store-memory	rust	store/memory	atoom-store-memory:store-memory	portable	linux	-	-	-	-	The memory driver of the item port: a map in memory served on a UNIX socket, for tests
+# source/file is also a Go module (library + cmd/file, for in-process Go consumers and the conformance run). It has no row: the id is the directory, one
+# executable is released for one driver, and this row holds it (docs/packages.md, "The Go file driver").
 source-file	rust	source/file	atoom-source-file:source-file	portable	linux	-	-	-	-	The file driver of the source port: a directory of signed config documents served on a UNIX socket
 source-credential	rust	source/credential	atoom-source-credential:source-credential	portable	linux	-	-	-	-	The credential driver of the source port: systemd credentials served on a UNIX socket
 blob-fs	rust	blob/fs	atoom-blob-fs:blob-fs	portable	linux	-	-	-	-	The fs driver of the blob port: a local directory served on a UNIX socket

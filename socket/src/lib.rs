@@ -3,6 +3,10 @@
 //!
 //! - [`dial`] makes a client of a socket: a transport and the configuration for a generated client. The connection is made at the
 //!   first call, so no server has to run yet, and is made again when the server restarts.
+//! - [`in_process`] makes the same [`Client`] of a [`Router`](connectrpc::Router) in the same process, with no socket: the generated
+//!   client calls the driver's handler through `connectrpc`'s own service ([record 0009](../../docs/decisions/0009-connectrpc-in-process.md)),
+//!   so a consumer moves a driver between a socket and its own process by configuration, not by code. There is no peer in process: the
+//!   host's rule of who may call is an interceptor ([`InProcessConfig::with_interceptor`]).
 //! - [`serve`] listens on a socket and serves a [`Router`](connectrpc::Router) on it until a future resolves. The peer's credentials
 //!   are read from the kernel once per connection and every call passes the guard ([`Allow`]) before its message is decoded: a caller
 //!   whose uid is not admitted is refused with the reason `caller`. A handler reads the caller with [`peer`]. `ServerConfig` also
@@ -25,7 +29,9 @@ mod server;
 pub mod testing;
 
 pub use call::{Call, HEADER_CORRELATION};
-pub use client::{Client, Transport, dial};
+pub use client::{
+    Client, InProcessConfig, ResponseBody, Transport, dial, in_process, in_process_with,
+};
 pub use guard::{Allow, Peer, REASON_CALLER, peer};
 pub use server::{ServerConfig, serve};
 
@@ -41,3 +47,6 @@ mod tests;
 
 #[cfg(test)]
 mod call_tests;
+
+#[cfg(test)]
+mod in_process_tests;

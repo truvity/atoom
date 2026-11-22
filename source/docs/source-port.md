@@ -47,12 +47,12 @@ Every refusal is a Connect error with the `Refusal` detail of [common](../../com
 
 | Driver | Backend | Watch | Where it fits |
 | --- | --- | --- | --- |
-| [source/file](../file/README.md) | a directory of `<name>.jws` documents | `NOTIFY` | a host with its signed configuration in a directory, or a mounted ConfigMap |
+| [source/file](../file/README.md) (Rust) | a directory of `<name>.jws` documents | `NOTIFY` | a host with its signed configuration in a directory, or a mounted ConfigMap |
 | [source/credential](../credential/README.md) | systemd credentials (`$CREDENTIALS_DIRECTORY`) or a directory of them | `NONE` | a service that gets its secrets from systemd |
-| `source/file` in Go | the same directory, linked into a Go process | `NOTIFY` | a Go consumer that reads its documents in-process (planned, step B2) |
+| [source/file](../file/docs/go.md) (Go) | the same directory, linked into a Go process | `NOTIFY` | a Go consumer that reads its documents in-process |
 | `source/appconfig`, `source/ssm` | AWS AppConfig, SSM Parameter Store | `POLL`, `NONE` | Lambda and Kubernetes (planned, step B9) |
 
-Both built drivers are Linux only (they open files with `openat2`), and say so in their manifests; the macOS jobs of CI leave them out.
+The Rust drivers are Linux only (they open files with `openat2`), and say so in their manifests; the macOS jobs of CI leave them out. The Go `source/file` runs on macOS too.
 
 ## The call context
 

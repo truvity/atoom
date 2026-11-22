@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Runs the conformance kit of the source port (the binary source-conformance) against every source driver, each through the socket of
-# its own thin main: the file driver over a directory holding one signed-config document, and the credential driver over a directory
-# holding one credential (mode 0400). Both drivers are Linux only, so on any other system the run says so and does nothing.
+# its own thin main: the file driver over a directory holding one signed-config document, in Rust and in Go (the same directory, the same
+# kit, two thin mains), and the credential driver over a directory holding one credential (mode 0400). The Rust drivers are Linux only,
+# so on any other system the run says so and does nothing (the Go driver's own tests run everywhere: `just go-test`).
 #
 #   tools/scripts/conformance-source.sh
 set -euo pipefail
@@ -45,6 +46,16 @@ pids+=($!)
 wait_for "the file driver" test -S "$tmp/file.sock"
 echo "conformance-source: source-conformance against source-file"
 "$bin/source-conformance" --socket "$tmp/file.sock" --present boundary --bytes "$tmp/bytes"
+
+# The Go file driver, over the same kind of directory: its thin main is built here, as the release builds it (CGO off).
+mkdir "$tmp/docs-go"
+cp "$tmp/bytes" "$tmp/docs-go/boundary.jws"
+(cd source/file && CGO_ENABLED=0 go build -o "$tmp/source-file-go" ./cmd/file)
+"$tmp/source-file-go" serve --socket "$tmp/file-go.sock" --dir "$tmp/docs-go" &
+pids+=($!)
+wait_for "the Go file driver" test -S "$tmp/file-go.sock"
+echo "conformance-source: source-conformance against the Go source/file (cmd/file)"
+"$bin/source-conformance" --socket "$tmp/file-go.sock" --present boundary --bytes "$tmp/bytes"
 
 # The credential driver: a directory that only its owner can write, and a credential that only its owner can read.
 mkdir -m 0700 "$tmp/creds"

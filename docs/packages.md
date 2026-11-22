@@ -12,7 +12,7 @@ The table of what is released is [`tools/release/drivers.tsv`](../tools/release/
 | `store/dynamodb` | `atoom-store-dynamodb` | `atoom-driver-store-dynamodb` | `atoom-store-dynamodb` | linux, darwin | extension zip; a Go function links the library instead |
 | `store/rqlite` | `atoom-store-rqlite` | `atoom-driver-store-rqlite` | `atoom-store-rqlite` | linux | no: Lambda runs no rqlite |
 | `store/memory` | `atoom-store-memory` | `atoom-driver-store-memory` | `atoom-store-memory` | linux | extension zip, for tests |
-| `source/file` | `atoom-source-file` | `atoom-driver-source-file` | `atoom-source-file` | linux | extension zip; a Go version is planned for in-process use |
+| `source/file` | `atoom-source-file` | `atoom-driver-source-file` | `atoom-source-file` | linux | extension zip; a Go function links the Go [`source/file`](#the-go-file-driver) instead |
 | `source/credential` | `atoom-source-credential` | `atoom-driver-source-credential` | `atoom-source-credential` | linux | no: Lambda has no systemd credentials |
 | `blob/fs` | `atoom-blob-fs` | `atoom-driver-blob-fs` | `atoom-blob-fs` | linux | no: Lambda has no lasting local disk |
 | `blob/fsreadonly` | `atoom-blob-fsreadonly` | `atoom-driver-blob-fsreadonly` | `atoom-blob-fsreadonly` | linux | no: Lambda has no lasting local disk |
@@ -26,7 +26,6 @@ Planned drivers, each released in every form it can run in once it is built:
 
 | Driver | Backend | Lambda | Step |
 | --- | --- | --- | --- |
-| `source/file` (Go) | a directory, in-process | linked, no zip | B2 |
 | `store/postgres` | PostgreSQL | extension zip | B6 |
 | `store/valkey` | Valkey | extension zip | B10 |
 | `source/appconfig`, `source/ssm` | AWS AppConfig, SSM Parameter Store | extension zip | B9 |
@@ -34,6 +33,10 @@ Planned drivers, each released in every form it can run in once it is built:
 | `transport/sqs` | an Amazon SQS queue | extension zip | B9 |
 | `transport/nats` | NATS JetStream | extension zip | B15 |
 | `index/rqlite`, `index/postgres` | rqlite; PostgreSQL with row-level security | `index/postgres`: extension zip | B15 |
+
+## The Go file driver
+
+`source/file` is a driver in two languages, in one directory ([its page](../source/file/README.md)). The Rust crate is the row `source-file` above: the executable `atoom-source-file`, the package, the image, the tarball. The Go module `github.com/truvity/atoom/source/file` is **a library**: it is what a Go function or a Go host links in, with no Lambda zip ([0010](decisions/0010-distribution-per-driver-and-lambda.md)). Its thin main (`cmd/file`) serves the conformance run, and a Go host that wants a sidecar builds it; it has no row because the id of a row is its directory (`source-file`), a release carries one executable for one driver, and the Rust one holds the name. The Go library is released as every Go module is: a tag `source/file/vX.Y.Z` with the tag of the repository.
 
 ## The naming rules
 

@@ -176,8 +176,8 @@ conformance-store: rust-toolchain rqlite-fetch
     if [ "$(uname -s)" = Linux ]; then export ATOOM_REQUIRE_RQLITED=1 ATOOM_REQUIRE_DYNAMODB_LOCAL=1; fi
     tools/scripts/conformance-store.sh
 
-# The source-port kit against the file driver and the credential driver, each through the socket of its thin main
-# (tools/scripts/conformance-source.sh). Both drivers are Linux only, so elsewhere it says so and does nothing.
+# The source-port kit against the file driver (Rust and Go) and the credential driver, each through the socket of its thin main
+# (tools/scripts/conformance-source.sh). The Rust drivers are Linux only, so elsewhere it says so and does nothing.
 [private]
 conformance-source: rust-toolchain
     tools/scripts/conformance-source.sh

@@ -11,6 +11,8 @@ atoom 0.2.0 is released. It holds:
 - thirteen drivers, each released as a tarball, a `.deb` and an `.rpm` package and an OCI image ([packages](packages.md));
 - the release flow ([releasing](release.md)) and the dependency checks (`just check`).
 
+Built since: B1 (the in-process helper of `socket`, [in process](../socket/docs/in-process.md)) and B2 (the Go `source/file`, [its page](../source/file/docs/go.md)); both are in the next release.
+
 Not built: blocks, Lambda extension zips, the drivers marked planned, and the changes of steps B12 to B14 below.
 
 ## After 0.2.0: the blocks phase

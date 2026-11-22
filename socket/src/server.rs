@@ -19,6 +19,9 @@ use crate::guard::{Allow, Guard, Peer};
 /// How long a graceful shutdown waits for calls in flight.
 const GRACE: Duration = Duration::from_secs(5);
 
+/// The deadline of a call that carries none: a server's default, and the default of a router called in process.
+pub(crate) const DEFAULT_DEADLINE: Duration = Duration::from_secs(30);
+
 /// The configuration of one server on one socket.
 #[derive(Clone, Debug)]
 pub struct ServerConfig {
@@ -48,7 +51,7 @@ impl ServerConfig {
             mode: 0o600,
             socket_gid: None,
             allow: Allow::SameUid,
-            default_deadline: Duration::from_secs(30),
+            default_deadline: DEFAULT_DEADLINE,
         }
     }
 }

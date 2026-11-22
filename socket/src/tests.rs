@@ -92,7 +92,10 @@ async fn a_symlink_or_a_plain_file_in_the_way_is_refused() {
 #[test]
 fn dial_does_not_need_a_server() {
     let c = dial(std::path::Path::new("/nonexistent/atoom.sock"));
-    assert_eq!(c.socket(), std::path::Path::new("/nonexistent/atoom.sock"));
+    assert_eq!(
+        c.socket(),
+        Some(std::path::Path::new("/nonexistent/atoom.sock"))
+    );
 }
 
 // The guard. The messages of the test service are `Refusal` (the one message every atoom library has), so that the socket crate
@@ -256,7 +259,7 @@ async fn the_refusal_does_not_decode_the_message() {
     let dir = tempfile::tempdir().unwrap();
     let r = start(config(&dir, Allow::Uids(vec![me() + 1]))).await;
     let (status, body) = raw_post(
-        r.client.socket(),
+        r.client.socket().unwrap(),
         "/atoom.test.v1.Who/Ask",
         b"\xff\xff not proto",
     )

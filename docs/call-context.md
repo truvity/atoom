@@ -41,9 +41,14 @@ res, err := client.Get(ctx, connect.NewRequest(&req))    // a client made with c
 
 ## In process
 
-A driver mounted in a process of its own (a Lambda function, a test) is called with no socket in between: the handler gets the context of its caller as it is. A host that serves the handler over HTTP itself wraps it with `call.Inherit` (Go) so that the correlation id of the request reaches the handler; the Connect handler reads the deadline on its own.
+A driver called with no socket in between ([in process](../socket/docs/in-process.md), [record 0009](decisions/0009-connectrpc-in-process.md)) is called through the same generated client, and the same rules hold:
+
+- **Rust:** a client made by `atoom_socket::in_process(router)` sends and reads the deadline and the correlation id as a client of `dial` does. A call made inside a handler or inside `call::scope` carries both to the handler of the driver, and the handler hands them down.
+- **Go:** the Connect handler mounted on an in-memory transport takes the deadline from the context of the call (the Connect client sends it, the handler reads it, with no option). The correlation id needs `call.ClientOptions()` on the client and `call.Inherit` around the handler. A host that serves the handler over HTTP itself wraps it with `call.Inherit` so that the correlation id of the request reaches the handler.
+
+What an in-process call does not have is a peer: who may call is the host's rule ([in process](../socket/docs/in-process.md#what-does-not-exist-in-process)).
 
 ## What is tested
 
-- `atoom-socket` and `socket` hold the rules: the header is sent and read, a handler hands both down to a second server, a shorter timeout stays and a longer one is cut, an invalid id is dropped by both sides, a passed deadline answers `deadline_exceeded`, and a server that admits any uid hands the call down too.
+- `atoom-socket` and `socket` hold the rules: the header is sent and read, a handler hands both down to a second server (in process too: `socket/src/in_process_tests.rs`), a shorter timeout stays and a longer one is cut, an invalid id is dropped by both sides, a passed deadline answers `deadline_exceeded`, and a server that admits any uid hands the call down too.
 - Each port proves its own client: a test per port (Rust `<port>/conformance/tests/call.rs`, Go `<port>/call_test.go`, `key/conformance/call_test.go`) calls every method of its generated clients, unary and streaming, against a server that records what arrived, and checks the id and the timeout; and that a call made outside any scope carries neither. The Rust recorder is `atoom_socket::testing::Recorder` (feature `testing`) and the Go one is `common/call/calltest`.

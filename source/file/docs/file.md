@@ -1,6 +1,6 @@
 # How the file driver works
 
-What it does and does not do, for a consumer that links it.
+What it does and does not do, for a consumer that links it. This page is the Rust crate; the Go module beside it is the same driver and its page, with the differences, is [go.md](go.md).
 
 - **A document** is asked for by the kebab-case name of its kind (1 to 63 characters of lower-case letters, digits and `-`, starting with a letter) and read from `<name>.jws` in the directory. A name cannot hold a `/` or a `.`, so it cannot leave the directory.
 - **The bytes** come back as the file holds them. The driver never parses them: the signature is the caller's to check. A file over 4 MiB, a directory and anything that is not a regular file is refused as `bound`.
