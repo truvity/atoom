@@ -25,6 +25,10 @@ func TestAllowedDependencies(t *testing.T) {
 		goLib("store", []string{"common"}, []string{"connectrpc.com/connect"}),
 		goLib("store/rqlite", []string{"store"}, nil),
 		goLib("tools", nil, []string{"anything"}),
+		// A block is built from ports, shared libraries and other blocks, with any library it needs.
+		goLib("socket", []string{"common"}, nil),
+		goLib("blocks/seal", []string{"common", "key", "store", "socket"}, []string{"github.com/go-jose/go-jose/v4"}),
+		goLib("blocks/token", []string{"blocks/seal", "key", "common"}, nil),
 		{Dir: "common", Lang: "rust", Name: "atoom-common", External: []string{"base64", "buffa", "connectrpc", "connectrpc-build", "serde"}},
 	}
 	if got := checkAll(libs, s); len(got) != 0 {
@@ -94,6 +98,45 @@ func TestWrongDependenciesFail(t *testing.T) {
 			name: "a replace of an atoom module",
 			libs: []lib{{Dir: "key", Lang: "go", Name: modulePrefix + "key", Replaces: []string{modulePrefix + "common"}}},
 			want: "a committed go.mod never carries a replace",
+		},
+		{
+			name: "a block requires a driver",
+			libs: []lib{
+				goLib("key", nil, nil),
+				goLib("key/software", []string{"key"}, nil),
+				goLib("blocks/seal", []string{"key", "key/software"}, nil),
+			},
+			want: "blocks/seal (go github.com/truvity/atoom/blocks/seal): requires key/software: a block may require only common, the ports",
+		},
+		{
+			name: "a port requires a block",
+			libs: []lib{
+				goLib("key", []string{"blocks/seal"}, nil),
+				goLib("blocks/seal", []string{"key"}, nil),
+			},
+			want: "key (go github.com/truvity/atoom/key): requires blocks/seal",
+		},
+		{
+			name: "a driver requires a block",
+			libs: []lib{
+				goLib("key", nil, nil),
+				goLib("key/software", []string{"key", "blocks/seal"}, nil),
+				goLib("blocks/seal", []string{"key"}, nil),
+			},
+			want: "key/software (go github.com/truvity/atoom/key/software): requires blocks/seal",
+		},
+		{
+			name: "two blocks require each other",
+			libs: []lib{
+				goLib("blocks/seal", []string{"blocks/token"}, nil),
+				goLib("blocks/token", []string{"blocks/seal"}, nil),
+			},
+			want: "blocks/seal (go): requires itself through other libraries: a cycle",
+		},
+		{
+			name: "blocks is not a library",
+			libs: []lib{goLib("blocks", nil, nil)},
+			want: "blocks holds the blocks",
 		},
 		{
 			name: "three levels deep",

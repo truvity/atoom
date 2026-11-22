@@ -6,7 +6,7 @@ Ports, drivers, blocks and kits shared by [sluis](https://github.com/truvity/slu
 
 - **Ports** are abstract interfaces. A port is a Protobuf contract, its ConnectRPC stubs (Go, Rust), its documentation and a conformance kit.
 - **Drivers** are implementations of one port. A driver is a library (the ConnectRPC handler and its logic) plus a thin main that serves it on a socket. A release carries each driver in every form it can run in: library, tarball, `.deb` and `.rpm` package, OCI image and, where Lambda can run it, an extension zip.
-- **Blocks** are contracts built from other ports and blocks. A block has no backend code, declares its dependencies and gets them passed in, has no cycles, and takes its rules from its host. There is one implementation per block, in the language of its main host. A block moves into atoom at its second consumer. The first blocks are `seal`, `state`, `token` and `export`; none is built yet.
+- **Blocks** are contracts built from other ports and blocks. A block has no backend code, declares its dependencies and gets them passed in, has no cycles, and takes its rules from its host. There is one implementation per block, in the language of its main host. A block moves into atoom at its second consumer. The first blocks are `seal`, `state`, `token` and `export`; [`seal`](blocks/seal/README.md) is built.
 - **Kits** are the tests every driver of a port, and every block, must pass. A kit runs through the ConnectRPC endpoint, in any language.
 
 A consumer calls a port or a block through its generated client, always, also when the driver runs in the same process. The one exception is Cedar, which is used as a library. Anyone can write a driver, inside or outside this repository, and prove it with the port's kit. Each library has its own thin dependencies and its own documentation, and the whole repository has one version.
@@ -36,9 +36,11 @@ atoom 0.2.0 is released. Seven ports with kits and thirteen drivers are built:
 | [index](index/README.md) | a search index of an append-only log | [sqlite](index/sqlite/README.md) |
 | [destination](destination/README.md) | where a published document goes | [dir](destination/dir/README.md) |
 
+One block is built: [seal](blocks/seal/README.md), data keys per purpose and scope, sealing, keyed hashes and signing by purpose, over the key and store ports.
+
 The shared libraries are [common](common/README.md) (the types every port speaks), [socket](socket/README.md) (the socket host and its guard) and, for the card driver, [key/slotplan](key/slotplan/README.md) and [key/pinrelease](key/pinrelease/README.md).
 
-Planned: the blocks, Lambda extension zips, more drivers (PostgreSQL and Valkey stores, AppConfig and SSM sources, an S3 blob store, SQS and NATS JetStream transports, rqlite and PostgreSQL indexes), and generic blob, transport and index contracts. The order is the [plan](docs/plan.md).
+Planned: the blocks `state`, `token` and `export`, Lambda extension zips, more drivers (PostgreSQL and Valkey stores, AppConfig and SSM sources, an S3 blob store, SQS and NATS JetStream transports, rqlite and PostgreSQL indexes), and generic blob, transport and index contracts. The order is the [plan](docs/plan.md).
 
 ## Documents
 
@@ -52,7 +54,7 @@ Planned: the blocks, Lambda extension zips, more drivers (PostgreSQL and Valkey 
 - [Provenance](docs/provenance.md): where the code and the documents came from.
 - [Archive](docs/archive/README.md): the extraction plan, as history.
 
-Each port has a page, `<port>/docs/<port>-port.md`, linked from its README and from [architecture](docs/architecture.md#ports).
+Each port has a page, `<port>/docs/<port>-port.md`, linked from its README and from [architecture](docs/architecture.md#ports), and each block a page, `blocks/<name>/docs/<name>-block.md`.
 
 ## Development
 

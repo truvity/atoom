@@ -17,7 +17,7 @@ flowchart TB
     C1["sluis, session, audit, ritueel"]
   end
   subgraph atoom["truvity/atoom (one version)"]
-    B["Blocks: seal, state, token, export (planned)"]
+    B["Blocks: seal (built); state, token, export (planned)"]
     P["Ports: contract + stubs + docs + kit"]
     D["Drivers: library + thin main"]
     K["Kits"]
@@ -49,7 +49,8 @@ atoom/
   store/                 port: items
     conformance/  rqlite/  memory/  dynamodb/
   source/  blob/  transport/  index/  destination/    the other ports, same shape
-  blocks/                blocks, one directory each (planned: none is built yet)
+  blocks/                blocks, one directory each
+    seal/                the seal block: proto, stubs, the Go implementation, README, docs/, the kit (package conformance)
   deploy/release/        the Dockerfile templates of the images
   tools/                 release scripts, isolation check, conformance scripts
   docs/                  this page, the call context, the socket guard, packages, release, provenance, plan, decisions, archive
@@ -59,7 +60,17 @@ atoom/
 - Each library has its own `README.md` and a `docs/` folder.
 - Cargo members and `go.work` `use` lines are listed explicitly, so that a Go-only directory needs no exclusion.
 - The module path is `github.com/truvity/atoom/<dir>`, the crate `atoom-<dir with dashes>`, the proto package `atoom.<port>.v1alpha1`.
-- A block lives in `blocks/<name>/`: its contract, stubs, README, `docs/`, kit and implementation. Its page is `docs/<name>-block.md` in that directory. This is planned; the first block is `seal` (step B4 of the [plan](plan.md)).
+- A block lives in `blocks/<name>/`: its contract, stubs, README, `docs/`, kit and implementation, one library in the language of its main host ([0008](decisions/0008-blocks.md)). The first block, [`seal`](../blocks/seal/README.md), sets the pattern that the others follow:
+
+  | Part | Where (for a block `<name>`) |
+  | --- | --- |
+  | the contract | `blocks/<name>/proto/atoom/<name>/v1alpha1/*.proto`, a module of `buf.yaml`, package `atoom.<name>.v1alpha1` |
+  | the stubs | `blocks/<name>/gen/`, made by `blocks/<name>/buf.gen.yaml` (`just gen`); Rust stubs only when a Rust consumer calls the block |
+  | the implementation | the library at the root of the directory: Go module `github.com/truvity/atoom/blocks/<name>`, or the crate `atoom-blocks-<name>`; `New(ctx, Options)` takes the clients of its dependencies, and `Handler()` (Go) or `router()` (Rust) is the ConnectRPC handler |
+  | the host's hooks | in its options: the declaration of its purposes or kinds, the rules (a hook asked before every call), and where its facts go |
+  | the kit | the package or module `conformance` of the block, speaking the contract only, with its own declaration and rules, and the command `<name>-conformance` under `conformance/cmd/` |
+  | the kit's run | `tools/scripts/conformance-<name>.sh`, a recipe `conformance-<name>` of `just conformance`: the kit over the memory drivers of the block's dependencies, each behind the socket of its thin main |
+  | the page | `blocks/<name>/docs/<name>-block.md`: what it is built from, the calls, the contract, the hooks, the refusals, the kit and how to host it |
 
 ## Dependency rules
 
@@ -68,7 +79,7 @@ Checked in CI by `just check-isolation` ([0003](decisions/0003-libraries-with-th
 - a **port** module requires only the ConnectRPC and Protobuf runtimes and what their generated code needs, besides the `common` types;
 - a **driver** may require the `common` types, its own port, the kit of its own port (for tests), a shared library and its own backend SDK. It may not require another driver or the code of another port;
 - **no driver requires another driver.** A small library that several drivers of one port need is a shared library, listed in `tools/isolation/shared.txt` (`socket`, `key/slotplan`, `key/pinrelease`, `blob/fsdir`);
-- a **block** requires only ports and blocks, with no cycle, and never a backend ([0008](decisions/0008-blocks.md)). The check is added with the first block;
+- a **block** requires only `common`, ports, shared libraries and other blocks, with no cycle, and never a driver or a backend ([0008](decisions/0008-blocks.md)); no port and no driver requires a block. A block may require the libraries it needs besides (`blocks/seal`: AES key wrap from `go-jose`);
 - a consumer that takes `key` and `key/software` has no AWS SDK, PC/SC, DynamoDB or PostgreSQL code in its module graph.
 
 The cgo and PC/SC dependency of `key/yubikeypiv` is behind the build tag `atoom_card`. Without the tag the driver builds with no C code and refuses to open a card.

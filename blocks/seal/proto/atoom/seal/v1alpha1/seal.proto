@@ -1,0 +1,164 @@
+// The contract of the seal block (docs/seal-block.md): data keys per purpose and scope, wrapped through the key port and kept in the store
+// port; values sealed and opened under them, keyed hashes, and signing by purpose. Moved from sluis key@ (record 0013: sluis records 0006
+// and the storage part of 0047). The block is built from the key and store ports only; its host declares the purposes and supplies the
+// rules, and the block never knows what a scope, an address or an authorization means.
+syntax = "proto3";
+
+package atoom.seal.v1alpha1;
+
+// SealService is served by the seal block. Key material never leaves it: a data key exists in clear only in the block's memory, and an
+// authority key only in the key store behind the key port.
+service SealService {
+  rpc Capabilities(CapabilitiesRequest) returns (CapabilitiesResponse);  // the purposes the host declared, and this instance's recipient
+  rpc Seal(SealRequest) returns (SealResponse);                          // a value sealed under the current data key of a purpose and scope
+  rpc Open(OpenRequest) returns (OpenResponse);                          // a batch of envelopes, all or none
+  rpc Mac(MacRequest) returns (MacResponse);                             // HMAC-SHA384 under the data key of a purpose and scope
+  rpc Sign(SignRequest) returns (SignResponse);                          // a signature in place, by the key of a signing purpose
+  rpc PublicKey(PublicKeyRequest) returns (PublicKeyResponse);           // the public key of a signing purpose
+  rpc Rotate(RotateRequest) returns (RotateResponse);                    // a new generation of a data key; seals move to it, opens of the old go on
+  rpc Erase(EraseRequest) returns (EraseResponse);                       // deletes every wrap of a scope, so nothing sealed under it opens again
+  rpc Rewrap(RewrapRequest) returns (RewrapResponse);                    // wraps every data key this instance opens for the recipients that lack one
+}
+
+// Use is what a purpose of the host's declaration is for.
+enum Use {
+  USE_UNSPECIFIED = 0;  // not set
+  USE_SEAL = 1;         // Seal and Open, under a data key
+  USE_MAC = 2;          // Mac, under a data key
+  USE_SIGN = 3;         // Sign and PublicKey, by a key of the key store
+}
+
+// CapabilitiesRequest asks what the block serves.
+message CapabilitiesRequest {}
+
+// CapabilitiesResponse says what the block serves.
+message CapabilitiesResponse {
+  repeated PurposeInfo purposes = 1;  // the purposes the host declared: the only names the other calls accept
+  string recipient = 2;               // this instance's recipient label: the lower-case base32 of the RFC 7638 thumbprint of its wrapping key
+}
+
+// PurposeInfo is one purpose of the host's declaration, as the block serves it.
+message PurposeInfo {
+  string name = 1;               // the purpose
+  Use use = 2;                   // what it is for
+  uint32 code = 3;               // USE_SEAL: the byte that names the purpose in an envelope, 1 to 255
+  string algorithm = 4;          // USE_SIGN: "ES384", "ES256" or "RS256"
+  bool caller_generation = 5;    // USE_MAC: the caller names the generation (an epoch); otherwise the block uses the current one
+}
+
+// SealRequest seals a value under the current data key of a purpose and scope, bound to an address.
+message SealRequest {
+  string purpose = 1;            // a USE_SEAL purpose of the host's declaration
+  string scope = 2;              // which data key of the purpose: empty for the installation's own, or a name the host chose (a tenant, a store)
+  repeated string address = 3;   // the parts the envelope is bound to, as additional authenticated data: 1 to 16, each at most 1024 octets
+  bytes plaintext = 4;           // the value, at most 1 MiB
+  bytes authorization = 5;       // opaque to the block: handed to the host's rules (a sealed grant, say)
+}
+
+// SealResponse carries the envelope (docs/seal-block.md, "The envelope").
+message SealResponse {
+  bytes envelope = 1;  // version | code | generation | nonce | ciphertext | tag
+}
+
+// OpenItem is one envelope to open.
+message OpenItem {
+  string purpose = 1;            // the purpose it was sealed under
+  string scope = 2;              // the scope it was sealed under
+  repeated string address = 3;   // the address it was bound to
+  bytes envelope = 4;            // the envelope
+}
+
+// OpenRequest opens a batch of envelopes, all or none.
+message OpenRequest {
+  repeated OpenItem items = 1;   // 1 to 64
+  bytes authorization = 2;       // opaque to the block: handed to the host's rules with every item
+}
+
+// OpenResponse carries the plaintexts.
+message OpenResponse {
+  repeated bytes plaintexts = 1;  // in the order of the items
+}
+
+// MacRequest asks for a keyed hash.
+message MacRequest {
+  string purpose = 1;            // a USE_MAC purpose of the host's declaration
+  string scope = 2;              // which data key of the purpose, as for Seal
+  string label = 3;              // separates the uses of one key: 1 to 1024 octets of UTF-8, bound into the input
+  bytes input = 4;               // the value to hash
+  uint32 generation = 5;         // for a purpose with caller_generation: the generation (an epoch), at least 1; otherwise 0
+  bytes authorization = 6;       // opaque to the block: handed to the host's rules
+}
+
+// MacResponse carries the keyed hash.
+message MacResponse {
+  bytes mac = 1;  // HMAC-SHA384 under the data key over u16 length | label | input: 48 octets
+}
+
+// SignRequest signs content by the key of a signing purpose.
+message SignRequest {
+  string purpose = 1;            // a USE_SIGN purpose of the host's declaration
+  bytes content = 2;             // what is signed; the host's rules may check it first, the block hashes it for the algorithm, at most 1 MiB
+  bytes authorization = 3;       // opaque to the block: handed to the host's rules
+}
+
+// SignResponse carries the signature.
+message SignResponse {
+  bytes signature_der = 1;       // ES384 and ES256: ASN.1 DER; RS256: the RSASSA-PKCS1-v1_5 octet string
+  bytes signature_raw = 2;       // ES384 and ES256: the raw r||s of a JWS (RFC 7518, section 3.4); RS256: the same octets as signature_der
+  string key_id = 3;             // the key port's key_id of the key that signed
+  string algorithm = 4;          // the purpose's algorithm
+}
+
+// PublicKeyRequest asks for the public key of a signing purpose.
+message PublicKeyRequest {
+  string purpose = 1;  // a USE_SIGN purpose
+}
+
+// PublicKeyResponse carries it.
+message PublicKeyResponse {
+  bytes spki_der = 1;   // SubjectPublicKeyInfo, DER
+  string key_id = 2;    // the key port's key_id
+  string algorithm = 3; // the purpose's algorithm
+}
+
+// RotateRequest makes a new generation of the data key of a purpose and scope.
+message RotateRequest {
+  string purpose = 1;            // a USE_SEAL purpose, or a USE_MAC one without caller_generation
+  string scope = 2;              // the scope
+  bytes authorization = 3;       // opaque to the block: handed to the host's rules
+}
+
+// RotateResponse names the generation that seals now.
+message RotateResponse {
+  uint32 generation = 1;  // the new current generation
+}
+
+// EraseRequest deletes the wraps of a scope.
+message EraseRequest {
+  string scope = 1;              // the scope; the installation's own (empty) is erased too when asked
+  repeated string purposes = 2;  // the data-key purposes to erase; none erases every data-key purpose of the declaration
+  bytes authorization = 3;       // opaque to the block: handed to the host's rules
+}
+
+// EraseResponse says what was deleted.
+message EraseResponse {
+  uint32 wraps = 1;  // the number of wraps deleted, every generation and every recipient
+}
+
+// RewrapRequest asks for one rewrap pass.
+message RewrapRequest {}
+
+// RewrapResponse says what the pass did.
+message RewrapResponse {
+  uint32 written = 1;  // the wraps written for recipients that lacked one
+}
+
+// DataKeyWrap is how the block keeps one data key wrapped for one recipient, as the value of a store item (docs/seal-block.md, "Wraps in
+// the store"). The fields and numbers are those of sluis's DataKeyWrap.
+message DataKeyWrap {
+  string purpose = 1;            // the purpose of the data key
+  uint32 generation = 2;         // its generation
+  string recipient = 3;          // the recipient label of the wrapping key it is wrapped for
+  bytes ephemeral_public = 4;    // SEC1 uncompressed P-384 point of the ECDH-ES sender key
+  bytes wrapped_key = 5;         // AES key wrap (RFC 3394) of the 32-octet data key under HKDF-SHA384 of the shared secret
+}

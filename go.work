@@ -6,6 +6,7 @@ toolchain go1.27.4
 // modules through their own go.mod files and the tags of one release.
 use (
 	./blob
+	./blocks/seal
 	./common
 	./destination
 	./index
@@ -26,6 +27,8 @@ use (
 )
 
 replace github.com/truvity/atoom/blob v0.3.0 => ./blob
+
+replace github.com/truvity/atoom/blocks/seal v0.3.0 => ./blocks/seal
 
 replace github.com/truvity/atoom/common v0.3.0 => ./common
 
