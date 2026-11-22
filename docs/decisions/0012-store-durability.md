@@ -1,6 +1,6 @@
 # 0012. One store interface for durable and temporary data; a driver declares its durability
 
-Status: accepted, 2026-11-20
+Status: accepted, 2026-11-20; partly superseded by 0017
 
 ## Decision
 

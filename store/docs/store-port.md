@@ -27,7 +27,7 @@ The port has five calls:
 
 - `store`: the name of the engine (`memory`, `rqlite`, `dynamodb`);
 - `tail_log`: whether the driver keeps the change log;
-- `durability` ([record 0012](../../docs/decisions/0012-store-durability.md)): what an acknowledged write survives. `DURABILITY_STRICT`: it survives a crash and a failover. `DURABILITY_LOSSY`: a failover can lose it. Unset (`DURABILITY_UNSPECIFIED`): the driver declares none, which is `store/memory`, a store for tests, and any driver from before the field. `store/dynamodb` and `store/rqlite` declare `strict`. A consumer refuses a binding that is weaker than its data needs, and one that declares nothing where its data needs a durability.
+- `durability` ([records 0012](../../docs/decisions/0012-store-durability.md) and [0017](../../docs/decisions/0017-the-memory-store-is-lossy.md)): what an acknowledged write survives. `DURABILITY_STRICT`: it survives a crash and a failover. `DURABILITY_LOSSY`: a failover or a restart can lose it. Unset (`DURABILITY_UNSPECIFIED`): the driver declares none, which is a driver from before the field. `store/dynamodb` and `store/rqlite` declare `strict`, `store/memory` declares `lossy`. A consumer refuses a binding that is weaker than its data needs, and one that declares nothing where its data needs a durability.
 
 The kit holds a driver to a value of the record, and the conformance run of this repository to the value in the table of drivers below; it cannot crash an engine behind a socket, so a driver's own test does (the rqlite driver kills `rqlited` and finds every acknowledged write after the restart, with the kit's `durability_before_crash` and `durability_after_restart`).
 
@@ -76,7 +76,7 @@ Every refusal is a Connect error with the `Refusal` detail of [common](../../com
 | Driver | Engine | Durability | Where it fits |
 | --- | --- | --- | --- |
 | [store/rqlite](../rqlite/README.md) | rqlite (replicated SQLite on Raft) | strict | a board or a local installation, one node or a cluster |
-| [store/memory](../memory/README.md) | a map under a mutex | none declared: for tests | tests, and a consumer that needs no backend |
+| [store/memory](../memory/README.md) | a map under a mutex | lossy: a restart loses every write | tests, and a consumer that needs no backend |
 | [store/dynamodb](../dynamodb/README.md) | DynamoDB | strict | AWS, serverless; a Go library that links into a Lambda function; no change log |
 | `store/postgres` | PostgreSQL | strict | Kubernetes (planned, step B6) |
 | `store/valkey` | Valkey | strict on one node with the append-only file synced on every write; lossy with asynchronous replication | session records and other temporary data (planned, step B10) |

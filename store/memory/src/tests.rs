@@ -23,9 +23,9 @@ async fn the_memory_engine_passes_the_item_suite() {
         }
         tokio::time::sleep(Duration::from_millis(20)).await;
     }
-    // The memory driver declares no durability: it is for tests (record 0012).
+    // The memory driver declares lossy: a restart loses every write (record 0017).
     let expect = Claims {
-        durability: Some(Durability::DURABILITY_UNSPECIFIED),
+        durability: Some(Durability::DURABILITY_LOSSY),
     };
     let cases = item_suite_expecting(atoom_socket::dial(&socket), expect).await;
     let mut out = Vec::new();

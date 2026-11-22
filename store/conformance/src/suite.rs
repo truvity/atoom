@@ -132,12 +132,12 @@ pub async fn item_suite_expecting(client: Client, expect: Claims) -> Vec<Case> {
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Claims {
     /// The durability the driver must declare (record 0012): `Some(Durability::DURABILITY_UNSPECIFIED)` for a driver that
-    /// declares none (`store/memory`). `None` holds it only to the closed list: strict, lossy, or none declared.
+    /// declares none. `None` holds it only to the closed list: strict, lossy, or none declared.
     pub durability: Option<Durability>,
 }
 
 /// The case `durability`: the driver declares one of the values of record 0012, `strict` or `lossy`, and the one `expect`
-/// names when it names one. A driver that declares none (a store for tests) is skipped unless it was expected to declare
+/// names when it names one. A driver that declares none (one from before the field) is skipped unless it was expected to declare
 /// none; a value outside the list fails.
 async fn durability_case(caps: Option<&CapabilitiesResponse>, expect: Option<Durability>) -> Case {
     let Some(caps) = caps else {
@@ -150,7 +150,7 @@ async fn durability_case(caps: Option<&CapabilitiesResponse>, expect: Option<Dur
     match (declared, expect) {
         (Some(Durability::DURABILITY_UNSPECIFIED), None) => skip_case(
             "durability",
-            "the driver declares no durability (capabilities.durability is unset): a store for tests, record 0012",
+            "the driver declares no durability (capabilities.durability is unset): a driver from before the field",
         ),
         _ => {
             run_case("durability", async move {

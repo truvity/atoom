@@ -30,9 +30,9 @@ const (
 type Durability int32
 
 const (
-	Durability_DURABILITY_UNSPECIFIED Durability = 0 // the driver declares none: a store for tests (store/memory), or a driver from before the field existed
+	Durability_DURABILITY_UNSPECIFIED Durability = 0 // the driver declares none: a driver from before the field existed
 	Durability_DURABILITY_STRICT      Durability = 1 // an acknowledged write survives a crash and a failover
-	Durability_DURABILITY_LOSSY       Durability = 2 // a failover can lose acknowledged writes
+	Durability_DURABILITY_LOSSY       Durability = 2 // a failover, or a restart, can lose acknowledged writes (store/memory loses them all at a restart)
 )
 
 // Enum value maps for Durability.
@@ -120,7 +120,7 @@ type CapabilitiesResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Store         string                 `protobuf:"bytes,1,opt,name=store,proto3" json:"store,omitempty"`                                                 // the engine behind the driver: "memory", "rqlite" or "dynamodb"
 	TailLog       bool                   `protobuf:"varint,2,opt,name=tail_log,json=tailLog,proto3" json:"tail_log,omitempty"`                             // true when the driver keeps the change log: TailLog is served, a put or delete with log set is accepted, and a query names a log head and epoch
-	Durability    Durability             `protobuf:"varint,3,opt,name=durability,proto3,enum=atoom.store.v1alpha1.Durability" json:"durability,omitempty"` // what an acknowledged write survives (record 0012); unset for a store that declares none (store/memory, for tests)
+	Durability    Durability             `protobuf:"varint,3,opt,name=durability,proto3,enum=atoom.store.v1alpha1.Durability" json:"durability,omitempty"` // what an acknowledged write survives (records 0012 and 0017); unset for a driver that declares none
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }

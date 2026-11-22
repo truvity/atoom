@@ -18,7 +18,7 @@ struct Args {
     /// The UNIX socket the driver serves the item contract on.
     #[arg(long, value_name = "PATH")]
     socket: PathBuf,
-    /// The durability the driver must declare: strict, lossy, or none (a store for tests). Without it the driver is held only
+    /// The durability the driver must declare: strict, lossy, or none (a driver from before the field). Without it the driver is held only
     /// to the values of record 0012.
     #[arg(long, value_enum)]
     durability: Option<Declared>,
