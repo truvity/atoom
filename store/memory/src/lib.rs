@@ -18,9 +18,9 @@ use atoom_common::refusal;
 use atoom_socket::ServerConfig;
 use atoom_store::atoom::common::v1alpha1::IndexEntry;
 use atoom_store::atoom::store::v1alpha1::{
-    CapabilitiesRequest, CapabilitiesResponse, DriverItem, ItemGetRequest, ItemGetResponse,
-    ItemService, ItemServiceExt, QueryRequest, QueryResponse, TailLogRequest, TailLogResponse,
-    TransactRequest, TransactResponse,
+    CapabilitiesRequest, CapabilitiesResponse, DriverItem, Durability, ItemGetRequest,
+    ItemGetResponse, ItemService, ItemServiceExt, QueryRequest, QueryResponse, TailLogRequest,
+    TailLogResponse, TransactRequest, TransactResponse,
 };
 use atoom_store_conformance::rules::{self, Expected, now_ms};
 use connectrpc::error::ErrorCode;
@@ -212,8 +212,8 @@ impl ItemService for MemoryEngine {
         Response::ok(CapabilitiesResponse {
             store: "memory".to_owned(),
             tail_log: true,
-            // No durability is declared (record 0012): the driver is for tests, and a restart loses every write. A consumer that
-            // requires a durability refuses it.
+            // Lossy (record 0017): a restart loses every write, so a consumer that requires strict refuses it.
+            durability: Durability::DURABILITY_LOSSY.into(),
             ..CapabilitiesResponse::default()
         })
     }

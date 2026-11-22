@@ -4,7 +4,7 @@
 # container (one at a time, removed at the end), when a container runtime is there; and the rqlite driver (both namespaces) when an rqlited
 # is fetched (`just rqlite-fetch`; rqlite publishes no macOS build, so there the rqlite driver is skipped and the run says so). The Go tests of
 # the DynamoDB driver that need DynamoDB Local run against the same container. Each run holds the driver to the durability its documentation gives it (record 0012):
-# none for the memory driver, strict for the DynamoDB and rqlite drivers.
+# lossy for the memory driver (record 0017), strict for the DynamoDB and rqlite drivers.
 #
 #   tools/scripts/conformance-store.sh
 #
@@ -45,7 +45,7 @@ run_kit() { # name socket durability
 "$bin/store-memory" --socket "$tmp/memory.sock" &
 pids+=($!)
 wait_for "the memory driver" test -S "$tmp/memory.sock"
-run_kit "store-memory" "$tmp/memory.sock" none
+run_kit "store-memory" "$tmp/memory.sock" lossy
 
 # The DynamoDB driver, against DynamoDB Local. The image is the multi-arch index of amazon/dynamodb-local 3.3.2, pinned by digest (it has
 # linux/amd64 and linux/arm64 manifests, so each native runner pulls its own); it runs in memory, with no data volume, on a random loopback
