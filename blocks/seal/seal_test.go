@@ -40,6 +40,8 @@ type setup struct {
 	ttl        time.Duration
 	now        func() time.Time
 	observe    func(context.Context, seal.Event)
+	limit      uint64
+	reserve    uint32
 }
 
 func start(t *testing.T, s setup) *env {
@@ -53,21 +55,26 @@ func start(t *testing.T, s setup) *env {
 	if s.items == nil {
 		s.items = newFakeItems()
 	}
+	if s.limit == 0 {
+		s.limit, s.reserve = conformance.SealsPerGeneration, conformance.SealReservation
+	}
 	keys := newFakeKeys(seal.KeyPurposes("", s.purposes))
 	khc, kstop := socket.InProcess(keyv1alpha1connect.NewKeyStoreServiceHandler(keys))
 	t.Cleanup(kstop)
 	ihc, istop := socket.InProcess(storev1alpha1connect.NewItemServiceHandler(s.items))
 	t.Cleanup(istop)
 	b, err := seal.New(context.Background(), seal.Options{
-		Keys:         keyv1alpha1connect.NewKeyStoreServiceClient(khc, "http://key", call.ClientOptions()...),
-		Items:        storev1alpha1connect.NewItemServiceClient(ihc, "http://store", call.ClientOptions()...),
-		Purposes:     s.purposes,
-		Rules:        s.rules,
-		Installation: "test",
-		Recipients:   s.recipients,
-		CacheTTL:     s.ttl,
-		Now:          s.now,
-		Observe:      s.observe,
+		Keys:               keyv1alpha1connect.NewKeyStoreServiceClient(khc, "http://key", call.ClientOptions()...),
+		Items:              storev1alpha1connect.NewItemServiceClient(ihc, "http://store", call.ClientOptions()...),
+		Purposes:           s.purposes,
+		Rules:              s.rules,
+		Installation:       "test",
+		Recipients:         s.recipients,
+		CacheTTL:           s.ttl,
+		Now:                s.now,
+		Observe:            s.observe,
+		SealsPerGeneration: s.limit,
+		SealReservation:    s.reserve,
 	})
 	if err != nil {
 		t.Fatal(err)

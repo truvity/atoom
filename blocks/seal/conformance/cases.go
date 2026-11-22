@@ -41,6 +41,8 @@ func Cases() []Case {
 		{"the_hosts_rules_decide", rules},
 		{"sign_verifies_under_the_public_key", sign},
 		{"what_is_not_a_call_is_refused", refusals},
+		{"seals_rotate_before_the_limit", sealLimit},
+		{"a_compromised_generation_seals_no_more", compromised},
 		{"rewrap", rewrapCase},
 	}
 }
@@ -602,6 +604,97 @@ func rewrapCase(ctx context.Context, k *Kit) error {
 	// The recipients are the host's, so the kit holds a pass only to succeed; the block's own tests prove the wraps it writes for others.
 	if _, err := k.Client.Rewrap(ctx, connect.NewRequest(&sealv1alpha1.RewrapRequest{})); err != nil {
 		return fmt.Errorf("rewrap: %w", err)
+	}
+	return nil
+}
+
+func sealLimit(ctx context.Context, k *Kit) error {
+	caps, err := k.Client.Capabilities(ctx, connect.NewRequest(&sealv1alpha1.CapabilitiesRequest{}))
+	if err != nil {
+		return err
+	}
+	if caps.Msg.GetSealsPerGeneration() != SealsPerGeneration || caps.Msg.GetSealReservation() != SealReservation {
+		return fmt.Errorf("the block's seal limit is %d with reservations of %d: start it with conformance.SealsPerGeneration and conformance.SealReservation",
+			caps.Msg.GetSealsPerGeneration(), caps.Msg.GetSealReservation())
+	}
+	scope := k.Scope("limit")
+	addr := []string{"l"}
+	perGeneration := map[uint32]int{}
+	var last uint32
+	var envs [][]byte
+	for i := range 3*SealsPerGeneration + 1 {
+		env, err := k.seal(ctx, PurposeSeal, scope, addr, []byte(fmt.Sprint(i)))
+		if err != nil {
+			return fmt.Errorf("seal %d: %w", i, err)
+		}
+		g := generationOf(env)
+		if g < last {
+			return fmt.Errorf("seal %d went back from generation %d to %d", i, last, g)
+		}
+		last = g
+		perGeneration[g]++
+		if perGeneration[g] > SealsPerGeneration {
+			return fmt.Errorf("generation %d made more than %d seals", g, SealsPerGeneration)
+		}
+		envs = append(envs, env)
+	}
+	if len(perGeneration) < 4 {
+		return fmt.Errorf("%d seals used %d generations, want at least 4", len(envs), len(perGeneration))
+	}
+	for i := 0; i < len(envs); i += SealsPerGeneration / 2 {
+		got, err := k.open(ctx, item(PurposeSeal, scope, addr, envs[i]))
+		if err != nil {
+			return fmt.Errorf("an envelope of generation %d after the rotations: %w", generationOf(envs[i]), err)
+		}
+		if string(got[0]) != fmt.Sprint(i) {
+			return errors.New("an envelope opened to another value after the rotations")
+		}
+	}
+	return nil
+}
+
+func compromised(ctx context.Context, k *Kit) error {
+	scope := k.Scope("compromised")
+	addr := []string{"c"}
+	before, err := k.seal(ctx, PurposeSeal, scope, addr, []byte("before"))
+	if err != nil {
+		return err
+	}
+	g := generationOf(before)
+	res, err := k.Client.MarkCompromised(ctx, connect.NewRequest(&sealv1alpha1.MarkCompromisedRequest{Purpose: PurposeSeal, Scope: scope, Generation: g}))
+	if err != nil {
+		return fmt.Errorf("mark: %w", err)
+	}
+	if res.Msg.GetGeneration() != g+1 {
+		return fmt.Errorf("the mark of generation %d left generation %d current, want %d", g, res.Msg.GetGeneration(), g+1)
+	}
+	for range 3 {
+		after, err := k.seal(ctx, PurposeSeal, scope, addr, []byte("after"))
+		if err != nil {
+			return fmt.Errorf("a seal after the mark: %w", err)
+		}
+		if generationOf(after) == g {
+			return errors.New("a seal under the compromised generation")
+		}
+	}
+	got, err := k.open(ctx, item(PurposeSeal, scope, addr, before))
+	if err != nil {
+		return fmt.Errorf("an envelope of the compromised generation: %w", err)
+	}
+	if string(got[0]) != "before" {
+		return errors.New("an envelope of the compromised generation opened to another value")
+	}
+	_, err = k.Client.MarkCompromised(ctx, connect.NewRequest(&sealv1alpha1.MarkCompromisedRequest{Purpose: PurposeSeal, Scope: scope, Generation: g + 9}))
+	if e := refused(err, connect.CodeInvalidArgument, seal.ReasonGeneration); e != nil {
+		return fmt.Errorf("a mark of a generation never made: %w", e)
+	}
+	_, err = k.Client.MarkCompromised(ctx, connect.NewRequest(&sealv1alpha1.MarkCompromisedRequest{Purpose: PurposeMac, Scope: scope, Generation: 1}))
+	if e := refused(err, connect.CodeInvalidArgument, seal.ReasonPurpose); e != nil {
+		return fmt.Errorf("a mark of a mac purpose: %w", e)
+	}
+	_, err = k.Client.MarkCompromised(ctx, connect.NewRequest(&sealv1alpha1.MarkCompromisedRequest{Purpose: PurposeSeal, Scope: RefusedPrefix + scope, Generation: 1}))
+	if e := refused(err, connect.CodePermissionDenied, seal.ReasonRule); e != nil {
+		return fmt.Errorf("a mark the rules refuse: %w", e)
 	}
 	return nil
 }

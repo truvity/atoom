@@ -118,11 +118,13 @@ func (*CapabilitiesRequest) Descriptor() ([]byte, []int) {
 
 // CapabilitiesResponse says what the block serves.
 type CapabilitiesResponse struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Purposes      []*PurposeInfo         `protobuf:"bytes,1,rep,name=purposes,proto3" json:"purposes,omitempty"`   // the purposes the host declared: the only names the other calls accept
-	Recipient     string                 `protobuf:"bytes,2,opt,name=recipient,proto3" json:"recipient,omitempty"` // this instance's recipient label: the lower-case base32 of the RFC 7638 thumbprint of its wrapping key
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state              protoimpl.MessageState `protogen:"open.v1"`
+	Purposes           []*PurposeInfo         `protobuf:"bytes,1,rep,name=purposes,proto3" json:"purposes,omitempty"`                                                  // the purposes the host declared: the only names the other calls accept
+	Recipient          string                 `protobuf:"bytes,2,opt,name=recipient,proto3" json:"recipient,omitempty"`                                                // this instance's recipient label: the lower-case base32 of the RFC 7638 thumbprint of its wrapping key
+	SealsPerGeneration uint64                 `protobuf:"varint,3,opt,name=seals_per_generation,json=sealsPerGeneration,proto3" json:"seals_per_generation,omitempty"` // the most seals one generation of a data key makes; the block rotates before it (docs/seal-block.md, "The seal limit")
+	SealReservation    uint32                 `protobuf:"varint,4,opt,name=seal_reservation,json=sealReservation,proto3" json:"seal_reservation,omitempty"`            // how many seals an instance reserves at once in the durable counter of a generation (N)
+	unknownFields      protoimpl.UnknownFields
+	sizeCache          protoimpl.SizeCache
 }
 
 func (x *CapabilitiesResponse) Reset() {
@@ -167,6 +169,20 @@ func (x *CapabilitiesResponse) GetRecipient() string {
 		return x.Recipient
 	}
 	return ""
+}
+
+func (x *CapabilitiesResponse) GetSealsPerGeneration() uint64 {
+	if x != nil {
+		return x.SealsPerGeneration
+	}
+	return 0
+}
+
+func (x *CapabilitiesResponse) GetSealReservation() uint32 {
+	if x != nil {
+		return x.SealReservation
+	}
+	return 0
 }
 
 // PurposeInfo is one purpose of the host's declaration, as the block serves it.
@@ -1195,6 +1211,210 @@ func (x *RewrapResponse) GetWritten() uint32 {
 	return 0
 }
 
+// MarkCompromisedRequest marks a generation of the data key of a seal purpose and scope compromised (sluis record 0041).
+type MarkCompromisedRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Purpose       string                 `protobuf:"bytes,1,opt,name=purpose,proto3" json:"purpose,omitempty"`             // a USE_SEAL purpose
+	Scope         string                 `protobuf:"bytes,2,opt,name=scope,proto3" json:"scope,omitempty"`                 // the scope
+	Generation    uint32                 `protobuf:"varint,3,opt,name=generation,proto3" json:"generation,omitempty"`      // the generation, at least 1
+	Authorization []byte                 `protobuf:"bytes,4,opt,name=authorization,proto3" json:"authorization,omitempty"` // opaque to the block: handed to the host's rules
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *MarkCompromisedRequest) Reset() {
+	*x = MarkCompromisedRequest{}
+	mi := &file_atoom_seal_v1alpha1_seal_proto_msgTypes[20]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *MarkCompromisedRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*MarkCompromisedRequest) ProtoMessage() {}
+
+func (x *MarkCompromisedRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_atoom_seal_v1alpha1_seal_proto_msgTypes[20]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use MarkCompromisedRequest.ProtoReflect.Descriptor instead.
+func (*MarkCompromisedRequest) Descriptor() ([]byte, []int) {
+	return file_atoom_seal_v1alpha1_seal_proto_rawDescGZIP(), []int{20}
+}
+
+func (x *MarkCompromisedRequest) GetPurpose() string {
+	if x != nil {
+		return x.Purpose
+	}
+	return ""
+}
+
+func (x *MarkCompromisedRequest) GetScope() string {
+	if x != nil {
+		return x.Scope
+	}
+	return ""
+}
+
+func (x *MarkCompromisedRequest) GetGeneration() uint32 {
+	if x != nil {
+		return x.Generation
+	}
+	return 0
+}
+
+func (x *MarkCompromisedRequest) GetAuthorization() []byte {
+	if x != nil {
+		return x.Authorization
+	}
+	return nil
+}
+
+// MarkCompromisedResponse names the generation that seals now.
+type MarkCompromisedResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Generation    uint32                 `protobuf:"varint,1,opt,name=generation,proto3" json:"generation,omitempty"` // the current generation after the mark: a new one when the marked generation was the current one
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *MarkCompromisedResponse) Reset() {
+	*x = MarkCompromisedResponse{}
+	mi := &file_atoom_seal_v1alpha1_seal_proto_msgTypes[21]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *MarkCompromisedResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*MarkCompromisedResponse) ProtoMessage() {}
+
+func (x *MarkCompromisedResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_atoom_seal_v1alpha1_seal_proto_msgTypes[21]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use MarkCompromisedResponse.ProtoReflect.Descriptor instead.
+func (*MarkCompromisedResponse) Descriptor() ([]byte, []int) {
+	return file_atoom_seal_v1alpha1_seal_proto_rawDescGZIP(), []int{21}
+}
+
+func (x *MarkCompromisedResponse) GetGeneration() uint32 {
+	if x != nil {
+		return x.Generation
+	}
+	return 0
+}
+
+// SealCounter is the durable counter of one generation of a seal key, the value of a store item (docs/seal-block.md, "The seal limit").
+type SealCounter struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Reserved      uint64                 `protobuf:"varint,1,opt,name=reserved,proto3" json:"reserved,omitempty"` // the seals reserved so far, by every instance: an upper bound of the seals the generation made
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SealCounter) Reset() {
+	*x = SealCounter{}
+	mi := &file_atoom_seal_v1alpha1_seal_proto_msgTypes[22]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SealCounter) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SealCounter) ProtoMessage() {}
+
+func (x *SealCounter) ProtoReflect() protoreflect.Message {
+	mi := &file_atoom_seal_v1alpha1_seal_proto_msgTypes[22]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SealCounter.ProtoReflect.Descriptor instead.
+func (*SealCounter) Descriptor() ([]byte, []int) {
+	return file_atoom_seal_v1alpha1_seal_proto_rawDescGZIP(), []int{22}
+}
+
+func (x *SealCounter) GetReserved() uint64 {
+	if x != nil {
+		return x.Reserved
+	}
+	return 0
+}
+
+// GenerationMark is the mark of one generation of a data key, the value of a store item.
+type GenerationMark struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Compromised   bool                   `protobuf:"varint,1,opt,name=compromised,proto3" json:"compromised,omitempty"` // the generation is compromised: it seals no more; what it sealed still opens
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GenerationMark) Reset() {
+	*x = GenerationMark{}
+	mi := &file_atoom_seal_v1alpha1_seal_proto_msgTypes[23]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GenerationMark) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GenerationMark) ProtoMessage() {}
+
+func (x *GenerationMark) ProtoReflect() protoreflect.Message {
+	mi := &file_atoom_seal_v1alpha1_seal_proto_msgTypes[23]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GenerationMark.ProtoReflect.Descriptor instead.
+func (*GenerationMark) Descriptor() ([]byte, []int) {
+	return file_atoom_seal_v1alpha1_seal_proto_rawDescGZIP(), []int{23}
+}
+
+func (x *GenerationMark) GetCompromised() bool {
+	if x != nil {
+		return x.Compromised
+	}
+	return false
+}
+
 // DataKeyWrap is how the block keeps one data key wrapped for one recipient, as the value of a store item (docs/seal-block.md, "Wraps in
 // the store"). The fields and numbers are those of sluis's DataKeyWrap.
 type DataKeyWrap struct {
@@ -1210,7 +1430,7 @@ type DataKeyWrap struct {
 
 func (x *DataKeyWrap) Reset() {
 	*x = DataKeyWrap{}
-	mi := &file_atoom_seal_v1alpha1_seal_proto_msgTypes[20]
+	mi := &file_atoom_seal_v1alpha1_seal_proto_msgTypes[24]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1222,7 +1442,7 @@ func (x *DataKeyWrap) String() string {
 func (*DataKeyWrap) ProtoMessage() {}
 
 func (x *DataKeyWrap) ProtoReflect() protoreflect.Message {
-	mi := &file_atoom_seal_v1alpha1_seal_proto_msgTypes[20]
+	mi := &file_atoom_seal_v1alpha1_seal_proto_msgTypes[24]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1235,7 +1455,7 @@ func (x *DataKeyWrap) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DataKeyWrap.ProtoReflect.Descriptor instead.
 func (*DataKeyWrap) Descriptor() ([]byte, []int) {
-	return file_atoom_seal_v1alpha1_seal_proto_rawDescGZIP(), []int{20}
+	return file_atoom_seal_v1alpha1_seal_proto_rawDescGZIP(), []int{24}
 }
 
 func (x *DataKeyWrap) GetPurpose() string {
@@ -1278,10 +1498,12 @@ var File_atoom_seal_v1alpha1_seal_proto protoreflect.FileDescriptor
 const file_atoom_seal_v1alpha1_seal_proto_rawDesc = "" +
 	"\n" +
 	"\x1eatoom/seal/v1alpha1/seal.proto\x12\x13atoom.seal.v1alpha1\"\x15\n" +
-	"\x13CapabilitiesRequest\"r\n" +
+	"\x13CapabilitiesRequest\"\xcf\x01\n" +
 	"\x14CapabilitiesResponse\x12<\n" +
 	"\bpurposes\x18\x01 \x03(\v2 .atoom.seal.v1alpha1.PurposeInfoR\bpurposes\x12\x1c\n" +
-	"\trecipient\x18\x02 \x01(\tR\trecipient\"\xac\x01\n" +
+	"\trecipient\x18\x02 \x01(\tR\trecipient\x120\n" +
+	"\x14seals_per_generation\x18\x03 \x01(\x04R\x12sealsPerGeneration\x12)\n" +
+	"\x10seal_reservation\x18\x04 \x01(\rR\x0fsealReservation\"\xac\x01\n" +
 	"\vPurposeInfo\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12*\n" +
 	"\x03use\x18\x02 \x01(\x0e2\x18.atoom.seal.v1alpha1.UseR\x03use\x12\x12\n" +
@@ -1351,7 +1573,22 @@ const file_atoom_seal_v1alpha1_seal_proto_rawDesc = "" +
 	"\x05wraps\x18\x01 \x01(\rR\x05wraps\"\x0f\n" +
 	"\rRewrapRequest\"*\n" +
 	"\x0eRewrapResponse\x12\x18\n" +
-	"\awritten\x18\x01 \x01(\rR\awritten\"\xb1\x01\n" +
+	"\awritten\x18\x01 \x01(\rR\awritten\"\x8e\x01\n" +
+	"\x16MarkCompromisedRequest\x12\x18\n" +
+	"\apurpose\x18\x01 \x01(\tR\apurpose\x12\x14\n" +
+	"\x05scope\x18\x02 \x01(\tR\x05scope\x12\x1e\n" +
+	"\n" +
+	"generation\x18\x03 \x01(\rR\n" +
+	"generation\x12$\n" +
+	"\rauthorization\x18\x04 \x01(\fR\rauthorization\"9\n" +
+	"\x17MarkCompromisedResponse\x12\x1e\n" +
+	"\n" +
+	"generation\x18\x01 \x01(\rR\n" +
+	"generation\")\n" +
+	"\vSealCounter\x12\x1a\n" +
+	"\breserved\x18\x01 \x01(\x04R\breserved\"2\n" +
+	"\x0eGenerationMark\x12 \n" +
+	"\vcompromised\x18\x01 \x01(\bR\vcompromised\"\xb1\x01\n" +
 	"\vDataKeyWrap\x12\x18\n" +
 	"\apurpose\x18\x01 \x01(\tR\apurpose\x12\x1e\n" +
 	"\n" +
@@ -1365,7 +1602,7 @@ const file_atoom_seal_v1alpha1_seal_proto_rawDesc = "" +
 	"\x0fUSE_UNSPECIFIED\x10\x00\x12\f\n" +
 	"\bUSE_SEAL\x10\x01\x12\v\n" +
 	"\aUSE_MAC\x10\x02\x12\f\n" +
-	"\bUSE_SIGN\x10\x032\xf5\x05\n" +
+	"\bUSE_SIGN\x10\x032\xe3\x06\n" +
 	"\vSealService\x12c\n" +
 	"\fCapabilities\x12(.atoom.seal.v1alpha1.CapabilitiesRequest\x1a).atoom.seal.v1alpha1.CapabilitiesResponse\x12K\n" +
 	"\x04Seal\x12 .atoom.seal.v1alpha1.SealRequest\x1a!.atoom.seal.v1alpha1.SealResponse\x12K\n" +
@@ -1375,7 +1612,8 @@ const file_atoom_seal_v1alpha1_seal_proto_rawDesc = "" +
 	"\tPublicKey\x12%.atoom.seal.v1alpha1.PublicKeyRequest\x1a&.atoom.seal.v1alpha1.PublicKeyResponse\x12Q\n" +
 	"\x06Rotate\x12\".atoom.seal.v1alpha1.RotateRequest\x1a#.atoom.seal.v1alpha1.RotateResponse\x12N\n" +
 	"\x05Erase\x12!.atoom.seal.v1alpha1.EraseRequest\x1a\".atoom.seal.v1alpha1.EraseResponse\x12Q\n" +
-	"\x06Rewrap\x12\".atoom.seal.v1alpha1.RewrapRequest\x1a#.atoom.seal.v1alpha1.RewrapResponseB\xdd\x01\n" +
+	"\x06Rewrap\x12\".atoom.seal.v1alpha1.RewrapRequest\x1a#.atoom.seal.v1alpha1.RewrapResponse\x12l\n" +
+	"\x0fMarkCompromised\x12+.atoom.seal.v1alpha1.MarkCompromisedRequest\x1a,.atoom.seal.v1alpha1.MarkCompromisedResponseB\xdd\x01\n" +
 	"\x17com.atoom.seal.v1alpha1B\tSealProtoP\x01ZIgithub.com/truvity/atoom/blocks/seal/gen/atoom/seal/v1alpha1;sealv1alpha1\xa2\x02\x03ASX\xaa\x02\x13Atoom.Seal.V1alpha1\xca\x02\x13Atoom\\Seal\\V1alpha1\xe2\x02\x1fAtoom\\Seal\\V1alpha1\\GPBMetadata\xea\x02\x15Atoom::Seal::V1alpha1b\x06proto3"
 
 var (
@@ -1391,30 +1629,34 @@ func file_atoom_seal_v1alpha1_seal_proto_rawDescGZIP() []byte {
 }
 
 var file_atoom_seal_v1alpha1_seal_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_atoom_seal_v1alpha1_seal_proto_msgTypes = make([]protoimpl.MessageInfo, 21)
+var file_atoom_seal_v1alpha1_seal_proto_msgTypes = make([]protoimpl.MessageInfo, 25)
 var file_atoom_seal_v1alpha1_seal_proto_goTypes = []any{
-	(Use)(0),                     // 0: atoom.seal.v1alpha1.Use
-	(*CapabilitiesRequest)(nil),  // 1: atoom.seal.v1alpha1.CapabilitiesRequest
-	(*CapabilitiesResponse)(nil), // 2: atoom.seal.v1alpha1.CapabilitiesResponse
-	(*PurposeInfo)(nil),          // 3: atoom.seal.v1alpha1.PurposeInfo
-	(*SealRequest)(nil),          // 4: atoom.seal.v1alpha1.SealRequest
-	(*SealResponse)(nil),         // 5: atoom.seal.v1alpha1.SealResponse
-	(*OpenItem)(nil),             // 6: atoom.seal.v1alpha1.OpenItem
-	(*OpenRequest)(nil),          // 7: atoom.seal.v1alpha1.OpenRequest
-	(*OpenResponse)(nil),         // 8: atoom.seal.v1alpha1.OpenResponse
-	(*MacRequest)(nil),           // 9: atoom.seal.v1alpha1.MacRequest
-	(*MacResponse)(nil),          // 10: atoom.seal.v1alpha1.MacResponse
-	(*SignRequest)(nil),          // 11: atoom.seal.v1alpha1.SignRequest
-	(*SignResponse)(nil),         // 12: atoom.seal.v1alpha1.SignResponse
-	(*PublicKeyRequest)(nil),     // 13: atoom.seal.v1alpha1.PublicKeyRequest
-	(*PublicKeyResponse)(nil),    // 14: atoom.seal.v1alpha1.PublicKeyResponse
-	(*RotateRequest)(nil),        // 15: atoom.seal.v1alpha1.RotateRequest
-	(*RotateResponse)(nil),       // 16: atoom.seal.v1alpha1.RotateResponse
-	(*EraseRequest)(nil),         // 17: atoom.seal.v1alpha1.EraseRequest
-	(*EraseResponse)(nil),        // 18: atoom.seal.v1alpha1.EraseResponse
-	(*RewrapRequest)(nil),        // 19: atoom.seal.v1alpha1.RewrapRequest
-	(*RewrapResponse)(nil),       // 20: atoom.seal.v1alpha1.RewrapResponse
-	(*DataKeyWrap)(nil),          // 21: atoom.seal.v1alpha1.DataKeyWrap
+	(Use)(0),                        // 0: atoom.seal.v1alpha1.Use
+	(*CapabilitiesRequest)(nil),     // 1: atoom.seal.v1alpha1.CapabilitiesRequest
+	(*CapabilitiesResponse)(nil),    // 2: atoom.seal.v1alpha1.CapabilitiesResponse
+	(*PurposeInfo)(nil),             // 3: atoom.seal.v1alpha1.PurposeInfo
+	(*SealRequest)(nil),             // 4: atoom.seal.v1alpha1.SealRequest
+	(*SealResponse)(nil),            // 5: atoom.seal.v1alpha1.SealResponse
+	(*OpenItem)(nil),                // 6: atoom.seal.v1alpha1.OpenItem
+	(*OpenRequest)(nil),             // 7: atoom.seal.v1alpha1.OpenRequest
+	(*OpenResponse)(nil),            // 8: atoom.seal.v1alpha1.OpenResponse
+	(*MacRequest)(nil),              // 9: atoom.seal.v1alpha1.MacRequest
+	(*MacResponse)(nil),             // 10: atoom.seal.v1alpha1.MacResponse
+	(*SignRequest)(nil),             // 11: atoom.seal.v1alpha1.SignRequest
+	(*SignResponse)(nil),            // 12: atoom.seal.v1alpha1.SignResponse
+	(*PublicKeyRequest)(nil),        // 13: atoom.seal.v1alpha1.PublicKeyRequest
+	(*PublicKeyResponse)(nil),       // 14: atoom.seal.v1alpha1.PublicKeyResponse
+	(*RotateRequest)(nil),           // 15: atoom.seal.v1alpha1.RotateRequest
+	(*RotateResponse)(nil),          // 16: atoom.seal.v1alpha1.RotateResponse
+	(*EraseRequest)(nil),            // 17: atoom.seal.v1alpha1.EraseRequest
+	(*EraseResponse)(nil),           // 18: atoom.seal.v1alpha1.EraseResponse
+	(*RewrapRequest)(nil),           // 19: atoom.seal.v1alpha1.RewrapRequest
+	(*RewrapResponse)(nil),          // 20: atoom.seal.v1alpha1.RewrapResponse
+	(*MarkCompromisedRequest)(nil),  // 21: atoom.seal.v1alpha1.MarkCompromisedRequest
+	(*MarkCompromisedResponse)(nil), // 22: atoom.seal.v1alpha1.MarkCompromisedResponse
+	(*SealCounter)(nil),             // 23: atoom.seal.v1alpha1.SealCounter
+	(*GenerationMark)(nil),          // 24: atoom.seal.v1alpha1.GenerationMark
+	(*DataKeyWrap)(nil),             // 25: atoom.seal.v1alpha1.DataKeyWrap
 }
 var file_atoom_seal_v1alpha1_seal_proto_depIdxs = []int32{
 	3,  // 0: atoom.seal.v1alpha1.CapabilitiesResponse.purposes:type_name -> atoom.seal.v1alpha1.PurposeInfo
@@ -1429,17 +1671,19 @@ var file_atoom_seal_v1alpha1_seal_proto_depIdxs = []int32{
 	15, // 9: atoom.seal.v1alpha1.SealService.Rotate:input_type -> atoom.seal.v1alpha1.RotateRequest
 	17, // 10: atoom.seal.v1alpha1.SealService.Erase:input_type -> atoom.seal.v1alpha1.EraseRequest
 	19, // 11: atoom.seal.v1alpha1.SealService.Rewrap:input_type -> atoom.seal.v1alpha1.RewrapRequest
-	2,  // 12: atoom.seal.v1alpha1.SealService.Capabilities:output_type -> atoom.seal.v1alpha1.CapabilitiesResponse
-	5,  // 13: atoom.seal.v1alpha1.SealService.Seal:output_type -> atoom.seal.v1alpha1.SealResponse
-	8,  // 14: atoom.seal.v1alpha1.SealService.Open:output_type -> atoom.seal.v1alpha1.OpenResponse
-	10, // 15: atoom.seal.v1alpha1.SealService.Mac:output_type -> atoom.seal.v1alpha1.MacResponse
-	12, // 16: atoom.seal.v1alpha1.SealService.Sign:output_type -> atoom.seal.v1alpha1.SignResponse
-	14, // 17: atoom.seal.v1alpha1.SealService.PublicKey:output_type -> atoom.seal.v1alpha1.PublicKeyResponse
-	16, // 18: atoom.seal.v1alpha1.SealService.Rotate:output_type -> atoom.seal.v1alpha1.RotateResponse
-	18, // 19: atoom.seal.v1alpha1.SealService.Erase:output_type -> atoom.seal.v1alpha1.EraseResponse
-	20, // 20: atoom.seal.v1alpha1.SealService.Rewrap:output_type -> atoom.seal.v1alpha1.RewrapResponse
-	12, // [12:21] is the sub-list for method output_type
-	3,  // [3:12] is the sub-list for method input_type
+	21, // 12: atoom.seal.v1alpha1.SealService.MarkCompromised:input_type -> atoom.seal.v1alpha1.MarkCompromisedRequest
+	2,  // 13: atoom.seal.v1alpha1.SealService.Capabilities:output_type -> atoom.seal.v1alpha1.CapabilitiesResponse
+	5,  // 14: atoom.seal.v1alpha1.SealService.Seal:output_type -> atoom.seal.v1alpha1.SealResponse
+	8,  // 15: atoom.seal.v1alpha1.SealService.Open:output_type -> atoom.seal.v1alpha1.OpenResponse
+	10, // 16: atoom.seal.v1alpha1.SealService.Mac:output_type -> atoom.seal.v1alpha1.MacResponse
+	12, // 17: atoom.seal.v1alpha1.SealService.Sign:output_type -> atoom.seal.v1alpha1.SignResponse
+	14, // 18: atoom.seal.v1alpha1.SealService.PublicKey:output_type -> atoom.seal.v1alpha1.PublicKeyResponse
+	16, // 19: atoom.seal.v1alpha1.SealService.Rotate:output_type -> atoom.seal.v1alpha1.RotateResponse
+	18, // 20: atoom.seal.v1alpha1.SealService.Erase:output_type -> atoom.seal.v1alpha1.EraseResponse
+	20, // 21: atoom.seal.v1alpha1.SealService.Rewrap:output_type -> atoom.seal.v1alpha1.RewrapResponse
+	22, // 22: atoom.seal.v1alpha1.SealService.MarkCompromised:output_type -> atoom.seal.v1alpha1.MarkCompromisedResponse
+	13, // [13:23] is the sub-list for method output_type
+	3,  // [3:13] is the sub-list for method input_type
 	3,  // [3:3] is the sub-list for extension type_name
 	3,  // [3:3] is the sub-list for extension extendee
 	0,  // [0:3] is the sub-list for field type_name
@@ -1456,7 +1700,7 @@ func file_atoom_seal_v1alpha1_seal_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_atoom_seal_v1alpha1_seal_proto_rawDesc), len(file_atoom_seal_v1alpha1_seal_proto_rawDesc)),
 			NumEnums:      1,
-			NumMessages:   21,
+			NumMessages:   25,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

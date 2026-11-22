@@ -18,6 +18,7 @@ service SealService {
   rpc Rotate(RotateRequest) returns (RotateResponse);                    // a new generation of a data key; seals move to it, opens of the old go on
   rpc Erase(EraseRequest) returns (EraseResponse);                       // deletes every wrap of a scope, so nothing sealed under it opens again
   rpc Rewrap(RewrapRequest) returns (RewrapResponse);                    // wraps every data key this instance opens for the recipients that lack one
+  rpc MarkCompromised(MarkCompromisedRequest) returns (MarkCompromisedResponse); // marks a generation compromised: it seals no more, and a new one is made
 }
 
 // Use is what a purpose of the host's declaration is for.
@@ -35,6 +36,8 @@ message CapabilitiesRequest {}
 message CapabilitiesResponse {
   repeated PurposeInfo purposes = 1;  // the purposes the host declared: the only names the other calls accept
   string recipient = 2;               // this instance's recipient label: the lower-case base32 of the RFC 7638 thumbprint of its wrapping key
+  uint64 seals_per_generation = 3;    // the most seals one generation of a data key makes; the block rotates before it (docs/seal-block.md, "The seal limit")
+  uint32 seal_reservation = 4;        // how many seals an instance reserves at once in the durable counter of a generation (N)
 }
 
 // PurposeInfo is one purpose of the host's declaration, as the block serves it.
@@ -151,6 +154,29 @@ message RewrapRequest {}
 // RewrapResponse says what the pass did.
 message RewrapResponse {
   uint32 written = 1;  // the wraps written for recipients that lacked one
+}
+
+// MarkCompromisedRequest marks a generation of the data key of a seal purpose and scope compromised (sluis record 0041).
+message MarkCompromisedRequest {
+  string purpose = 1;            // a USE_SEAL purpose
+  string scope = 2;              // the scope
+  uint32 generation = 3;         // the generation, at least 1
+  bytes authorization = 4;       // opaque to the block: handed to the host's rules
+}
+
+// MarkCompromisedResponse names the generation that seals now.
+message MarkCompromisedResponse {
+  uint32 generation = 1;  // the current generation after the mark: a new one when the marked generation was the current one
+}
+
+// SealCounter is the durable counter of one generation of a seal key, the value of a store item (docs/seal-block.md, "The seal limit").
+message SealCounter {
+  uint64 reserved = 1;  // the seals reserved so far, by every instance: an upper bound of the seals the generation made
+}
+
+// GenerationMark is the mark of one generation of a data key, the value of a store item.
+message GenerationMark {
+  bool compromised = 1;  // the generation is compromised: it seals no more; what it sealed still opens
 }
 
 // DataKeyWrap is how the block keeps one data key wrapped for one recipient, as the value of a store item (docs/seal-block.md, "Wraps in

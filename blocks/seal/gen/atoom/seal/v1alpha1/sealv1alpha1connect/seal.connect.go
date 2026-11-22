@@ -57,6 +57,9 @@ const (
 	SealServiceEraseProcedure = "/atoom.seal.v1alpha1.SealService/Erase"
 	// SealServiceRewrapProcedure is the fully-qualified name of the SealService's Rewrap RPC.
 	SealServiceRewrapProcedure = "/atoom.seal.v1alpha1.SealService/Rewrap"
+	// SealServiceMarkCompromisedProcedure is the fully-qualified name of the SealService's
+	// MarkCompromised RPC.
+	SealServiceMarkCompromisedProcedure = "/atoom.seal.v1alpha1.SealService/MarkCompromised"
 )
 
 // SealServiceClient is a client for the atoom.seal.v1alpha1.SealService service.
@@ -70,6 +73,7 @@ type SealServiceClient interface {
 	Rotate(context.Context, *connect.Request[v1alpha1.RotateRequest]) (*connect.Response[v1alpha1.RotateResponse], error)
 	Erase(context.Context, *connect.Request[v1alpha1.EraseRequest]) (*connect.Response[v1alpha1.EraseResponse], error)
 	Rewrap(context.Context, *connect.Request[v1alpha1.RewrapRequest]) (*connect.Response[v1alpha1.RewrapResponse], error)
+	MarkCompromised(context.Context, *connect.Request[v1alpha1.MarkCompromisedRequest]) (*connect.Response[v1alpha1.MarkCompromisedResponse], error)
 }
 
 // NewSealServiceClient constructs a client for the atoom.seal.v1alpha1.SealService service. By
@@ -137,20 +141,27 @@ func NewSealServiceClient(httpClient connect.HTTPClient, baseURL string, opts ..
 			connect.WithSchema(sealServiceMethods.ByName("Rewrap")),
 			connect.WithClientOptions(opts...),
 		),
+		markCompromised: connect.NewClient[v1alpha1.MarkCompromisedRequest, v1alpha1.MarkCompromisedResponse](
+			httpClient,
+			baseURL+SealServiceMarkCompromisedProcedure,
+			connect.WithSchema(sealServiceMethods.ByName("MarkCompromised")),
+			connect.WithClientOptions(opts...),
+		),
 	}
 }
 
 // sealServiceClient implements SealServiceClient.
 type sealServiceClient struct {
-	capabilities *connect.Client[v1alpha1.CapabilitiesRequest, v1alpha1.CapabilitiesResponse]
-	seal         *connect.Client[v1alpha1.SealRequest, v1alpha1.SealResponse]
-	open         *connect.Client[v1alpha1.OpenRequest, v1alpha1.OpenResponse]
-	mac          *connect.Client[v1alpha1.MacRequest, v1alpha1.MacResponse]
-	sign         *connect.Client[v1alpha1.SignRequest, v1alpha1.SignResponse]
-	publicKey    *connect.Client[v1alpha1.PublicKeyRequest, v1alpha1.PublicKeyResponse]
-	rotate       *connect.Client[v1alpha1.RotateRequest, v1alpha1.RotateResponse]
-	erase        *connect.Client[v1alpha1.EraseRequest, v1alpha1.EraseResponse]
-	rewrap       *connect.Client[v1alpha1.RewrapRequest, v1alpha1.RewrapResponse]
+	capabilities    *connect.Client[v1alpha1.CapabilitiesRequest, v1alpha1.CapabilitiesResponse]
+	seal            *connect.Client[v1alpha1.SealRequest, v1alpha1.SealResponse]
+	open            *connect.Client[v1alpha1.OpenRequest, v1alpha1.OpenResponse]
+	mac             *connect.Client[v1alpha1.MacRequest, v1alpha1.MacResponse]
+	sign            *connect.Client[v1alpha1.SignRequest, v1alpha1.SignResponse]
+	publicKey       *connect.Client[v1alpha1.PublicKeyRequest, v1alpha1.PublicKeyResponse]
+	rotate          *connect.Client[v1alpha1.RotateRequest, v1alpha1.RotateResponse]
+	erase           *connect.Client[v1alpha1.EraseRequest, v1alpha1.EraseResponse]
+	rewrap          *connect.Client[v1alpha1.RewrapRequest, v1alpha1.RewrapResponse]
+	markCompromised *connect.Client[v1alpha1.MarkCompromisedRequest, v1alpha1.MarkCompromisedResponse]
 }
 
 // Capabilities calls atoom.seal.v1alpha1.SealService.Capabilities.
@@ -198,6 +209,11 @@ func (c *sealServiceClient) Rewrap(ctx context.Context, req *connect.Request[v1a
 	return c.rewrap.CallUnary(ctx, req)
 }
 
+// MarkCompromised calls atoom.seal.v1alpha1.SealService.MarkCompromised.
+func (c *sealServiceClient) MarkCompromised(ctx context.Context, req *connect.Request[v1alpha1.MarkCompromisedRequest]) (*connect.Response[v1alpha1.MarkCompromisedResponse], error) {
+	return c.markCompromised.CallUnary(ctx, req)
+}
+
 // SealServiceHandler is an implementation of the atoom.seal.v1alpha1.SealService service.
 type SealServiceHandler interface {
 	Capabilities(context.Context, *connect.Request[v1alpha1.CapabilitiesRequest]) (*connect.Response[v1alpha1.CapabilitiesResponse], error)
@@ -209,6 +225,7 @@ type SealServiceHandler interface {
 	Rotate(context.Context, *connect.Request[v1alpha1.RotateRequest]) (*connect.Response[v1alpha1.RotateResponse], error)
 	Erase(context.Context, *connect.Request[v1alpha1.EraseRequest]) (*connect.Response[v1alpha1.EraseResponse], error)
 	Rewrap(context.Context, *connect.Request[v1alpha1.RewrapRequest]) (*connect.Response[v1alpha1.RewrapResponse], error)
+	MarkCompromised(context.Context, *connect.Request[v1alpha1.MarkCompromisedRequest]) (*connect.Response[v1alpha1.MarkCompromisedResponse], error)
 }
 
 // NewSealServiceHandler builds an HTTP handler from the service implementation. It returns the path
@@ -272,6 +289,12 @@ func NewSealServiceHandler(svc SealServiceHandler, opts ...connect.HandlerOption
 		connect.WithSchema(sealServiceMethods.ByName("Rewrap")),
 		connect.WithHandlerOptions(opts...),
 	)
+	sealServiceMarkCompromisedHandler := connect.NewUnaryHandler(
+		SealServiceMarkCompromisedProcedure,
+		svc.MarkCompromised,
+		connect.WithSchema(sealServiceMethods.ByName("MarkCompromised")),
+		connect.WithHandlerOptions(opts...),
+	)
 	return "/atoom.seal.v1alpha1.SealService/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case SealServiceCapabilitiesProcedure:
@@ -292,6 +315,8 @@ func NewSealServiceHandler(svc SealServiceHandler, opts ...connect.HandlerOption
 			sealServiceEraseHandler.ServeHTTP(w, r)
 		case SealServiceRewrapProcedure:
 			sealServiceRewrapHandler.ServeHTTP(w, r)
+		case SealServiceMarkCompromisedProcedure:
+			sealServiceMarkCompromisedHandler.ServeHTTP(w, r)
 		default:
 			http.NotFound(w, r)
 		}
@@ -335,4 +360,8 @@ func (UnimplementedSealServiceHandler) Erase(context.Context, *connect.Request[v
 
 func (UnimplementedSealServiceHandler) Rewrap(context.Context, *connect.Request[v1alpha1.RewrapRequest]) (*connect.Response[v1alpha1.RewrapResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("atoom.seal.v1alpha1.SealService.Rewrap is not implemented"))
+}
+
+func (UnimplementedSealServiceHandler) MarkCompromised(context.Context, *connect.Request[v1alpha1.MarkCompromisedRequest]) (*connect.Response[v1alpha1.MarkCompromisedResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("atoom.seal.v1alpha1.SealService.MarkCompromised is not implemented"))
 }

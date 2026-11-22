@@ -23,16 +23,18 @@ type entry struct {
 	key     []byte
 	expires time.Time
 	dead    bool
+	// compromised is the generation's mark as the block read it when it put the entry (docs/seal-block.md, "Compromised generations").
+	compromised bool
 }
 
-// use runs fn with the key. It returns used == false when the entry was wiped before fn could run.
-func (e *entry) use(fn func(key []byte) error) (used bool, err error) {
+// use runs fn with the key and the mark. It returns used == false when the entry was wiped before fn could run.
+func (e *entry) use(fn func(key []byte, compromised bool) error) (used bool, err error) {
 	e.mu.RLock()
 	defer e.mu.RUnlock()
 	if e.dead {
 		return false, nil
 	}
-	return true, fn(e.key)
+	return true, fn(e.key, e.compromised)
 }
 
 // wipe zeroes the key. Go gives no guarantee that no copy of the bytes lives elsewhere (the garbage collector may have moved the
@@ -83,8 +85,8 @@ func (c *cache) get(ref keyRef) *entry {
 }
 
 // put stores the key under ref and takes ownership of the slice. A key already there is replaced and wiped.
-func (c *cache) put(ref keyRef, key []byte) *entry {
-	e := &entry{key: key, expires: c.now().Add(c.ttl)}
+func (c *cache) put(ref keyRef, key []byte, compromised bool) *entry {
+	e := &entry{key: key, expires: c.now().Add(c.ttl), compromised: compromised}
 	c.mu.Lock()
 	if c.closed {
 		c.mu.Unlock()
@@ -119,6 +121,13 @@ func (c *cache) setGeneration(l line, g uint32) {
 		return
 	}
 	c.current[l] = generationEntry{generation: g, expires: c.now().Add(c.ttl)}
+}
+
+// forgetGeneration forgets the current generation of a line, so the next call reads it from the store.
+func (c *cache) forgetGeneration(l line) {
+	c.mu.Lock()
+	delete(c.current, l)
+	c.mu.Unlock()
 }
 
 // dropLine removes every entry of a line and its current generation, and wipes the keys.

@@ -4,7 +4,7 @@ The `seal` block ([record 0008](../../docs/decisions/0008-blocks.md)): data keys
 
 | | |
 | --- | --- |
-| Contract | `atoom.seal.v1alpha1.SealService` ([seal.proto](proto/atoom/seal/v1alpha1/seal.proto)): `Capabilities`, `Seal`, `Open` (batched), `Mac`, `Sign`, `PublicKey`, `Rotate`, `Erase`, `Rewrap`; Go stubs in `gen/` |
+| Contract | `atoom.seal.v1alpha1.SealService` ([seal.proto](proto/atoom/seal/v1alpha1/seal.proto)): `Capabilities`, `Seal`, `Open` (batched), `Mac`, `Sign`, `PublicKey`, `Rotate`, `Erase`, `Rewrap`, `MarkCompromised`; Go stubs in `gen/` |
 | Library | Go module `github.com/truvity/atoom/blocks/seal`: `seal.New(ctx, seal.Options{Keys, Items, Purposes, Rules, Installation, ...})` returns the block; `Block.Handler()` is the ConnectRPC handler, to mount in-process (`socket.InProcess`) or on a socket (`socket.Serve`); `seal.KeyPurposes` is the block's declaration to its key driver |
 | Kit | package `conformance` (`conformance.Run(ctx, client, out)`, with the kit's `Purposes()` and `Rules()`), and the command `seal-conformance` (`--key-socket K --store-socket S` hosts the block over two drivers and runs the kit in-process; `--socket P` runs it against a block that another host serves; `--print-declaration`) |
 

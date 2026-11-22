@@ -5,10 +5,11 @@
 //	seal-conformance --print-declaration
 //
 // With --key-socket and --store-socket it hosts the block in this process, over the key driver and the store driver that listen on those
-// sockets, with the kit's purposes and rules, and runs the kit against it through an in-memory transport (socket.InProcess): the block's
+// sockets, with the kit's purposes, rules and seal limit, and runs the kit against it through an in-memory transport (socket.InProcess): the block's
 // contract is ConnectRPC in-process too. The key driver must be started with the declaration that --print-declaration writes, the JSON
 // file that the thin mains take as --purposes. With --socket it runs the kit against a block that another host serves on a socket, with
-// the kit's purposes and rules (conformance.Purposes, conformance.Rules).
+// the kit's purposes, rules and seal limit (conformance.Purposes, conformance.Rules, conformance.SealsPerGeneration and
+// conformance.SealReservation).
 //
 // It prints one line for each case and exits 0 when no case failed, 1 when one failed, and 2 on a usage error.
 package main
@@ -82,6 +83,9 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 			Purposes:     conformance.Purposes(),
 			Rules:        conformance.Rules(),
 			Installation: *installation,
+			// The kit seals past the limit of a generation, so the block it hosts has the kit's small one.
+			SealsPerGeneration: conformance.SealsPerGeneration,
+			SealReservation:    conformance.SealReservation,
 		})
 		if err != nil {
 			_, _ = fmt.Fprintln(stderr, "seal-conformance:", err)

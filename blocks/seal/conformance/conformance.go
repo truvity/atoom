@@ -1,8 +1,8 @@
 // Package conformance is the kit of the seal block (docs/seal-block.md, "The kit"): the cases that the block, and any other
 // implementation of SealService, must pass, run through a client of the contract.
 //
-// The kit declares its own purposes (Purposes) and its own rules (Rules), and the block under test is started with both: a host that
-// runs the kit gives them to seal.New, and its key driver the declaration of seal.KeyPurposes(Purposes()). Every case writes under scopes
+// The kit declares its own purposes (Purposes), its own rules (Rules) and its seal limit (SealsPerGeneration, SealReservation), and the
+// block under test is started with them: a host that runs the kit gives them to seal.New, and its key driver the declaration of seal.KeyPurposes(Purposes()). Every case writes under scopes
 // of its own run, so the kit can run again against the same store. The block's own tests run it over in-memory stand-ins of the ports, and
 // `just conformance` runs it over the memory drivers (key/software and store/memory), through their sockets.
 package conformance
@@ -44,6 +44,13 @@ const (
 	RefusedPrefix = "kit-refused-"
 	// NoCreatePrefix starts a scope in which the kit's rules allow the calls and do not allow a key to be made.
 	NoCreatePrefix = "kit-nocreate-"
+)
+
+// The seal limit of the block under test: the kit seals past it, so the block is started with a small one (seal.Options
+// SealsPerGeneration and SealReservation).
+const (
+	SealsPerGeneration = 64
+	SealReservation    = 8
 )
 
 // Purposes is the kit's declaration, which the block under test must serve: two seal purposes, a mac purpose of the current generation
