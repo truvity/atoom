@@ -1,0 +1,8 @@
+# The advisories that `cargo audit` (`just check-advisories`) lets through. An entry is an exception, so it says why it does not affect
+# atoom and the day it is looked at again; prefer bumping the dependency to an entry. The same entries as sluis, with the same dates.
+[advisories]
+ignore = [
+  # chrono is reported unmaintained, not vulnerable. It comes only through cedar-policy-core (the Rust engine of atoom-policy, record
+  # 0019); no release of cedar-policy drops it (4.15.0 still has it). Looked at again by 2026-12-18.
+  "RUSTSEC-2026-0543",
+]

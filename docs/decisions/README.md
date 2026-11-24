@@ -28,6 +28,7 @@ The records were rewritten once, in a clean state, on 2026-11-21, so that each s
 | [0016](0016-the-key-port-signs-digests.md) | The key port signs digests and returns the plain signature; envelopes belong to the blocks | 2026-11-22 |
 | [0017](0017-the-memory-store-is-lossy.md) | The memory store declares `lossy` (partly supersedes 0012) | 2026-11-22 |
 | [0018](0018-a-hosts-rule-on-the-socket-guard.md) | The socket guard runs a host's rule and tells it of refusals; the restart back-off is socket plumbing | 2026-11-22 |
+| [0019](0019-the-policy-bundle-and-its-loader.md) | The signed policy bundle, its loading rules and the loader in Go and Rust (proposed) | 2026-11-24 |
 
 ## Renumbered in the clean rewrite of 2026-11-21
 

@@ -30,6 +30,11 @@ func TestAllowedDependencies(t *testing.T) {
 		goLib("blocks/seal", []string{"common", "key", "store", "socket"}, []string{"github.com/go-jose/go-jose/v4"}),
 		goLib("blocks/token", []string{"blocks/seal", "key", "common"}, nil),
 		{Dir: "common", Lang: "rust", Name: "atoom-common", External: []string{"base64", "buffa", "connectrpc", "connectrpc-build", "serde"}},
+		// A library around an engine reads through ports, with the engine of its language (record 0019).
+		goLib("source", []string{"common"}, []string{"connectrpc.com/connect"}),
+		goLib("policy", []string{"source", "socket", "common"}, []string{"github.com/cedar-policy/cedar-go"}),
+		{Dir: "source", Lang: "rust", Name: "atoom-source", External: []string{"connectrpc"}},
+		{Dir: "policy", Lang: "rust", Name: "atoom-policy", Atoom: []string{"source", "socket"}, External: []string{"cedar-policy", "tokio"}},
 	}
 	if got := checkAll(libs, s); len(got) != 0 {
 		t.Fatalf("a valid tree has problems:\n%s", strings.Join(got, "\n"))
@@ -132,6 +137,32 @@ func TestWrongDependenciesFail(t *testing.T) {
 				goLib("blocks/token", []string{"blocks/seal"}, nil),
 			},
 			want: "blocks/seal (go): requires itself through other libraries: a cycle",
+		},
+		{
+			name: "a library around an engine requires a driver",
+			libs: []lib{
+				goLib("source", nil, nil),
+				goLib("source/file", []string{"source"}, nil),
+				goLib("policy", []string{"source", "source/file"}, nil),
+			},
+			want: "policy (go github.com/truvity/atoom/policy): requires source/file: a library around an engine may require only common, the ports",
+		},
+		{
+			name: "a library around an engine requires a block",
+			libs: []lib{
+				goLib("key", nil, nil),
+				goLib("blocks/seal", []string{"key"}, nil),
+				goLib("policy", []string{"blocks/seal"}, nil),
+			},
+			want: "policy (go github.com/truvity/atoom/policy): requires blocks/seal",
+		},
+		{
+			name: "a block requires the library around an engine",
+			libs: []lib{
+				goLib("policy", nil, nil),
+				goLib("blocks/seal", []string{"policy"}, nil),
+			},
+			want: "blocks/seal (go github.com/truvity/atoom/blocks/seal): requires policy: a library around an engine is linked by a consumer",
 		},
 		{
 			name: "blocks is not a library",

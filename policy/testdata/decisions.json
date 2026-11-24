@@ -1,0 +1,2399 @@
+{
+ "description": "The decision cases of the decision test set (record 0019, 'Deciding'): a bundle by name, a request (principal, action, resource, context in the JSON form of Cedar) and the entities the caller gives (the JSON entity format of Cedar; the action entities come from the schema), and the decision of the reference engine (cedar-policy): allow or deny, the policies that determined it and the policies that errored, each sorted; or a misfit, a request or entity that does not fit the schema. A bundle listed in gaps is one that an engine cannot load: that engine checks that it refuses the bundle as unsupported and skips its cases. A case with expect_go and gap is one where cedar-go gives another verdict: the Go package holds it to expect_go. The Go package and the Rust crate run every case.",
+ "bundles": {
+  "routes": {
+   "schema": "entity Group in [Group];\nentity User in [Group] {\n  email: String,\n  groups: Set<String>,\n};\nentity Route {\n  site: String,\n  mode: String,\n};\naction read;\naction \"GET\", \"HEAD\" in [Action::\"read\"] appliesTo {\n  principal: [User],\n  resource: [Route],\n  context: { path: String, method: String },\n};\naction \"POST\" appliesTo {\n  principal: [User],\n  resource: [Route],\n  context: { path: String, method: String },\n};\n",
+   "policies": {
+    "open": "permit (principal, action, resource) when { resource.mode == \"open\" };",
+    "admins": "permit (principal in Group::\"admins\", action, resource == Route::\"admin\");",
+    "read": "permit (principal, action in Action::\"read\", resource) when { resource.mode == \"read\" };",
+    "no-post-on-read": "forbid (principal, action == Action::\"POST\", resource) when { resource.mode == \"read\" };",
+    "mail": "permit (principal, action, resource == Route::\"mail\") when { principal.email like \"*@example.com\" };",
+    "api": "permit (principal, action, resource == Route::\"api\") when { context.path like \"/api/*\" && context.method == \"GET\" };",
+    "overflow": "permit (principal, action, resource == Route::\"overflow\") when { 9223372036854775807 + 1 > 0 };"
+   }
+  },
+  "linked": {
+   "schema": "entity Group in [Group];\nentity User in [Group] {\n  email: String,\n  groups: Set<String>,\n};\nentity Route {\n  site: String,\n  mode: String,\n};\naction read;\naction \"GET\", \"HEAD\" in [Action::\"read\"] appliesTo {\n  principal: [User],\n  resource: [Route],\n  context: { path: String, method: String },\n};\naction \"POST\" appliesTo {\n  principal: [User],\n  resource: [Route],\n  context: { path: String, method: String },\n};\n",
+   "policies": {
+    "open": "permit (principal, action, resource) when { resource.mode == \"open\" };"
+   },
+   "templates": {
+    "route-for": "permit (principal == ?principal, action in Action::\"read\", resource == ?resource);"
+   },
+   "links": [
+    {
+     "id": "alice-secret",
+     "template": "route-for",
+     "values": {
+      "?principal": {
+       "type": "User",
+       "id": "alice"
+      },
+      "?resource": {
+       "type": "Route",
+       "id": "secret"
+      }
+     }
+    }
+   ]
+  },
+  "extensions": {
+   "schema": "entity User {\n  level: Long,\n} tags String;\nentity Doc;\naction view appliesTo {\n  principal: [User],\n  resource: [Doc],\n  context: { ip: ipaddr, at: datetime },\n};\n",
+   "policies": {
+    "team": "permit (principal, action, resource) when { principal.hasTag(\"team\") && principal.getTag(\"team\") == \"core\" };",
+    "net": "permit (principal, action, resource) when { context.ip.isInRange(ip(\"10.0.0.0/8\")) && principal.level >= 3 };",
+    "before": "forbid (principal, action, resource) when { context.at < datetime(\"2026-01-01\") };"
+   }
+  }
+ },
+ "gaps": {
+  "linked": {
+   "go": "cedar-go has no templates: a bundle with a template or a link is refused (unsupported)"
+  }
+ },
+ "cases": [
+  {
+   "name": "an open route",
+   "bundle": "routes",
+   "principal": {
+    "type": "User",
+    "id": "bob"
+   },
+   "action": {
+    "type": "Action",
+    "id": "GET"
+   },
+   "resource": {
+    "type": "Route",
+    "id": "home"
+   },
+   "context": {
+    "path": "/",
+    "method": "GET"
+   },
+   "entities": [
+    {
+     "uid": {
+      "type": "User",
+      "id": "bob"
+     },
+     "attrs": {
+      "email": "bob@example.org",
+      "groups": []
+     },
+     "parents": [
+      {
+       "type": "Group",
+       "id": "staff"
+      }
+     ]
+    },
+    {
+     "uid": {
+      "type": "Route",
+      "id": "home"
+     },
+     "attrs": {
+      "site": "docs",
+      "mode": "open"
+     },
+     "parents": []
+    },
+    {
+     "uid": {
+      "type": "Group",
+      "id": "admins"
+     },
+     "attrs": {},
+     "parents": []
+    },
+    {
+     "uid": {
+      "type": "Group",
+      "id": "staff"
+     },
+     "attrs": {},
+     "parents": []
+    }
+   ],
+   "expect": {
+    "decision": "allow",
+    "reasons": [
+     "open"
+    ],
+    "errors": []
+   }
+  },
+  {
+   "name": "the admin route, for a member of admins",
+   "bundle": "routes",
+   "principal": {
+    "type": "User",
+    "id": "alice"
+   },
+   "action": {
+    "type": "Action",
+    "id": "GET"
+   },
+   "resource": {
+    "type": "Route",
+    "id": "admin"
+   },
+   "context": {
+    "path": "/",
+    "method": "GET"
+   },
+   "entities": [
+    {
+     "uid": {
+      "type": "User",
+      "id": "alice"
+     },
+     "attrs": {
+      "email": "alice@example.com",
+      "groups": []
+     },
+     "parents": [
+      {
+       "type": "Group",
+       "id": "admins"
+      }
+     ]
+    },
+    {
+     "uid": {
+      "type": "Route",
+      "id": "admin"
+     },
+     "attrs": {
+      "site": "docs",
+      "mode": "admin"
+     },
+     "parents": []
+    },
+    {
+     "uid": {
+      "type": "Group",
+      "id": "admins"
+     },
+     "attrs": {},
+     "parents": []
+    },
+    {
+     "uid": {
+      "type": "Group",
+      "id": "staff"
+     },
+     "attrs": {},
+     "parents": []
+    }
+   ],
+   "expect": {
+    "decision": "allow",
+    "reasons": [
+     "admins"
+    ],
+    "errors": []
+   }
+  },
+  {
+   "name": "the admin route, for another",
+   "bundle": "routes",
+   "principal": {
+    "type": "User",
+    "id": "bob"
+   },
+   "action": {
+    "type": "Action",
+    "id": "GET"
+   },
+   "resource": {
+    "type": "Route",
+    "id": "admin"
+   },
+   "context": {
+    "path": "/",
+    "method": "GET"
+   },
+   "entities": [
+    {
+     "uid": {
+      "type": "User",
+      "id": "bob"
+     },
+     "attrs": {
+      "email": "bob@example.org",
+      "groups": []
+     },
+     "parents": [
+      {
+       "type": "Group",
+       "id": "staff"
+      }
+     ]
+    },
+    {
+     "uid": {
+      "type": "Route",
+      "id": "admin"
+     },
+     "attrs": {
+      "site": "docs",
+      "mode": "admin"
+     },
+     "parents": []
+    },
+    {
+     "uid": {
+      "type": "Group",
+      "id": "admins"
+     },
+     "attrs": {},
+     "parents": []
+    },
+    {
+     "uid": {
+      "type": "Group",
+      "id": "staff"
+     },
+     "attrs": {},
+     "parents": []
+    }
+   ],
+   "expect": {
+    "decision": "deny",
+    "reasons": [],
+    "errors": []
+   }
+  },
+  {
+   "name": "the admin route, through a nested group",
+   "bundle": "routes",
+   "principal": {
+    "type": "User",
+    "id": "carol"
+   },
+   "action": {
+    "type": "Action",
+    "id": "POST"
+   },
+   "resource": {
+    "type": "Route",
+    "id": "admin"
+   },
+   "context": {
+    "path": "/",
+    "method": "GET"
+   },
+   "entities": [
+    {
+     "uid": {
+      "type": "User",
+      "id": "carol"
+     },
+     "attrs": {
+      "email": "carol@example.net",
+      "groups": []
+     },
+     "parents": [
+      {
+       "type": "Group",
+       "id": "ops"
+      }
+     ]
+    },
+    {
+     "uid": {
+      "type": "Group",
+      "id": "ops"
+     },
+     "attrs": {},
+     "parents": [
+      {
+       "type": "Group",
+       "id": "admins"
+      }
+     ]
+    },
+    {
+     "uid": {
+      "type": "Route",
+      "id": "admin"
+     },
+     "attrs": {
+      "site": "docs",
+      "mode": "admin"
+     },
+     "parents": []
+    },
+    {
+     "uid": {
+      "type": "Group",
+      "id": "admins"
+     },
+     "attrs": {},
+     "parents": []
+    },
+    {
+     "uid": {
+      "type": "Group",
+      "id": "staff"
+     },
+     "attrs": {},
+     "parents": []
+    }
+   ],
+   "expect": {
+    "decision": "allow",
+    "reasons": [
+     "admins"
+    ],
+    "errors": []
+   }
+  },
+  {
+   "name": "the admin route, when the caller gives no entity for the principal",
+   "bundle": "routes",
+   "principal": {
+    "type": "User",
+    "id": "alice"
+   },
+   "action": {
+    "type": "Action",
+    "id": "GET"
+   },
+   "resource": {
+    "type": "Route",
+    "id": "admin"
+   },
+   "context": {
+    "path": "/",
+    "method": "GET"
+   },
+   "entities": [
+    {
+     "uid": {
+      "type": "Route",
+      "id": "admin"
+     },
+     "attrs": {
+      "site": "docs",
+      "mode": "admin"
+     },
+     "parents": []
+    },
+    {
+     "uid": {
+      "type": "Group",
+      "id": "admins"
+     },
+     "attrs": {},
+     "parents": []
+    },
+    {
+     "uid": {
+      "type": "Group",
+      "id": "staff"
+     },
+     "attrs": {},
+     "parents": []
+    }
+   ],
+   "expect": {
+    "decision": "deny",
+    "reasons": [],
+    "errors": []
+   }
+  },
+  {
+   "name": "a read route, GET is in the action group read",
+   "bundle": "routes",
+   "principal": {
+    "type": "User",
+    "id": "bob"
+   },
+   "action": {
+    "type": "Action",
+    "id": "GET"
+   },
+   "resource": {
+    "type": "Route",
+    "id": "docs"
+   },
+   "context": {
+    "path": "/",
+    "method": "GET"
+   },
+   "entities": [
+    {
+     "uid": {
+      "type": "User",
+      "id": "bob"
+     },
+     "attrs": {
+      "email": "bob@example.org",
+      "groups": []
+     },
+     "parents": [
+      {
+       "type": "Group",
+       "id": "staff"
+      }
+     ]
+    },
+    {
+     "uid": {
+      "type": "Route",
+      "id": "docs"
+     },
+     "attrs": {
+      "site": "docs",
+      "mode": "read"
+     },
+     "parents": []
+    },
+    {
+     "uid": {
+      "type": "Group",
+      "id": "admins"
+     },
+     "attrs": {},
+     "parents": []
+    },
+    {
+     "uid": {
+      "type": "Group",
+      "id": "staff"
+     },
+     "attrs": {},
+     "parents": []
+    }
+   ],
+   "expect": {
+    "decision": "allow",
+    "reasons": [
+     "read"
+    ],
+    "errors": []
+   }
+  },
+  {
+   "name": "a read route, HEAD is in the action group read",
+   "bundle": "routes",
+   "principal": {
+    "type": "User",
+    "id": "bob"
+   },
+   "action": {
+    "type": "Action",
+    "id": "HEAD"
+   },
+   "resource": {
+    "type": "Route",
+    "id": "docs"
+   },
+   "context": {
+    "path": "/",
+    "method": "GET"
+   },
+   "entities": [
+    {
+     "uid": {
+      "type": "User",
+      "id": "bob"
+     },
+     "attrs": {
+      "email": "bob@example.org",
+      "groups": []
+     },
+     "parents": [
+      {
+       "type": "Group",
+       "id": "staff"
+      }
+     ]
+    },
+    {
+     "uid": {
+      "type": "Route",
+      "id": "docs"
+     },
+     "attrs": {
+      "site": "docs",
+      "mode": "read"
+     },
+     "parents": []
+    },
+    {
+     "uid": {
+      "type": "Group",
+      "id": "admins"
+     },
+     "attrs": {},
+     "parents": []
+    },
+    {
+     "uid": {
+      "type": "Group",
+      "id": "staff"
+     },
+     "attrs": {},
+     "parents": []
+    }
+   ],
+   "expect": {
+    "decision": "allow",
+    "reasons": [
+     "read"
+    ],
+    "errors": []
+   }
+  },
+  {
+   "name": "a read route, POST is forbidden",
+   "bundle": "routes",
+   "principal": {
+    "type": "User",
+    "id": "bob"
+   },
+   "action": {
+    "type": "Action",
+    "id": "POST"
+   },
+   "resource": {
+    "type": "Route",
+    "id": "docs"
+   },
+   "context": {
+    "path": "/",
+    "method": "GET"
+   },
+   "entities": [
+    {
+     "uid": {
+      "type": "User",
+      "id": "bob"
+     },
+     "attrs": {
+      "email": "bob@example.org",
+      "groups": []
+     },
+     "parents": [
+      {
+       "type": "Group",
+       "id": "staff"
+      }
+     ]
+    },
+    {
+     "uid": {
+      "type": "Route",
+      "id": "docs"
+     },
+     "attrs": {
+      "site": "docs",
+      "mode": "read"
+     },
+     "parents": []
+    },
+    {
+     "uid": {
+      "type": "Group",
+      "id": "admins"
+     },
+     "attrs": {},
+     "parents": []
+    },
+    {
+     "uid": {
+      "type": "Group",
+      "id": "staff"
+     },
+     "attrs": {},
+     "parents": []
+    }
+   ],
+   "expect": {
+    "decision": "deny",
+    "reasons": [
+     "no-post-on-read"
+    ],
+    "errors": []
+   }
+  },
+  {
+   "name": "a forbid wins over a permit",
+   "bundle": "routes",
+   "principal": {
+    "type": "User",
+    "id": "alice"
+   },
+   "action": {
+    "type": "Action",
+    "id": "POST"
+   },
+   "resource": {
+    "type": "Route",
+    "id": "admin"
+   },
+   "context": {
+    "path": "/",
+    "method": "GET"
+   },
+   "entities": [
+    {
+     "uid": {
+      "type": "User",
+      "id": "alice"
+     },
+     "attrs": {
+      "email": "alice@example.com",
+      "groups": []
+     },
+     "parents": [
+      {
+       "type": "Group",
+       "id": "admins"
+      }
+     ]
+    },
+    {
+     "uid": {
+      "type": "Route",
+      "id": "admin"
+     },
+     "attrs": {
+      "site": "docs",
+      "mode": "read"
+     },
+     "parents": []
+    },
+    {
+     "uid": {
+      "type": "Group",
+      "id": "admins"
+     },
+     "attrs": {},
+     "parents": []
+    },
+    {
+     "uid": {
+      "type": "Group",
+      "id": "staff"
+     },
+     "attrs": {},
+     "parents": []
+    }
+   ],
+   "expect": {
+    "decision": "deny",
+    "reasons": [
+     "no-post-on-read"
+    ],
+    "errors": []
+   }
+  },
+  {
+   "name": "the mail route, an address that matches",
+   "bundle": "routes",
+   "principal": {
+    "type": "User",
+    "id": "alice"
+   },
+   "action": {
+    "type": "Action",
+    "id": "GET"
+   },
+   "resource": {
+    "type": "Route",
+    "id": "mail"
+   },
+   "context": {
+    "path": "/",
+    "method": "GET"
+   },
+   "entities": [
+    {
+     "uid": {
+      "type": "User",
+      "id": "alice"
+     },
+     "attrs": {
+      "email": "alice@example.com",
+      "groups": []
+     },
+     "parents": [
+      {
+       "type": "Group",
+       "id": "admins"
+      }
+     ]
+    },
+    {
+     "uid": {
+      "type": "Route",
+      "id": "mail"
+     },
+     "attrs": {
+      "site": "docs",
+      "mode": "closed"
+     },
+     "parents": []
+    },
+    {
+     "uid": {
+      "type": "Group",
+      "id": "admins"
+     },
+     "attrs": {},
+     "parents": []
+    },
+    {
+     "uid": {
+      "type": "Group",
+      "id": "staff"
+     },
+     "attrs": {},
+     "parents": []
+    }
+   ],
+   "expect": {
+    "decision": "allow",
+    "reasons": [
+     "mail"
+    ],
+    "errors": []
+   }
+  },
+  {
+   "name": "the mail route, an address that does not",
+   "bundle": "routes",
+   "principal": {
+    "type": "User",
+    "id": "bob"
+   },
+   "action": {
+    "type": "Action",
+    "id": "GET"
+   },
+   "resource": {
+    "type": "Route",
+    "id": "mail"
+   },
+   "context": {
+    "path": "/",
+    "method": "GET"
+   },
+   "entities": [
+    {
+     "uid": {
+      "type": "User",
+      "id": "bob"
+     },
+     "attrs": {
+      "email": "bob@example.org",
+      "groups": []
+     },
+     "parents": [
+      {
+       "type": "Group",
+       "id": "staff"
+      }
+     ]
+    },
+    {
+     "uid": {
+      "type": "Route",
+      "id": "mail"
+     },
+     "attrs": {
+      "site": "docs",
+      "mode": "closed"
+     },
+     "parents": []
+    },
+    {
+     "uid": {
+      "type": "Group",
+      "id": "admins"
+     },
+     "attrs": {},
+     "parents": []
+    },
+    {
+     "uid": {
+      "type": "Group",
+      "id": "staff"
+     },
+     "attrs": {},
+     "parents": []
+    }
+   ],
+   "expect": {
+    "decision": "deny",
+    "reasons": [],
+    "errors": []
+   }
+  },
+  {
+   "name": "the api route, from the context",
+   "bundle": "routes",
+   "principal": {
+    "type": "User",
+    "id": "bob"
+   },
+   "action": {
+    "type": "Action",
+    "id": "GET"
+   },
+   "resource": {
+    "type": "Route",
+    "id": "api"
+   },
+   "context": {
+    "path": "/api/v1",
+    "method": "GET"
+   },
+   "entities": [
+    {
+     "uid": {
+      "type": "User",
+      "id": "bob"
+     },
+     "attrs": {
+      "email": "bob@example.org",
+      "groups": []
+     },
+     "parents": [
+      {
+       "type": "Group",
+       "id": "staff"
+      }
+     ]
+    },
+    {
+     "uid": {
+      "type": "Route",
+      "id": "api"
+     },
+     "attrs": {
+      "site": "docs",
+      "mode": "closed"
+     },
+     "parents": []
+    },
+    {
+     "uid": {
+      "type": "Group",
+      "id": "admins"
+     },
+     "attrs": {},
+     "parents": []
+    },
+    {
+     "uid": {
+      "type": "Group",
+      "id": "staff"
+     },
+     "attrs": {},
+     "parents": []
+    }
+   ],
+   "expect": {
+    "decision": "allow",
+    "reasons": [
+     "api"
+    ],
+    "errors": []
+   }
+  },
+  {
+   "name": "the api route, a context that does not match",
+   "bundle": "routes",
+   "principal": {
+    "type": "User",
+    "id": "bob"
+   },
+   "action": {
+    "type": "Action",
+    "id": "GET"
+   },
+   "resource": {
+    "type": "Route",
+    "id": "api"
+   },
+   "context": {
+    "path": "/other",
+    "method": "GET"
+   },
+   "entities": [
+    {
+     "uid": {
+      "type": "User",
+      "id": "bob"
+     },
+     "attrs": {
+      "email": "bob@example.org",
+      "groups": []
+     },
+     "parents": [
+      {
+       "type": "Group",
+       "id": "staff"
+      }
+     ]
+    },
+    {
+     "uid": {
+      "type": "Route",
+      "id": "api"
+     },
+     "attrs": {
+      "site": "docs",
+      "mode": "closed"
+     },
+     "parents": []
+    },
+    {
+     "uid": {
+      "type": "Group",
+      "id": "admins"
+     },
+     "attrs": {},
+     "parents": []
+    },
+    {
+     "uid": {
+      "type": "Group",
+      "id": "staff"
+     },
+     "attrs": {},
+     "parents": []
+    }
+   ],
+   "expect": {
+    "decision": "deny",
+    "reasons": [],
+    "errors": []
+   }
+  },
+  {
+   "name": "a policy that errors counts as no permit",
+   "bundle": "routes",
+   "principal": {
+    "type": "User",
+    "id": "bob"
+   },
+   "action": {
+    "type": "Action",
+    "id": "GET"
+   },
+   "resource": {
+    "type": "Route",
+    "id": "overflow"
+   },
+   "context": {
+    "path": "/",
+    "method": "GET"
+   },
+   "entities": [
+    {
+     "uid": {
+      "type": "User",
+      "id": "bob"
+     },
+     "attrs": {
+      "email": "bob@example.org",
+      "groups": []
+     },
+     "parents": [
+      {
+       "type": "Group",
+       "id": "staff"
+      }
+     ]
+    },
+    {
+     "uid": {
+      "type": "Route",
+      "id": "overflow"
+     },
+     "attrs": {
+      "site": "docs",
+      "mode": "closed"
+     },
+     "parents": []
+    },
+    {
+     "uid": {
+      "type": "Group",
+      "id": "admins"
+     },
+     "attrs": {},
+     "parents": []
+    },
+    {
+     "uid": {
+      "type": "Group",
+      "id": "staff"
+     },
+     "attrs": {},
+     "parents": []
+    }
+   ],
+   "expect": {
+    "decision": "deny",
+    "reasons": [],
+    "errors": [
+     "overflow"
+    ]
+   }
+  },
+  {
+   "name": "a policy that errors beside one that permits",
+   "bundle": "routes",
+   "principal": {
+    "type": "User",
+    "id": "bob"
+   },
+   "action": {
+    "type": "Action",
+    "id": "GET"
+   },
+   "resource": {
+    "type": "Route",
+    "id": "overflow"
+   },
+   "context": {
+    "path": "/",
+    "method": "GET"
+   },
+   "entities": [
+    {
+     "uid": {
+      "type": "User",
+      "id": "bob"
+     },
+     "attrs": {
+      "email": "bob@example.org",
+      "groups": []
+     },
+     "parents": [
+      {
+       "type": "Group",
+       "id": "staff"
+      }
+     ]
+    },
+    {
+     "uid": {
+      "type": "Route",
+      "id": "overflow"
+     },
+     "attrs": {
+      "site": "docs",
+      "mode": "open"
+     },
+     "parents": []
+    },
+    {
+     "uid": {
+      "type": "Group",
+      "id": "admins"
+     },
+     "attrs": {},
+     "parents": []
+    },
+    {
+     "uid": {
+      "type": "Group",
+      "id": "staff"
+     },
+     "attrs": {},
+     "parents": []
+    }
+   ],
+   "expect": {
+    "decision": "allow",
+    "reasons": [
+     "open"
+    ],
+    "errors": [
+     "overflow"
+    ]
+   }
+  },
+  {
+   "name": "a principal of a type the action does not apply to",
+   "bundle": "routes",
+   "principal": {
+    "type": "Route",
+    "id": "home"
+   },
+   "action": {
+    "type": "Action",
+    "id": "GET"
+   },
+   "resource": {
+    "type": "Route",
+    "id": "home"
+   },
+   "context": {
+    "path": "/",
+    "method": "GET"
+   },
+   "entities": [
+    {
+     "uid": {
+      "type": "Route",
+      "id": "home"
+     },
+     "attrs": {
+      "site": "docs",
+      "mode": "open"
+     },
+     "parents": []
+    }
+   ],
+   "expect": {
+    "misfit": true
+   }
+  },
+  {
+   "name": "an action the schema does not declare",
+   "bundle": "routes",
+   "principal": {
+    "type": "User",
+    "id": "bob"
+   },
+   "action": {
+    "type": "Action",
+    "id": "DELETE"
+   },
+   "resource": {
+    "type": "Route",
+    "id": "home"
+   },
+   "context": {
+    "path": "/",
+    "method": "GET"
+   },
+   "entities": [
+    {
+     "uid": {
+      "type": "User",
+      "id": "bob"
+     },
+     "attrs": {
+      "email": "bob@example.org",
+      "groups": []
+     },
+     "parents": [
+      {
+       "type": "Group",
+       "id": "staff"
+      }
+     ]
+    },
+    {
+     "uid": {
+      "type": "Route",
+      "id": "home"
+     },
+     "attrs": {
+      "site": "docs",
+      "mode": "open"
+     },
+     "parents": []
+    },
+    {
+     "uid": {
+      "type": "Group",
+      "id": "admins"
+     },
+     "attrs": {},
+     "parents": []
+    },
+    {
+     "uid": {
+      "type": "Group",
+      "id": "staff"
+     },
+     "attrs": {},
+     "parents": []
+    }
+   ],
+   "expect": {
+    "misfit": true
+   }
+  },
+  {
+   "name": "a context without a required attribute",
+   "bundle": "routes",
+   "principal": {
+    "type": "User",
+    "id": "bob"
+   },
+   "action": {
+    "type": "Action",
+    "id": "GET"
+   },
+   "resource": {
+    "type": "Route",
+    "id": "home"
+   },
+   "context": {
+    "path": "/"
+   },
+   "entities": [
+    {
+     "uid": {
+      "type": "User",
+      "id": "bob"
+     },
+     "attrs": {
+      "email": "bob@example.org",
+      "groups": []
+     },
+     "parents": [
+      {
+       "type": "Group",
+       "id": "staff"
+      }
+     ]
+    },
+    {
+     "uid": {
+      "type": "Route",
+      "id": "home"
+     },
+     "attrs": {
+      "site": "docs",
+      "mode": "open"
+     },
+     "parents": []
+    },
+    {
+     "uid": {
+      "type": "Group",
+      "id": "admins"
+     },
+     "attrs": {},
+     "parents": []
+    },
+    {
+     "uid": {
+      "type": "Group",
+      "id": "staff"
+     },
+     "attrs": {},
+     "parents": []
+    }
+   ],
+   "expect": {
+    "misfit": true
+   }
+  },
+  {
+   "name": "a context with an attribute the schema does not declare",
+   "bundle": "routes",
+   "principal": {
+    "type": "User",
+    "id": "bob"
+   },
+   "action": {
+    "type": "Action",
+    "id": "GET"
+   },
+   "resource": {
+    "type": "Route",
+    "id": "home"
+   },
+   "context": {
+    "path": "/",
+    "method": "GET",
+    "extra": 1
+   },
+   "entities": [
+    {
+     "uid": {
+      "type": "User",
+      "id": "bob"
+     },
+     "attrs": {
+      "email": "bob@example.org",
+      "groups": []
+     },
+     "parents": [
+      {
+       "type": "Group",
+       "id": "staff"
+      }
+     ]
+    },
+    {
+     "uid": {
+      "type": "Route",
+      "id": "home"
+     },
+     "attrs": {
+      "site": "docs",
+      "mode": "open"
+     },
+     "parents": []
+    },
+    {
+     "uid": {
+      "type": "Group",
+      "id": "admins"
+     },
+     "attrs": {},
+     "parents": []
+    },
+    {
+     "uid": {
+      "type": "Group",
+      "id": "staff"
+     },
+     "attrs": {},
+     "parents": []
+    }
+   ],
+   "expect": {
+    "misfit": true
+   }
+  },
+  {
+   "name": "an entity attribute of the wrong type",
+   "bundle": "routes",
+   "principal": {
+    "type": "User",
+    "id": "bob"
+   },
+   "action": {
+    "type": "Action",
+    "id": "GET"
+   },
+   "resource": {
+    "type": "Route",
+    "id": "home"
+   },
+   "context": {
+    "path": "/",
+    "method": "GET"
+   },
+   "entities": [
+    {
+     "uid": {
+      "type": "User",
+      "id": "bob"
+     },
+     "attrs": {
+      "email": 1,
+      "groups": []
+     },
+     "parents": [
+      {
+       "type": "Group",
+       "id": "staff"
+      }
+     ]
+    },
+    {
+     "uid": {
+      "type": "Route",
+      "id": "home"
+     },
+     "attrs": {
+      "site": "docs",
+      "mode": "open"
+     },
+     "parents": []
+    },
+    {
+     "uid": {
+      "type": "Group",
+      "id": "admins"
+     },
+     "attrs": {},
+     "parents": []
+    },
+    {
+     "uid": {
+      "type": "Group",
+      "id": "staff"
+     },
+     "attrs": {},
+     "parents": []
+    }
+   ],
+   "expect": {
+    "misfit": true
+   }
+  },
+  {
+   "name": "an entity without a required attribute",
+   "bundle": "routes",
+   "principal": {
+    "type": "User",
+    "id": "bob"
+   },
+   "action": {
+    "type": "Action",
+    "id": "GET"
+   },
+   "resource": {
+    "type": "Route",
+    "id": "home"
+   },
+   "context": {
+    "path": "/",
+    "method": "GET"
+   },
+   "entities": [
+    {
+     "uid": {
+      "type": "User",
+      "id": "bob"
+     },
+     "attrs": {
+      "groups": []
+     },
+     "parents": [
+      {
+       "type": "Group",
+       "id": "staff"
+      }
+     ]
+    },
+    {
+     "uid": {
+      "type": "Route",
+      "id": "home"
+     },
+     "attrs": {
+      "site": "docs",
+      "mode": "open"
+     },
+     "parents": []
+    },
+    {
+     "uid": {
+      "type": "Group",
+      "id": "admins"
+     },
+     "attrs": {},
+     "parents": []
+    },
+    {
+     "uid": {
+      "type": "Group",
+      "id": "staff"
+     },
+     "attrs": {},
+     "parents": []
+    }
+   ],
+   "expect": {
+    "misfit": true
+   }
+  },
+  {
+   "name": "an entity of a type the schema does not declare",
+   "bundle": "routes",
+   "principal": {
+    "type": "User",
+    "id": "bob"
+   },
+   "action": {
+    "type": "Action",
+    "id": "GET"
+   },
+   "resource": {
+    "type": "Route",
+    "id": "home"
+   },
+   "context": {
+    "path": "/",
+    "method": "GET"
+   },
+   "entities": [
+    {
+     "uid": {
+      "type": "User",
+      "id": "bob"
+     },
+     "attrs": {
+      "email": "bob@example.org",
+      "groups": []
+     },
+     "parents": [
+      {
+       "type": "Group",
+       "id": "staff"
+      }
+     ]
+    },
+    {
+     "uid": {
+      "type": "Route",
+      "id": "home"
+     },
+     "attrs": {
+      "site": "docs",
+      "mode": "open"
+     },
+     "parents": []
+    },
+    {
+     "uid": {
+      "type": "Nope",
+      "id": "x"
+     },
+     "attrs": {},
+     "parents": []
+    },
+    {
+     "uid": {
+      "type": "Group",
+      "id": "admins"
+     },
+     "attrs": {},
+     "parents": []
+    },
+    {
+     "uid": {
+      "type": "Group",
+      "id": "staff"
+     },
+     "attrs": {},
+     "parents": []
+    }
+   ],
+   "expect": {
+    "misfit": true
+   }
+  },
+  {
+   "name": "an entity with a parent of a type the schema does not allow",
+   "bundle": "routes",
+   "principal": {
+    "type": "User",
+    "id": "bob"
+   },
+   "action": {
+    "type": "Action",
+    "id": "GET"
+   },
+   "resource": {
+    "type": "Route",
+    "id": "home"
+   },
+   "context": {
+    "path": "/",
+    "method": "GET"
+   },
+   "entities": [
+    {
+     "uid": {
+      "type": "User",
+      "id": "bob"
+     },
+     "attrs": {
+      "email": "bob@example.org",
+      "groups": []
+     },
+     "parents": [
+      {
+       "type": "Route",
+       "id": "home"
+      }
+     ]
+    },
+    {
+     "uid": {
+      "type": "Route",
+      "id": "home"
+     },
+     "attrs": {
+      "site": "docs",
+      "mode": "open"
+     },
+     "parents": []
+    },
+    {
+     "uid": {
+      "type": "Group",
+      "id": "admins"
+     },
+     "attrs": {},
+     "parents": []
+    },
+    {
+     "uid": {
+      "type": "Group",
+      "id": "staff"
+     },
+     "attrs": {},
+     "parents": []
+    }
+   ],
+   "expect": {
+    "misfit": true
+   }
+  },
+  {
+   "name": "the caller gives an action entity",
+   "bundle": "routes",
+   "principal": {
+    "type": "User",
+    "id": "bob"
+   },
+   "action": {
+    "type": "Action",
+    "id": "GET"
+   },
+   "resource": {
+    "type": "Route",
+    "id": "home"
+   },
+   "context": {
+    "path": "/",
+    "method": "GET"
+   },
+   "entities": [
+    {
+     "uid": {
+      "type": "User",
+      "id": "bob"
+     },
+     "attrs": {
+      "email": "bob@example.org",
+      "groups": []
+     },
+     "parents": [
+      {
+       "type": "Group",
+       "id": "staff"
+      }
+     ]
+    },
+    {
+     "uid": {
+      "type": "Route",
+      "id": "home"
+     },
+     "attrs": {
+      "site": "docs",
+      "mode": "open"
+     },
+     "parents": []
+    },
+    {
+     "uid": {
+      "type": "Action",
+      "id": "GET"
+     },
+     "attrs": {},
+     "parents": [
+      {
+       "type": "Action",
+       "id": "read"
+      }
+     ]
+    },
+    {
+     "uid": {
+      "type": "Group",
+      "id": "admins"
+     },
+     "attrs": {},
+     "parents": []
+    },
+    {
+     "uid": {
+      "type": "Group",
+      "id": "staff"
+     },
+     "attrs": {},
+     "parents": []
+    }
+   ],
+   "expect": {
+    "misfit": true
+   }
+  },
+  {
+   "name": "a template link permits",
+   "bundle": "linked",
+   "principal": {
+    "type": "User",
+    "id": "alice"
+   },
+   "action": {
+    "type": "Action",
+    "id": "GET"
+   },
+   "resource": {
+    "type": "Route",
+    "id": "secret"
+   },
+   "context": {
+    "path": "/",
+    "method": "GET"
+   },
+   "entities": [
+    {
+     "uid": {
+      "type": "User",
+      "id": "alice"
+     },
+     "attrs": {
+      "email": "alice@example.com",
+      "groups": []
+     },
+     "parents": [
+      {
+       "type": "Group",
+       "id": "admins"
+      }
+     ]
+    },
+    {
+     "uid": {
+      "type": "Route",
+      "id": "secret"
+     },
+     "attrs": {
+      "site": "docs",
+      "mode": "closed"
+     },
+     "parents": []
+    },
+    {
+     "uid": {
+      "type": "Group",
+      "id": "admins"
+     },
+     "attrs": {},
+     "parents": []
+    },
+    {
+     "uid": {
+      "type": "Group",
+      "id": "staff"
+     },
+     "attrs": {},
+     "parents": []
+    }
+   ],
+   "expect": {
+    "decision": "allow",
+    "reasons": [
+     "alice-secret"
+    ],
+    "errors": []
+   }
+  },
+  {
+   "name": "a template link does not permit another principal",
+   "bundle": "linked",
+   "principal": {
+    "type": "User",
+    "id": "bob"
+   },
+   "action": {
+    "type": "Action",
+    "id": "GET"
+   },
+   "resource": {
+    "type": "Route",
+    "id": "secret"
+   },
+   "context": {
+    "path": "/",
+    "method": "GET"
+   },
+   "entities": [
+    {
+     "uid": {
+      "type": "User",
+      "id": "bob"
+     },
+     "attrs": {
+      "email": "bob@example.org",
+      "groups": []
+     },
+     "parents": [
+      {
+       "type": "Group",
+       "id": "staff"
+      }
+     ]
+    },
+    {
+     "uid": {
+      "type": "Route",
+      "id": "secret"
+     },
+     "attrs": {
+      "site": "docs",
+      "mode": "closed"
+     },
+     "parents": []
+    },
+    {
+     "uid": {
+      "type": "Group",
+      "id": "admins"
+     },
+     "attrs": {},
+     "parents": []
+    },
+    {
+     "uid": {
+      "type": "Group",
+      "id": "staff"
+     },
+     "attrs": {},
+     "parents": []
+    }
+   ],
+   "expect": {
+    "decision": "deny",
+    "reasons": [],
+    "errors": []
+   }
+  },
+  {
+   "name": "a template link permits only the actions of its template",
+   "bundle": "linked",
+   "principal": {
+    "type": "User",
+    "id": "alice"
+   },
+   "action": {
+    "type": "Action",
+    "id": "POST"
+   },
+   "resource": {
+    "type": "Route",
+    "id": "secret"
+   },
+   "context": {
+    "path": "/",
+    "method": "GET"
+   },
+   "entities": [
+    {
+     "uid": {
+      "type": "User",
+      "id": "alice"
+     },
+     "attrs": {
+      "email": "alice@example.com",
+      "groups": []
+     },
+     "parents": [
+      {
+       "type": "Group",
+       "id": "admins"
+      }
+     ]
+    },
+    {
+     "uid": {
+      "type": "Route",
+      "id": "secret"
+     },
+     "attrs": {
+      "site": "docs",
+      "mode": "closed"
+     },
+     "parents": []
+    },
+    {
+     "uid": {
+      "type": "Group",
+      "id": "admins"
+     },
+     "attrs": {},
+     "parents": []
+    },
+    {
+     "uid": {
+      "type": "Group",
+      "id": "staff"
+     },
+     "attrs": {},
+     "parents": []
+    }
+   ],
+   "expect": {
+    "decision": "deny",
+    "reasons": [],
+    "errors": []
+   }
+  },
+  {
+   "name": "an entity tag permits",
+   "bundle": "extensions",
+   "principal": {
+    "type": "User",
+    "id": "u1"
+   },
+   "action": {
+    "type": "Action",
+    "id": "view"
+   },
+   "resource": {
+    "type": "Doc",
+    "id": "d1"
+   },
+   "context": {
+    "ip": {
+     "__extn": {
+      "fn": "ip",
+      "arg": "192.0.2.1"
+     }
+    },
+    "at": {
+     "__extn": {
+      "fn": "datetime",
+      "arg": "2026-06-01"
+     }
+    }
+   },
+   "entities": [
+    {
+     "uid": {
+      "type": "User",
+      "id": "u1"
+     },
+     "attrs": {
+      "level": 1
+     },
+     "parents": [],
+     "tags": {
+      "team": "core"
+     }
+    },
+    {
+     "uid": {
+      "type": "Doc",
+      "id": "d1"
+     },
+     "attrs": {},
+     "parents": []
+    }
+   ],
+   "expect": {
+    "decision": "allow",
+    "reasons": [
+     "team"
+    ],
+    "errors": []
+   }
+  },
+  {
+   "name": "an entity tag of another value",
+   "bundle": "extensions",
+   "principal": {
+    "type": "User",
+    "id": "u1"
+   },
+   "action": {
+    "type": "Action",
+    "id": "view"
+   },
+   "resource": {
+    "type": "Doc",
+    "id": "d1"
+   },
+   "context": {
+    "ip": {
+     "__extn": {
+      "fn": "ip",
+      "arg": "192.0.2.1"
+     }
+    },
+    "at": {
+     "__extn": {
+      "fn": "datetime",
+      "arg": "2026-06-01"
+     }
+    }
+   },
+   "entities": [
+    {
+     "uid": {
+      "type": "User",
+      "id": "u1"
+     },
+     "attrs": {
+      "level": 1
+     },
+     "parents": [],
+     "tags": {
+      "team": "edge"
+     }
+    },
+    {
+     "uid": {
+      "type": "Doc",
+      "id": "d1"
+     },
+     "attrs": {},
+     "parents": []
+    }
+   ],
+   "expect": {
+    "decision": "deny",
+    "reasons": [],
+    "errors": []
+   }
+  },
+  {
+   "name": "no entity tag",
+   "bundle": "extensions",
+   "principal": {
+    "type": "User",
+    "id": "u1"
+   },
+   "action": {
+    "type": "Action",
+    "id": "view"
+   },
+   "resource": {
+    "type": "Doc",
+    "id": "d1"
+   },
+   "context": {
+    "ip": {
+     "__extn": {
+      "fn": "ip",
+      "arg": "192.0.2.1"
+     }
+    },
+    "at": {
+     "__extn": {
+      "fn": "datetime",
+      "arg": "2026-06-01"
+     }
+    }
+   },
+   "entities": [
+    {
+     "uid": {
+      "type": "User",
+      "id": "u1"
+     },
+     "attrs": {
+      "level": 1
+     },
+     "parents": [],
+     "tags": {}
+    },
+    {
+     "uid": {
+      "type": "Doc",
+      "id": "d1"
+     },
+     "attrs": {},
+     "parents": []
+    }
+   ],
+   "expect": {
+    "decision": "deny",
+    "reasons": [],
+    "errors": []
+   }
+  },
+  {
+   "name": "an address in a range and a level",
+   "bundle": "extensions",
+   "principal": {
+    "type": "User",
+    "id": "u1"
+   },
+   "action": {
+    "type": "Action",
+    "id": "view"
+   },
+   "resource": {
+    "type": "Doc",
+    "id": "d1"
+   },
+   "context": {
+    "ip": {
+     "__extn": {
+      "fn": "ip",
+      "arg": "10.1.2.3"
+     }
+    },
+    "at": {
+     "__extn": {
+      "fn": "datetime",
+      "arg": "2026-06-01"
+     }
+    }
+   },
+   "entities": [
+    {
+     "uid": {
+      "type": "User",
+      "id": "u1"
+     },
+     "attrs": {
+      "level": 3
+     },
+     "parents": [],
+     "tags": {}
+    },
+    {
+     "uid": {
+      "type": "Doc",
+      "id": "d1"
+     },
+     "attrs": {},
+     "parents": []
+    }
+   ],
+   "expect": {
+    "decision": "allow",
+    "reasons": [
+     "net"
+    ],
+    "errors": []
+   }
+  },
+  {
+   "name": "an address in a range, a level too low",
+   "bundle": "extensions",
+   "principal": {
+    "type": "User",
+    "id": "u1"
+   },
+   "action": {
+    "type": "Action",
+    "id": "view"
+   },
+   "resource": {
+    "type": "Doc",
+    "id": "d1"
+   },
+   "context": {
+    "ip": {
+     "__extn": {
+      "fn": "ip",
+      "arg": "10.1.2.3"
+     }
+    },
+    "at": {
+     "__extn": {
+      "fn": "datetime",
+      "arg": "2026-06-01"
+     }
+    }
+   },
+   "entities": [
+    {
+     "uid": {
+      "type": "User",
+      "id": "u1"
+     },
+     "attrs": {
+      "level": 2
+     },
+     "parents": [],
+     "tags": {}
+    },
+    {
+     "uid": {
+      "type": "Doc",
+      "id": "d1"
+     },
+     "attrs": {},
+     "parents": []
+    }
+   ],
+   "expect": {
+    "decision": "deny",
+    "reasons": [],
+    "errors": []
+   }
+  },
+  {
+   "name": "a time before the bound is forbidden",
+   "bundle": "extensions",
+   "principal": {
+    "type": "User",
+    "id": "u1"
+   },
+   "action": {
+    "type": "Action",
+    "id": "view"
+   },
+   "resource": {
+    "type": "Doc",
+    "id": "d1"
+   },
+   "context": {
+    "ip": {
+     "__extn": {
+      "fn": "ip",
+      "arg": "10.1.2.3"
+     }
+    },
+    "at": {
+     "__extn": {
+      "fn": "datetime",
+      "arg": "2025-12-31T23:59:59Z"
+     }
+    }
+   },
+   "entities": [
+    {
+     "uid": {
+      "type": "User",
+      "id": "u1"
+     },
+     "attrs": {
+      "level": 3
+     },
+     "parents": [],
+     "tags": {
+      "team": "core"
+     }
+    },
+    {
+     "uid": {
+      "type": "Doc",
+      "id": "d1"
+     },
+     "attrs": {},
+     "parents": []
+    }
+   ],
+   "expect": {
+    "decision": "deny",
+    "reasons": [
+     "before"
+    ],
+    "errors": []
+   }
+  },
+  {
+   "name": "a tag of the wrong type",
+   "bundle": "extensions",
+   "principal": {
+    "type": "User",
+    "id": "u1"
+   },
+   "action": {
+    "type": "Action",
+    "id": "view"
+   },
+   "resource": {
+    "type": "Doc",
+    "id": "d1"
+   },
+   "context": {
+    "ip": {
+     "__extn": {
+      "fn": "ip",
+      "arg": "192.0.2.1"
+     }
+    },
+    "at": {
+     "__extn": {
+      "fn": "datetime",
+      "arg": "2026-06-01"
+     }
+    }
+   },
+   "entities": [
+    {
+     "uid": {
+      "type": "User",
+      "id": "u1"
+     },
+     "attrs": {
+      "level": 1
+     },
+     "parents": [],
+     "tags": {
+      "team": 1
+     }
+    },
+    {
+     "uid": {
+      "type": "Doc",
+      "id": "d1"
+     },
+     "attrs": {},
+     "parents": []
+    }
+   ],
+   "expect": {
+    "misfit": true
+   }
+  },
+  {
+   "name": "a string where the schema declares an address",
+   "bundle": "extensions",
+   "principal": {
+    "type": "User",
+    "id": "u1"
+   },
+   "action": {
+    "type": "Action",
+    "id": "view"
+   },
+   "resource": {
+    "type": "Doc",
+    "id": "d1"
+   },
+   "context": {
+    "ip": "10.1.2.3",
+    "at": {
+     "__extn": {
+      "fn": "datetime",
+      "arg": "2026-06-01"
+     }
+    }
+   },
+   "entities": [
+    {
+     "uid": {
+      "type": "User",
+      "id": "u1"
+     },
+     "attrs": {
+      "level": 1
+     },
+     "parents": [],
+     "tags": {}
+    },
+    {
+     "uid": {
+      "type": "Doc",
+      "id": "d1"
+     },
+     "attrs": {},
+     "parents": []
+    }
+   ],
+   "expect": {
+    "decision": "deny",
+    "reasons": [],
+    "errors": []
+   },
+   "expect_go": {
+    "misfit": true
+   },
+   "gap": "the JSON form of a context: cedar-policy reads it with the schema and takes a string where an extension type is declared as the extension's argument (ip(\"10.1.2.3\")); cedar-go reads it without the schema, so the string stays a string and does not fit"
+  }
+ ]
+}

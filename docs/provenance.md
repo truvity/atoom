@@ -268,6 +268,19 @@ From sluis `df108e5`.
 
 What stayed in sluis: the wrapper `main` and exporter@, the actor that calls the port.
 
+## policy
+
+<a id="policy"></a>
+
+The signature layer is sluis's signed config, from sluis `main` at `1a15ab19a6`; the rest is new code for atoom ([record 0019](decisions/0019-the-policy-bundle-and-its-loader.md)). The interim loader of session (`internal/policy`, at `a9fcb6c7ba`) set what a host needs from it: the cold start, the swap, the last good set and the digest on every decision.
+
+| Here | From sluis | Changed |
+| --- | --- | --- |
+| `testdata/signed-document.json` | `tests/testdata/signed-config/vectors.json` | the cases unchanged; the description names this repository |
+| `document.go` (`VerifyDocument`, `Compare`, the strict JSON reader) | `kits/go/signedconfig/{verify,sequence}.go` | takes the kind as a string, not a registry name; verifies with `crypto/ecdsa` instead of go-jose; "a kid is not pinned" for "not in the bootstrap file"; a set for the duplicate check of an object; no `Sequencer` (the loader holds the seq) |
+| `src/document.rs`, `src/json.rs` | `actors/store/src/config/document.rs` | takes the kind as a string; the key is the SPKI of a P-384 key, checked, or its point; the kids of the signatures in `Verified`; the depth bound of the Go reader |
+| `bundle.go`, `set.go`, `loader.go`, `src/bundle.rs`, `src/set.rs`, `src/loader.rs`, `testdata/bundles.json`, `testdata/decisions.json` | new | the payload, the compile and decide steps over `cedar-go` and `cedar-policy`, the loader over the source port, the test set |
+
 ## blocks/seal
 
 <a id="blocks-seal"></a>

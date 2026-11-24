@@ -69,6 +69,13 @@ const blocksDir = "blocks"
 // isBlock reports whether dir is a block.
 func isBlock(dir string) bool { return strings.HasPrefix(dir, blocksDir+"/") }
 
+// engineLibraries are the libraries around an engine that a consumer links directly (record 0019): the Cedar loader, policy. One is
+// neither a port nor a driver nor a block: it reads through ports and drives a library of its language.
+var engineLibraries = map[string]bool{"policy": true}
+
+// isEngineLibrary reports whether dir is a library around an engine.
+func isEngineLibrary(dir string) bool { return engineLibraries[dir] }
+
 // allowedAtoom reports whether the library at dir may require the atoom library dep.
 //
 // A library may require: the common types; its own port; the conformance kit of its own port; and a library listed as shared.
@@ -76,11 +83,18 @@ func isBlock(dir string) bool { return strings.HasPrefix(dir, blocksDir+"/") }
 //
 // A block (blocks/<block>, record 0008) is built from ports and blocks only: it may require the common types, any port, the shared
 // libraries and another block, and never a driver. No library but a block may require a block, and the blocks have no cycle (checkAll).
+//
+// A library around an engine (policy, record 0019) may require the common types, any port and the shared libraries, and never a driver
+// or a block. No library of the repository may require it: a consumer links it.
 func allowedAtoom(dir, dep string, s shared) bool {
 	port := strings.SplitN(dir, "/", 2)[0]
 	switch {
 	case dep == dir:
 		return false
+	case isEngineLibrary(dep):
+		return false
+	case isEngineLibrary(dir):
+		return dep == "common" || s[dep] || (!strings.Contains(dep, "/") && dep != blocksDir && !isTool(dep))
 	case isBlock(dir):
 		// A port or common is a library at the first level; a driver is at the second, and only another block is allowed there.
 		return (!strings.Contains(dep, "/") && dep != blocksDir && !isTool(dep)) || isBlock(dep) || s[dep]
@@ -117,16 +131,21 @@ func check(l lib, s shared) []string {
 		if allowedAtoom(l.Dir, dep, s) {
 			continue
 		}
-		if isBlock(l.Dir) {
+		switch {
+		case isEngineLibrary(dep):
+			add("requires %s: a library around an engine is linked by a consumer, and no library of the repository requires it", dep)
+		case isEngineLibrary(l.Dir):
+			add("requires %s: a library around an engine may require only common, the ports and the shared libraries", dep)
+		case isBlock(l.Dir):
 			add("requires %s: a block may require only common, the ports, the shared libraries and other blocks, never a driver", dep)
-		} else {
+		default:
 			add("requires %s: a library may require only common, its own port, its port's conformance kit and the shared libraries, never another driver or port", dep)
 		}
 	}
 	if l.Dir == blocksDir {
 		add("blocks holds the blocks, one directory each; it is not a library")
 	}
-	if depth == 1 && !s[l.Dir] && l.Dir != blocksDir {
+	if depth == 1 && !s[l.Dir] && l.Dir != blocksDir && !isEngineLibrary(l.Dir) {
 		// A port, or common: only the runtimes beside atoom's own. A library at the first level that the shared file lists (socket: the
 		// plain UNIX-socket host of the Rust mains) is plumbing and not a port, so it may require what it needs.
 		for _, dep := range l.External {

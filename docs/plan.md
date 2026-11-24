@@ -13,7 +13,7 @@ atoom 0.2.0 is released. It holds:
 
 Built since: B1 (the in-process helper of `socket`, [in process](../socket/docs/in-process.md)), B2 (the Go `source/file`, [its page](../source/file/docs/go.md)) and B13 (the key port takes any purpose a host declares, [the key port](../key/docs/key-port.md#the-declaration-of-purposes)), in 0.3.0; B3 (the durability of a store driver, [the store port](../store/docs/store-port.md#capabilities)), in the next release.
 
-Built since: B4, the [`seal` block](../blocks/seal/docs/seal-block.md), with its kit and the Go in-process helper `socket.InProcess`; in the next release.
+Built since: B4, the [`seal` block](../blocks/seal/docs/seal-block.md), with its kit and the Go in-process helper `socket.InProcess`, in 0.4.0; B5, the Cedar loader [`policy`](../policy/README.md) in Go and Rust with the signed bundle, the loading rules and the decision test set ([record 0019](decisions/0019-the-policy-bundle-and-its-loader.md)), in the next release.
 
 Not built: the blocks `state`, `token` and `export`, Lambda extension zips, the drivers marked planned, and the changes of steps B12 and B14 below.
 
@@ -28,7 +28,7 @@ In order. Each step is one pull request or a few. The sluis and session pull req
 | B3 | `Capabilities` gains `durability` ([0012](decisions/0012-store-durability.md)); every store driver declares it (built: `strict` for dynamodb and rqlite, `lossy` for memory, [record 0017](decisions/0017-the-memory-store-is-lossy.md)) | session and sluis choose bindings by it |
 | B13 | The key port takes any purpose a host declares (below; built) | `seal` declares its own purposes |
 | B4 | `seal` block in Go, moved from sluis key@ ([0013](decisions/0013-what-moves-from-sluis.md): sluis 0006 and the storage part of 0047), with its kit over the memory drivers; it declares its purposes (built: [blocks/seal](../blocks/seal/README.md), with the seal limit and the compromised generations of the owner's decision B-2 A; sluis's wraps move once into its layout, B-3 B) | session seals with it; sluis key@ becomes its host |
-| B5 | The Cedar loading rules, the signed bundle format, loaders in Go and Rust, and the decision test set ([0011](decisions/0011-cedar-as-a-library.md)) | session, sluis and audit load policies the same way |
+| B5 | The Cedar loading rules, the signed bundle format, loaders in Go and Rust, and the decision test set ([0011](decisions/0011-cedar-as-a-library.md); built: [policy](../policy/README.md), [record 0019](decisions/0019-the-policy-bundle-and-its-loader.md): sluis's signed-config format with the kind `PolicyBundle`, cedar-go and cedar-policy, the known gaps of cedar-go listed in the test set) | session, sluis and audit load policies the same way |
 | B6 | `store/postgres` | sluis on Kubernetes |
 | B7 | `state` block in Rust, moved from sluis store@ (sluis 0005), with the registry of kinds that any product extends ([0008](decisions/0008-blocks.md)) | sluis store@ becomes its host; audit declares its kinds |
 | B8 | `token` block in Go | session's signed client assertions and identity header; sluis signer |
