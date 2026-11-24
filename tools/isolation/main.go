@@ -3,7 +3,7 @@
 //	go run ./tools/isolation [-root .] [-shared tools/isolation/shared.txt]
 //
 // A library may require atoom libraries only as the rules allow: the common types, its own port, its port's conformance kit and the
-// libraries listed in the shared file. A port requires nothing outside the ConnectRPC and Protobuf runtimes. A committed go.mod never
+// libraries listed in the shared file; a block and a library around an engine (policy) may also require the ports. A port requires nothing outside the ConnectRPC and Protobuf runtimes. A committed go.mod never
 // replaces an atoom module. Every go.mod is listed in go.work, and every Cargo.toml is a member of the workspace. The rules run over
 // the Go modules (from go.work and go.mod) and the Rust crates (from `cargo metadata`).
 //

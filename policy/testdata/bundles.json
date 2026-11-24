@@ -1,0 +1,969 @@
+{
+ "description": "The bundle cases of the decision test set (record 0019, 'The payload' and 'Compiling'): a payload, given as JSON (bundle) or as exact text (payload_text), and the verdict of the reference engine (cedar-policy): loaded, with the ids of the policies of the set, or refused, with the class and the id of the fault. expect_go, with gap, is the verdict of cedar-go where it differs: a known gap of that engine. The Go package and the Rust crate run every case.",
+ "cases": [
+  {
+   "name": "two policies",
+   "bundle": {
+    "schema": "entity Group in [Group];\nentity User in [Group] {\n  email: String,\n  groups: Set<String>,\n};\nentity Route {\n  site: String,\n  mode: String,\n};\naction read;\naction \"GET\", \"HEAD\" in [Action::\"read\"] appliesTo {\n  principal: [User],\n  resource: [Route],\n  context: { path: String, method: String },\n};\naction \"POST\" appliesTo {\n  principal: [User],\n  resource: [Route],\n  context: { path: String, method: String },\n};\n",
+    "policies": {
+     "open": "permit (principal, action, resource) when { resource.mode == \"open\" };",
+     "admins": "permit (principal in Group::\"admins\", action, resource == Route::\"admin\");"
+    }
+   },
+   "expect": {
+    "loaded": [
+     "admins",
+     "open"
+    ]
+   }
+  },
+  {
+   "name": "every policy of the decision cases",
+   "bundle": {
+    "schema": "entity Group in [Group];\nentity User in [Group] {\n  email: String,\n  groups: Set<String>,\n};\nentity Route {\n  site: String,\n  mode: String,\n};\naction read;\naction \"GET\", \"HEAD\" in [Action::\"read\"] appliesTo {\n  principal: [User],\n  resource: [Route],\n  context: { path: String, method: String },\n};\naction \"POST\" appliesTo {\n  principal: [User],\n  resource: [Route],\n  context: { path: String, method: String },\n};\n",
+    "policies": {
+     "open": "permit (principal, action, resource) when { resource.mode == \"open\" };",
+     "admins": "permit (principal in Group::\"admins\", action, resource == Route::\"admin\");",
+     "read": "permit (principal, action in Action::\"read\", resource) when { resource.mode == \"read\" };",
+     "no-post-on-read": "forbid (principal, action == Action::\"POST\", resource) when { resource.mode == \"read\" };",
+     "mail": "permit (principal, action, resource == Route::\"mail\") when { principal.email like \"*@example.com\" };",
+     "api": "permit (principal, action, resource == Route::\"api\") when { context.path like \"/api/*\" && context.method == \"GET\" };",
+     "overflow": "permit (principal, action, resource == Route::\"overflow\") when { 9223372036854775807 + 1 > 0 };"
+    }
+   },
+   "expect": {
+    "loaded": [
+     "admins",
+     "api",
+     "mail",
+     "no-post-on-read",
+     "open",
+     "overflow",
+     "read"
+    ]
+   }
+  },
+  {
+   "name": "no policies: a set that denies everything",
+   "bundle": {
+    "schema": "entity Group in [Group];\nentity User in [Group] {\n  email: String,\n  groups: Set<String>,\n};\nentity Route {\n  site: String,\n  mode: String,\n};\naction read;\naction \"GET\", \"HEAD\" in [Action::\"read\"] appliesTo {\n  principal: [User],\n  resource: [Route],\n  context: { path: String, method: String },\n};\naction \"POST\" appliesTo {\n  principal: [User],\n  resource: [Route],\n  context: { path: String, method: String },\n};\n",
+    "policies": {}
+   },
+   "expect": {
+    "loaded": []
+   }
+  },
+  {
+   "name": "an empty schema and no policies",
+   "bundle": {
+    "schema": "",
+    "policies": {}
+   },
+   "expect": {
+    "loaded": []
+   }
+  },
+  {
+   "name": "a template and a link",
+   "bundle": {
+    "schema": "entity Group in [Group];\nentity User in [Group] {\n  email: String,\n  groups: Set<String>,\n};\nentity Route {\n  site: String,\n  mode: String,\n};\naction read;\naction \"GET\", \"HEAD\" in [Action::\"read\"] appliesTo {\n  principal: [User],\n  resource: [Route],\n  context: { path: String, method: String },\n};\naction \"POST\" appliesTo {\n  principal: [User],\n  resource: [Route],\n  context: { path: String, method: String },\n};\n",
+    "policies": {
+     "open": "permit (principal, action, resource) when { resource.mode == \"open\" };",
+     "admins": "permit (principal in Group::\"admins\", action, resource == Route::\"admin\");"
+    },
+    "templates": {
+     "route-for": "permit (principal == ?principal, action in Action::\"read\", resource == ?resource);"
+    },
+    "links": [
+     {
+      "id": "alice-secret",
+      "template": "route-for",
+      "values": {
+       "?principal": {
+        "type": "User",
+        "id": "alice"
+       },
+       "?resource": {
+        "type": "Route",
+        "id": "secret"
+       }
+      }
+     }
+    ]
+   },
+   "expect": {
+    "loaded": [
+     "admins",
+     "alice-secret",
+     "open"
+    ]
+   },
+   "expect_go": {
+    "refused": {
+     "class": "unsupported",
+     "id": "route-for"
+    }
+   },
+   "gap": "cedar-go has no templates: a bundle with a template or a link is refused (unsupported)"
+  },
+  {
+   "name": "a template without a link",
+   "bundle": {
+    "schema": "entity Group in [Group];\nentity User in [Group] {\n  email: String,\n  groups: Set<String>,\n};\nentity Route {\n  site: String,\n  mode: String,\n};\naction read;\naction \"GET\", \"HEAD\" in [Action::\"read\"] appliesTo {\n  principal: [User],\n  resource: [Route],\n  context: { path: String, method: String },\n};\naction \"POST\" appliesTo {\n  principal: [User],\n  resource: [Route],\n  context: { path: String, method: String },\n};\n",
+    "policies": {
+     "open": "permit (principal, action, resource) when { resource.mode == \"open\" };",
+     "admins": "permit (principal in Group::\"admins\", action, resource == Route::\"admin\");"
+    },
+    "templates": {
+     "route-for": "permit (principal == ?principal, action in Action::\"read\", resource == ?resource);"
+    }
+   },
+   "expect": {
+    "loaded": [
+     "admins",
+     "open"
+    ]
+   },
+   "expect_go": {
+    "refused": {
+     "class": "unsupported",
+     "id": "route-for"
+    }
+   },
+   "gap": "cedar-go has no templates: a bundle with a template or a link is refused (unsupported)"
+  },
+  {
+   "name": "not JSON",
+   "payload_text": "permit (principal, action, resource);",
+   "expect": {
+    "refused": {
+     "class": "payload",
+     "id": ""
+    }
+   }
+  },
+  {
+   "name": "a JSON list",
+   "payload_text": "[]",
+   "expect": {
+    "refused": {
+     "class": "payload",
+     "id": ""
+    }
+   }
+  },
+  {
+   "name": "trailing bytes after the object",
+   "payload_text": "{\"schema\": \"entity Group in [Group];\\nentity User in [Group] {\\n  email: String,\\n  groups: Set<String>,\\n};\\nentity Route {\\n  site: String,\\n  mode: String,\\n};\\naction read;\\naction \\\"GET\\\", \\\"HEAD\\\" in [Action::\\\"read\\\"] appliesTo {\\n  principal: [User],\\n  resource: [Route],\\n  context: { path: String, method: String },\\n};\\naction \\\"POST\\\" appliesTo {\\n  principal: [User],\\n  resource: [Route],\\n  context: { path: String, method: String },\\n};\\n\", \"policies\": {\"open\": \"permit (principal, action, resource) when { resource.mode == \\\"open\\\" };\", \"admins\": \"permit (principal in Group::\\\"admins\\\", action, resource == Route::\\\"admin\\\");\"}}{}",
+   "expect": {
+    "refused": {
+     "class": "payload",
+     "id": ""
+    }
+   }
+  },
+  {
+   "name": "a duplicate member",
+   "payload_text": "{\"schema\":\"\",\"schema\":\"\",\"policies\":{}}",
+   "expect": {
+    "refused": {
+     "class": "payload",
+     "id": ""
+    }
+   }
+  },
+  {
+   "name": "a duplicate policy id",
+   "payload_text": "{\"schema\":\"\",\"policies\":{\"a\":\"permit (principal, action, resource);\",\"a\":\"permit (principal, action, resource);\"}}",
+   "expect": {
+    "refused": {
+     "class": "payload",
+     "id": ""
+    }
+   }
+  },
+  {
+   "name": "a member that is not one of the four",
+   "bundle": {
+    "schema": "entity Group in [Group];\nentity User in [Group] {\n  email: String,\n  groups: Set<String>,\n};\nentity Route {\n  site: String,\n  mode: String,\n};\naction read;\naction \"GET\", \"HEAD\" in [Action::\"read\"] appliesTo {\n  principal: [User],\n  resource: [Route],\n  context: { path: String, method: String },\n};\naction \"POST\" appliesTo {\n  principal: [User],\n  resource: [Route],\n  context: { path: String, method: String },\n};\n",
+    "policies": {
+     "open": "permit (principal, action, resource) when { resource.mode == \"open\" };",
+     "admins": "permit (principal in Group::\"admins\", action, resource == Route::\"admin\");"
+    },
+    "entities": []
+   },
+   "expect": {
+    "refused": {
+     "class": "payload",
+     "id": ""
+    }
+   }
+  },
+  {
+   "name": "no schema",
+   "bundle": {
+    "policies": {}
+   },
+   "expect": {
+    "refused": {
+     "class": "payload",
+     "id": "schema"
+    }
+   }
+  },
+  {
+   "name": "a schema that is not a string",
+   "bundle": {
+    "schema": {},
+    "policies": {}
+   },
+   "expect": {
+    "refused": {
+     "class": "payload",
+     "id": "schema"
+    }
+   }
+  },
+  {
+   "name": "no policies member",
+   "bundle": {
+    "schema": "entity Group in [Group];\nentity User in [Group] {\n  email: String,\n  groups: Set<String>,\n};\nentity Route {\n  site: String,\n  mode: String,\n};\naction read;\naction \"GET\", \"HEAD\" in [Action::\"read\"] appliesTo {\n  principal: [User],\n  resource: [Route],\n  context: { path: String, method: String },\n};\naction \"POST\" appliesTo {\n  principal: [User],\n  resource: [Route],\n  context: { path: String, method: String },\n};\n"
+   },
+   "expect": {
+    "refused": {
+     "class": "payload",
+     "id": "policies"
+    }
+   }
+  },
+  {
+   "name": "policies as a list",
+   "bundle": {
+    "schema": "entity Group in [Group];\nentity User in [Group] {\n  email: String,\n  groups: Set<String>,\n};\nentity Route {\n  site: String,\n  mode: String,\n};\naction read;\naction \"GET\", \"HEAD\" in [Action::\"read\"] appliesTo {\n  principal: [User],\n  resource: [Route],\n  context: { path: String, method: String },\n};\naction \"POST\" appliesTo {\n  principal: [User],\n  resource: [Route],\n  context: { path: String, method: String },\n};\n",
+    "policies": [
+     "permit (principal, action, resource) when { resource.mode == \"open\" };"
+    ]
+   },
+   "expect": {
+    "refused": {
+     "class": "payload",
+     "id": "policies"
+    }
+   }
+  },
+  {
+   "name": "a policy id with a space",
+   "bundle": {
+    "schema": "entity Group in [Group];\nentity User in [Group] {\n  email: String,\n  groups: Set<String>,\n};\nentity Route {\n  site: String,\n  mode: String,\n};\naction read;\naction \"GET\", \"HEAD\" in [Action::\"read\"] appliesTo {\n  principal: [User],\n  resource: [Route],\n  context: { path: String, method: String },\n};\naction \"POST\" appliesTo {\n  principal: [User],\n  resource: [Route],\n  context: { path: String, method: String },\n};\n",
+    "policies": {
+     "an id": "permit (principal, action, resource) when { resource.mode == \"open\" };"
+    }
+   },
+   "expect": {
+    "refused": {
+     "class": "payload",
+     "id": "policies"
+    }
+   }
+  },
+  {
+   "name": "a policy id that starts with a dash",
+   "bundle": {
+    "schema": "entity Group in [Group];\nentity User in [Group] {\n  email: String,\n  groups: Set<String>,\n};\nentity Route {\n  site: String,\n  mode: String,\n};\naction read;\naction \"GET\", \"HEAD\" in [Action::\"read\"] appliesTo {\n  principal: [User],\n  resource: [Route],\n  context: { path: String, method: String },\n};\naction \"POST\" appliesTo {\n  principal: [User],\n  resource: [Route],\n  context: { path: String, method: String },\n};\n",
+    "policies": {
+     "-open": "permit (principal, action, resource) when { resource.mode == \"open\" };"
+    }
+   },
+   "expect": {
+    "refused": {
+     "class": "payload",
+     "id": "policies"
+    }
+   }
+  },
+  {
+   "name": "a policy id of 129 characters",
+   "bundle": {
+    "schema": "entity Group in [Group];\nentity User in [Group] {\n  email: String,\n  groups: Set<String>,\n};\nentity Route {\n  site: String,\n  mode: String,\n};\naction read;\naction \"GET\", \"HEAD\" in [Action::\"read\"] appliesTo {\n  principal: [User],\n  resource: [Route],\n  context: { path: String, method: String },\n};\naction \"POST\" appliesTo {\n  principal: [User],\n  resource: [Route],\n  context: { path: String, method: String },\n};\n",
+    "policies": {
+     "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa": "permit (principal, action, resource) when { resource.mode == \"open\" };"
+    }
+   },
+   "expect": {
+    "refused": {
+     "class": "payload",
+     "id": "policies"
+    }
+   }
+  },
+  {
+   "name": "a policy id of 128 characters",
+   "bundle": {
+    "schema": "entity Group in [Group];\nentity User in [Group] {\n  email: String,\n  groups: Set<String>,\n};\nentity Route {\n  site: String,\n  mode: String,\n};\naction read;\naction \"GET\", \"HEAD\" in [Action::\"read\"] appliesTo {\n  principal: [User],\n  resource: [Route],\n  context: { path: String, method: String },\n};\naction \"POST\" appliesTo {\n  principal: [User],\n  resource: [Route],\n  context: { path: String, method: String },\n};\n",
+    "policies": {
+     "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa": "permit (principal, action, resource) when { resource.mode == \"open\" };"
+    }
+   },
+   "expect": {
+    "loaded": [
+     "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    ]
+   }
+  },
+  {
+   "name": "a policy id with every allowed character",
+   "bundle": {
+    "schema": "entity Group in [Group];\nentity User in [Group] {\n  email: String,\n  groups: Set<String>,\n};\nentity Route {\n  site: String,\n  mode: String,\n};\naction read;\naction \"GET\", \"HEAD\" in [Action::\"read\"] appliesTo {\n  principal: [User],\n  resource: [Route],\n  context: { path: String, method: String },\n};\naction \"POST\" appliesTo {\n  principal: [User],\n  resource: [Route],\n  context: { path: String, method: String },\n};\n",
+    "policies": {
+     "Ab9._-:/x": "permit (principal, action, resource) when { resource.mode == \"open\" };"
+    }
+   },
+   "expect": {
+    "loaded": [
+     "Ab9._-:/x"
+    ]
+   }
+  },
+  {
+   "name": "a policy that is not a string",
+   "bundle": {
+    "schema": "entity Group in [Group];\nentity User in [Group] {\n  email: String,\n  groups: Set<String>,\n};\nentity Route {\n  site: String,\n  mode: String,\n};\naction read;\naction \"GET\", \"HEAD\" in [Action::\"read\"] appliesTo {\n  principal: [User],\n  resource: [Route],\n  context: { path: String, method: String },\n};\naction \"POST\" appliesTo {\n  principal: [User],\n  resource: [Route],\n  context: { path: String, method: String },\n};\n",
+    "policies": {
+     "open": 1
+    }
+   },
+   "expect": {
+    "refused": {
+     "class": "payload",
+     "id": "policies"
+    }
+   }
+  },
+  {
+   "name": "templates as a list",
+   "bundle": {
+    "schema": "entity Group in [Group];\nentity User in [Group] {\n  email: String,\n  groups: Set<String>,\n};\nentity Route {\n  site: String,\n  mode: String,\n};\naction read;\naction \"GET\", \"HEAD\" in [Action::\"read\"] appliesTo {\n  principal: [User],\n  resource: [Route],\n  context: { path: String, method: String },\n};\naction \"POST\" appliesTo {\n  principal: [User],\n  resource: [Route],\n  context: { path: String, method: String },\n};\n",
+    "policies": {
+     "open": "permit (principal, action, resource) when { resource.mode == \"open\" };",
+     "admins": "permit (principal in Group::\"admins\", action, resource == Route::\"admin\");"
+    },
+    "templates": []
+   },
+   "expect": {
+    "refused": {
+     "class": "payload",
+     "id": "templates"
+    }
+   }
+  },
+  {
+   "name": "links as an object",
+   "bundle": {
+    "schema": "entity Group in [Group];\nentity User in [Group] {\n  email: String,\n  groups: Set<String>,\n};\nentity Route {\n  site: String,\n  mode: String,\n};\naction read;\naction \"GET\", \"HEAD\" in [Action::\"read\"] appliesTo {\n  principal: [User],\n  resource: [Route],\n  context: { path: String, method: String },\n};\naction \"POST\" appliesTo {\n  principal: [User],\n  resource: [Route],\n  context: { path: String, method: String },\n};\n",
+    "policies": {
+     "open": "permit (principal, action, resource) when { resource.mode == \"open\" };",
+     "admins": "permit (principal in Group::\"admins\", action, resource == Route::\"admin\");"
+    },
+    "links": {}
+   },
+   "expect": {
+    "refused": {
+     "class": "payload",
+     "id": "links"
+    }
+   }
+  },
+  {
+   "name": "a link with another member",
+   "bundle": {
+    "schema": "entity Group in [Group];\nentity User in [Group] {\n  email: String,\n  groups: Set<String>,\n};\nentity Route {\n  site: String,\n  mode: String,\n};\naction read;\naction \"GET\", \"HEAD\" in [Action::\"read\"] appliesTo {\n  principal: [User],\n  resource: [Route],\n  context: { path: String, method: String },\n};\naction \"POST\" appliesTo {\n  principal: [User],\n  resource: [Route],\n  context: { path: String, method: String },\n};\n",
+    "policies": {
+     "open": "permit (principal, action, resource) when { resource.mode == \"open\" };",
+     "admins": "permit (principal in Group::\"admins\", action, resource == Route::\"admin\");"
+    },
+    "templates": {
+     "route-for": "permit (principal == ?principal, action in Action::\"read\", resource == ?resource);"
+    },
+    "links": [
+     {
+      "id": "alice-secret",
+      "template": "route-for",
+      "values": {
+       "?principal": {
+        "type": "User",
+        "id": "alice"
+       },
+       "?resource": {
+        "type": "Route",
+        "id": "secret"
+       }
+      },
+      "note": "x"
+     }
+    ]
+   },
+   "expect": {
+    "refused": {
+     "class": "payload",
+     "id": "links"
+    }
+   }
+  },
+  {
+   "name": "a link with a slot that is not ?principal or ?resource",
+   "bundle": {
+    "schema": "entity Group in [Group];\nentity User in [Group] {\n  email: String,\n  groups: Set<String>,\n};\nentity Route {\n  site: String,\n  mode: String,\n};\naction read;\naction \"GET\", \"HEAD\" in [Action::\"read\"] appliesTo {\n  principal: [User],\n  resource: [Route],\n  context: { path: String, method: String },\n};\naction \"POST\" appliesTo {\n  principal: [User],\n  resource: [Route],\n  context: { path: String, method: String },\n};\n",
+    "policies": {
+     "open": "permit (principal, action, resource) when { resource.mode == \"open\" };",
+     "admins": "permit (principal in Group::\"admins\", action, resource == Route::\"admin\");"
+    },
+    "templates": {
+     "route-for": "permit (principal == ?principal, action in Action::\"read\", resource == ?resource);"
+    },
+    "links": [
+     {
+      "id": "alice-secret",
+      "template": "route-for",
+      "values": {
+       "?other": {
+        "type": "User",
+        "id": "alice"
+       }
+      }
+     }
+    ]
+   },
+   "expect": {
+    "refused": {
+     "class": "payload",
+     "id": "links"
+    }
+   }
+  },
+  {
+   "name": "a link value that is an entity text, not type and id",
+   "bundle": {
+    "schema": "entity Group in [Group];\nentity User in [Group] {\n  email: String,\n  groups: Set<String>,\n};\nentity Route {\n  site: String,\n  mode: String,\n};\naction read;\naction \"GET\", \"HEAD\" in [Action::\"read\"] appliesTo {\n  principal: [User],\n  resource: [Route],\n  context: { path: String, method: String },\n};\naction \"POST\" appliesTo {\n  principal: [User],\n  resource: [Route],\n  context: { path: String, method: String },\n};\n",
+    "policies": {
+     "open": "permit (principal, action, resource) when { resource.mode == \"open\" };",
+     "admins": "permit (principal in Group::\"admins\", action, resource == Route::\"admin\");"
+    },
+    "templates": {
+     "route-for": "permit (principal == ?principal, action in Action::\"read\", resource == ?resource);"
+    },
+    "links": [
+     {
+      "id": "alice-secret",
+      "template": "route-for",
+      "values": {
+       "?principal": "User::\"alice\"",
+       "?resource": "Route::\"secret\""
+      }
+     }
+    ]
+   },
+   "expect": {
+    "refused": {
+     "class": "payload",
+     "id": "links"
+    }
+   }
+  },
+  {
+   "name": "one id for a policy and a template",
+   "bundle": {
+    "schema": "entity Group in [Group];\nentity User in [Group] {\n  email: String,\n  groups: Set<String>,\n};\nentity Route {\n  site: String,\n  mode: String,\n};\naction read;\naction \"GET\", \"HEAD\" in [Action::\"read\"] appliesTo {\n  principal: [User],\n  resource: [Route],\n  context: { path: String, method: String },\n};\naction \"POST\" appliesTo {\n  principal: [User],\n  resource: [Route],\n  context: { path: String, method: String },\n};\n",
+    "policies": {
+     "open": "permit (principal, action, resource) when { resource.mode == \"open\" };",
+     "admins": "permit (principal in Group::\"admins\", action, resource == Route::\"admin\");"
+    },
+    "templates": {
+     "open": "permit (principal == ?principal, action in Action::\"read\", resource == ?resource);"
+    }
+   },
+   "expect": {
+    "refused": {
+     "class": "payload",
+     "id": "open"
+    }
+   }
+  },
+  {
+   "name": "one id for a policy and a link",
+   "bundle": {
+    "schema": "entity Group in [Group];\nentity User in [Group] {\n  email: String,\n  groups: Set<String>,\n};\nentity Route {\n  site: String,\n  mode: String,\n};\naction read;\naction \"GET\", \"HEAD\" in [Action::\"read\"] appliesTo {\n  principal: [User],\n  resource: [Route],\n  context: { path: String, method: String },\n};\naction \"POST\" appliesTo {\n  principal: [User],\n  resource: [Route],\n  context: { path: String, method: String },\n};\n",
+    "policies": {
+     "open": "permit (principal, action, resource) when { resource.mode == \"open\" };",
+     "admins": "permit (principal in Group::\"admins\", action, resource == Route::\"admin\");"
+    },
+    "templates": {
+     "route-for": "permit (principal == ?principal, action in Action::\"read\", resource == ?resource);"
+    },
+    "links": [
+     {
+      "id": "admins",
+      "template": "route-for",
+      "values": {
+       "?principal": {
+        "type": "User",
+        "id": "alice"
+       },
+       "?resource": {
+        "type": "Route",
+        "id": "secret"
+       }
+      }
+     }
+    ]
+   },
+   "expect": {
+    "refused": {
+     "class": "payload",
+     "id": "admins"
+    }
+   }
+  },
+  {
+   "name": "a schema that does not parse",
+   "bundle": {
+    "schema": "entity User {",
+    "policies": {}
+   },
+   "expect": {
+    "refused": {
+     "class": "schema",
+     "id": ""
+    }
+   }
+  },
+  {
+   "name": "a schema that names a type it does not declare",
+   "bundle": {
+    "schema": "entity User in [Nope];",
+    "policies": {}
+   },
+   "expect": {
+    "refused": {
+     "class": "schema",
+     "id": ""
+    }
+   }
+  },
+  {
+   "name": "a policy that does not parse",
+   "bundle": {
+    "schema": "entity Group in [Group];\nentity User in [Group] {\n  email: String,\n  groups: Set<String>,\n};\nentity Route {\n  site: String,\n  mode: String,\n};\naction read;\naction \"GET\", \"HEAD\" in [Action::\"read\"] appliesTo {\n  principal: [User],\n  resource: [Route],\n  context: { path: String, method: String },\n};\naction \"POST\" appliesTo {\n  principal: [User],\n  resource: [Route],\n  context: { path: String, method: String },\n};\n",
+    "policies": {
+     "open": "permit (principal, action, resource) when { resource.mode == \"open\" };",
+     "broken": "permit (principal, action, resource"
+    }
+   },
+   "expect": {
+    "refused": {
+     "class": "policy",
+     "id": "broken"
+    }
+   }
+  },
+  {
+   "name": "two policies in one text",
+   "bundle": {
+    "schema": "entity Group in [Group];\nentity User in [Group] {\n  email: String,\n  groups: Set<String>,\n};\nentity Route {\n  site: String,\n  mode: String,\n};\naction read;\naction \"GET\", \"HEAD\" in [Action::\"read\"] appliesTo {\n  principal: [User],\n  resource: [Route],\n  context: { path: String, method: String },\n};\naction \"POST\" appliesTo {\n  principal: [User],\n  resource: [Route],\n  context: { path: String, method: String },\n};\n",
+    "policies": {
+     "two": "permit (principal, action, resource) when { resource.mode == \"open\" };\npermit (principal in Group::\"admins\", action, resource == Route::\"admin\");"
+    }
+   },
+   "expect": {
+    "refused": {
+     "class": "policy",
+     "id": "two"
+    }
+   }
+  },
+  {
+   "name": "an empty policy text",
+   "bundle": {
+    "schema": "entity Group in [Group];\nentity User in [Group] {\n  email: String,\n  groups: Set<String>,\n};\nentity Route {\n  site: String,\n  mode: String,\n};\naction read;\naction \"GET\", \"HEAD\" in [Action::\"read\"] appliesTo {\n  principal: [User],\n  resource: [Route],\n  context: { path: String, method: String },\n};\naction \"POST\" appliesTo {\n  principal: [User],\n  resource: [Route],\n  context: { path: String, method: String },\n};\n",
+    "policies": {
+     "empty": ""
+    }
+   },
+   "expect": {
+    "refused": {
+     "class": "policy",
+     "id": "empty"
+    }
+   }
+  },
+  {
+   "name": "a template among the policies",
+   "bundle": {
+    "schema": "entity Group in [Group];\nentity User in [Group] {\n  email: String,\n  groups: Set<String>,\n};\nentity Route {\n  site: String,\n  mode: String,\n};\naction read;\naction \"GET\", \"HEAD\" in [Action::\"read\"] appliesTo {\n  principal: [User],\n  resource: [Route],\n  context: { path: String, method: String },\n};\naction \"POST\" appliesTo {\n  principal: [User],\n  resource: [Route],\n  context: { path: String, method: String },\n};\n",
+    "policies": {
+     "tpl": "permit (principal == ?principal, action in Action::\"read\", resource == ?resource);"
+    }
+   },
+   "expect": {
+    "refused": {
+     "class": "policy",
+     "id": "tpl"
+    }
+   }
+  },
+  {
+   "name": "the first policy that does not parse, by id",
+   "bundle": {
+    "schema": "entity Group in [Group];\nentity User in [Group] {\n  email: String,\n  groups: Set<String>,\n};\nentity Route {\n  site: String,\n  mode: String,\n};\naction read;\naction \"GET\", \"HEAD\" in [Action::\"read\"] appliesTo {\n  principal: [User],\n  resource: [Route],\n  context: { path: String, method: String },\n};\naction \"POST\" appliesTo {\n  principal: [User],\n  resource: [Route],\n  context: { path: String, method: String },\n};\n",
+    "policies": {
+     "z-broken": "permit (",
+     "b-broken": "forbid ("
+    }
+   },
+   "expect": {
+    "refused": {
+     "class": "policy",
+     "id": "b-broken"
+    }
+   }
+  },
+  {
+   "name": "a template that does not parse",
+   "bundle": {
+    "schema": "entity Group in [Group];\nentity User in [Group] {\n  email: String,\n  groups: Set<String>,\n};\nentity Route {\n  site: String,\n  mode: String,\n};\naction read;\naction \"GET\", \"HEAD\" in [Action::\"read\"] appliesTo {\n  principal: [User],\n  resource: [Route],\n  context: { path: String, method: String },\n};\naction \"POST\" appliesTo {\n  principal: [User],\n  resource: [Route],\n  context: { path: String, method: String },\n};\n",
+    "policies": {
+     "open": "permit (principal, action, resource) when { resource.mode == \"open\" };",
+     "admins": "permit (principal in Group::\"admins\", action, resource == Route::\"admin\");"
+    },
+    "templates": {
+     "bad": "permit (principal == ?principal, action, resource"
+    }
+   },
+   "expect": {
+    "refused": {
+     "class": "template",
+     "id": "bad"
+    }
+   },
+   "expect_go": {
+    "refused": {
+     "class": "unsupported",
+     "id": "bad"
+    }
+   },
+   "gap": "cedar-go has no templates: a bundle with a template or a link is refused (unsupported)"
+  },
+  {
+   "name": "a static policy among the templates",
+   "bundle": {
+    "schema": "entity Group in [Group];\nentity User in [Group] {\n  email: String,\n  groups: Set<String>,\n};\nentity Route {\n  site: String,\n  mode: String,\n};\naction read;\naction \"GET\", \"HEAD\" in [Action::\"read\"] appliesTo {\n  principal: [User],\n  resource: [Route],\n  context: { path: String, method: String },\n};\naction \"POST\" appliesTo {\n  principal: [User],\n  resource: [Route],\n  context: { path: String, method: String },\n};\n",
+    "policies": {
+     "open": "permit (principal, action, resource) when { resource.mode == \"open\" };",
+     "admins": "permit (principal in Group::\"admins\", action, resource == Route::\"admin\");"
+    },
+    "templates": {
+     "static": "permit (principal, action in Action::\"read\", resource) when { resource.mode == \"read\" };"
+    }
+   },
+   "expect": {
+    "refused": {
+     "class": "template",
+     "id": "static"
+    }
+   },
+   "expect_go": {
+    "refused": {
+     "class": "unsupported",
+     "id": "static"
+    }
+   },
+   "gap": "cedar-go has no templates: a bundle with a template or a link is refused (unsupported)"
+  },
+  {
+   "name": "a link to a template that does not exist",
+   "bundle": {
+    "schema": "entity Group in [Group];\nentity User in [Group] {\n  email: String,\n  groups: Set<String>,\n};\nentity Route {\n  site: String,\n  mode: String,\n};\naction read;\naction \"GET\", \"HEAD\" in [Action::\"read\"] appliesTo {\n  principal: [User],\n  resource: [Route],\n  context: { path: String, method: String },\n};\naction \"POST\" appliesTo {\n  principal: [User],\n  resource: [Route],\n  context: { path: String, method: String },\n};\n",
+    "policies": {
+     "open": "permit (principal, action, resource) when { resource.mode == \"open\" };",
+     "admins": "permit (principal in Group::\"admins\", action, resource == Route::\"admin\");"
+    },
+    "links": [
+     {
+      "id": "alice-secret",
+      "template": "route-for",
+      "values": {
+       "?principal": {
+        "type": "User",
+        "id": "alice"
+       },
+       "?resource": {
+        "type": "Route",
+        "id": "secret"
+       }
+      }
+     }
+    ]
+   },
+   "expect": {
+    "refused": {
+     "class": "link",
+     "id": "alice-secret"
+    }
+   },
+   "expect_go": {
+    "refused": {
+     "class": "unsupported",
+     "id": "alice-secret"
+    }
+   },
+   "gap": "cedar-go has no templates: a bundle with a template or a link is refused (unsupported)"
+  },
+  {
+   "name": "a link that leaves a slot empty",
+   "bundle": {
+    "schema": "entity Group in [Group];\nentity User in [Group] {\n  email: String,\n  groups: Set<String>,\n};\nentity Route {\n  site: String,\n  mode: String,\n};\naction read;\naction \"GET\", \"HEAD\" in [Action::\"read\"] appliesTo {\n  principal: [User],\n  resource: [Route],\n  context: { path: String, method: String },\n};\naction \"POST\" appliesTo {\n  principal: [User],\n  resource: [Route],\n  context: { path: String, method: String },\n};\n",
+    "policies": {
+     "open": "permit (principal, action, resource) when { resource.mode == \"open\" };",
+     "admins": "permit (principal in Group::\"admins\", action, resource == Route::\"admin\");"
+    },
+    "templates": {
+     "route-for": "permit (principal == ?principal, action in Action::\"read\", resource == ?resource);"
+    },
+    "links": [
+     {
+      "id": "alice-secret",
+      "template": "route-for",
+      "values": {
+       "?principal": {
+        "type": "User",
+        "id": "alice"
+       }
+      }
+     }
+    ]
+   },
+   "expect": {
+    "refused": {
+     "class": "link",
+     "id": "alice-secret"
+    }
+   },
+   "expect_go": {
+    "refused": {
+     "class": "unsupported",
+     "id": "route-for"
+    }
+   },
+   "gap": "cedar-go has no templates: a bundle with a template or a link is refused (unsupported)"
+  },
+  {
+   "name": "a link whose entity type is not a name",
+   "bundle": {
+    "schema": "entity Group in [Group];\nentity User in [Group] {\n  email: String,\n  groups: Set<String>,\n};\nentity Route {\n  site: String,\n  mode: String,\n};\naction read;\naction \"GET\", \"HEAD\" in [Action::\"read\"] appliesTo {\n  principal: [User],\n  resource: [Route],\n  context: { path: String, method: String },\n};\naction \"POST\" appliesTo {\n  principal: [User],\n  resource: [Route],\n  context: { path: String, method: String },\n};\n",
+    "policies": {
+     "open": "permit (principal, action, resource) when { resource.mode == \"open\" };",
+     "admins": "permit (principal in Group::\"admins\", action, resource == Route::\"admin\");"
+    },
+    "templates": {
+     "route-for": "permit (principal == ?principal, action in Action::\"read\", resource == ?resource);"
+    },
+    "links": [
+     {
+      "id": "alice-secret",
+      "template": "route-for",
+      "values": {
+       "?principal": {
+        "type": "not a type",
+        "id": "alice"
+       },
+       "?resource": {
+        "type": "Route",
+        "id": "secret"
+       }
+      }
+     }
+    ]
+   },
+   "expect": {
+    "refused": {
+     "class": "link",
+     "id": "alice-secret"
+    }
+   },
+   "expect_go": {
+    "refused": {
+     "class": "unsupported",
+     "id": "route-for"
+    }
+   },
+   "gap": "cedar-go has no templates: a bundle with a template or a link is refused (unsupported)"
+  },
+  {
+   "name": "an attribute the schema does not declare",
+   "bundle": {
+    "schema": "entity Group in [Group];\nentity User in [Group] {\n  email: String,\n  groups: Set<String>,\n};\nentity Route {\n  site: String,\n  mode: String,\n};\naction read;\naction \"GET\", \"HEAD\" in [Action::\"read\"] appliesTo {\n  principal: [User],\n  resource: [Route],\n  context: { path: String, method: String },\n};\naction \"POST\" appliesTo {\n  principal: [User],\n  resource: [Route],\n  context: { path: String, method: String },\n};\n",
+    "policies": {
+     "open": "permit (principal, action, resource) when { resource.mode == \"open\" };",
+     "nope": "permit (principal, action, resource) when { principal.nope == \"x\" };"
+    }
+   },
+   "expect": {
+    "refused": {
+     "class": "validation",
+     "id": "nope"
+    }
+   }
+  },
+  {
+   "name": "an entity type the schema does not declare",
+   "bundle": {
+    "schema": "entity Group in [Group];\nentity User in [Group] {\n  email: String,\n  groups: Set<String>,\n};\nentity Route {\n  site: String,\n  mode: String,\n};\naction read;\naction \"GET\", \"HEAD\" in [Action::\"read\"] appliesTo {\n  principal: [User],\n  resource: [Route],\n  context: { path: String, method: String },\n};\naction \"POST\" appliesTo {\n  principal: [User],\n  resource: [Route],\n  context: { path: String, method: String },\n};\n",
+    "policies": {
+     "nope": "permit (principal == Nope::\"a\", action, resource);"
+    }
+   },
+   "expect": {
+    "refused": {
+     "class": "validation",
+     "id": "nope"
+    }
+   }
+  },
+  {
+   "name": "an action the schema does not declare",
+   "bundle": {
+    "schema": "entity Group in [Group];\nentity User in [Group] {\n  email: String,\n  groups: Set<String>,\n};\nentity Route {\n  site: String,\n  mode: String,\n};\naction read;\naction \"GET\", \"HEAD\" in [Action::\"read\"] appliesTo {\n  principal: [User],\n  resource: [Route],\n  context: { path: String, method: String },\n};\naction \"POST\" appliesTo {\n  principal: [User],\n  resource: [Route],\n  context: { path: String, method: String },\n};\n",
+    "policies": {
+     "nope": "permit (principal, action == Action::\"DELETE\", resource);"
+    }
+   },
+   "expect": {
+    "refused": {
+     "class": "validation",
+     "id": "nope"
+    }
+   }
+  },
+  {
+   "name": "a comparison of a string with a number",
+   "bundle": {
+    "schema": "entity Group in [Group];\nentity User in [Group] {\n  email: String,\n  groups: Set<String>,\n};\nentity Route {\n  site: String,\n  mode: String,\n};\naction read;\naction \"GET\", \"HEAD\" in [Action::\"read\"] appliesTo {\n  principal: [User],\n  resource: [Route],\n  context: { path: String, method: String },\n};\naction \"POST\" appliesTo {\n  principal: [User],\n  resource: [Route],\n  context: { path: String, method: String },\n};\n",
+    "policies": {
+     "cmp": "permit (principal, action, resource) when { resource.mode == 1 };"
+    }
+   },
+   "expect": {
+    "refused": {
+     "class": "validation",
+     "id": "cmp"
+    }
+   }
+  },
+  {
+   "name": "a string where a boolean is wanted",
+   "bundle": {
+    "schema": "entity Group in [Group];\nentity User in [Group] {\n  email: String,\n  groups: Set<String>,\n};\nentity Route {\n  site: String,\n  mode: String,\n};\naction read;\naction \"GET\", \"HEAD\" in [Action::\"read\"] appliesTo {\n  principal: [User],\n  resource: [Route],\n  context: { path: String, method: String },\n};\naction \"POST\" appliesTo {\n  principal: [User],\n  resource: [Route],\n  context: { path: String, method: String },\n};\n",
+    "policies": {
+     "cond": "permit (principal, action, resource) when { resource.mode };"
+    }
+   },
+   "expect": {
+    "refused": {
+     "class": "validation",
+     "id": "cond"
+    }
+   }
+  },
+  {
+   "name": "a principal type the action does not apply to",
+   "bundle": {
+    "schema": "entity Group in [Group];\nentity User in [Group] {\n  email: String,\n  groups: Set<String>,\n};\nentity Route {\n  site: String,\n  mode: String,\n};\naction read;\naction \"GET\", \"HEAD\" in [Action::\"read\"] appliesTo {\n  principal: [User],\n  resource: [Route],\n  context: { path: String, method: String },\n};\naction \"POST\" appliesTo {\n  principal: [User],\n  resource: [Route],\n  context: { path: String, method: String },\n};\n",
+    "policies": {
+     "route-principal": "permit (principal is Route, action == Action::\"GET\", resource);"
+    }
+   },
+   "expect": {
+    "loaded": [
+     "route-principal"
+    ]
+   },
+   "expect_go": {
+    "refused": {
+     "class": "validation",
+     "id": "route-principal"
+    }
+   },
+   "gap": "a policy that no request can satisfy (a principal type the action does not apply to): cedar-policy 4.14 warns and loads it, cedar-go fails validation"
+  },
+  {
+   "name": "the first policy that fails validation, by id",
+   "bundle": {
+    "schema": "entity Group in [Group];\nentity User in [Group] {\n  email: String,\n  groups: Set<String>,\n};\nentity Route {\n  site: String,\n  mode: String,\n};\naction read;\naction \"GET\", \"HEAD\" in [Action::\"read\"] appliesTo {\n  principal: [User],\n  resource: [Route],\n  context: { path: String, method: String },\n};\naction \"POST\" appliesTo {\n  principal: [User],\n  resource: [Route],\n  context: { path: String, method: String },\n};\n",
+    "policies": {
+     "z": "permit (principal, action, resource) when { principal.z };",
+     "y": "permit (principal, action, resource) when { principal.y };"
+    }
+   },
+   "expect": {
+    "refused": {
+     "class": "validation",
+     "id": "y"
+    }
+   }
+  },
+  {
+   "name": "getTag without hasTag",
+   "bundle": {
+    "schema": "entity User {\n  level: Long,\n} tags String;\nentity Doc;\naction view appliesTo {\n  principal: [User],\n  resource: [Doc],\n  context: { ip: ipaddr, at: datetime },\n};\n",
+    "policies": {
+     "unsafe": "permit (principal, action, resource) when { principal.getTag(\"team\") == \"core\" };"
+    }
+   },
+   "expect": {
+    "refused": {
+     "class": "validation",
+     "id": "unsafe"
+    }
+   }
+  },
+  {
+   "name": "hasTag on an entity type without tags (false, not an error)",
+   "bundle": {
+    "schema": "entity User {\n  level: Long,\n} tags String;\nentity Doc;\naction view appliesTo {\n  principal: [User],\n  resource: [Doc],\n  context: { ip: ipaddr, at: datetime },\n};\n",
+    "policies": {
+     "doc-tag": "permit (principal, action, resource) when { resource.hasTag(\"x\") };"
+    }
+   },
+   "expect": {
+    "loaded": [
+     "doc-tag"
+    ]
+   }
+  },
+  {
+   "name": "a template that fails validation",
+   "bundle": {
+    "schema": "entity Group in [Group];\nentity User in [Group] {\n  email: String,\n  groups: Set<String>,\n};\nentity Route {\n  site: String,\n  mode: String,\n};\naction read;\naction \"GET\", \"HEAD\" in [Action::\"read\"] appliesTo {\n  principal: [User],\n  resource: [Route],\n  context: { path: String, method: String },\n};\naction \"POST\" appliesTo {\n  principal: [User],\n  resource: [Route],\n  context: { path: String, method: String },\n};\n",
+    "policies": {
+     "open": "permit (principal, action, resource) when { resource.mode == \"open\" };",
+     "admins": "permit (principal in Group::\"admins\", action, resource == Route::\"admin\");"
+    },
+    "templates": {
+     "bad-tpl": "permit (principal == ?principal, action, resource) when { principal.nope };"
+    }
+   },
+   "expect": {
+    "refused": {
+     "class": "validation",
+     "id": "bad-tpl"
+    }
+   },
+   "expect_go": {
+    "refused": {
+     "class": "unsupported",
+     "id": "bad-tpl"
+    }
+   },
+   "gap": "cedar-go has no templates: a bundle with a template or a link is refused (unsupported)"
+  }
+ ]
+}

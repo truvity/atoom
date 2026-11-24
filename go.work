@@ -17,6 +17,7 @@ use (
 	./key/slotplan
 	./key/software
 	./key/yubikeypiv
+	./policy
 	./socket
 	./source
 	./source/file
@@ -49,6 +50,8 @@ replace github.com/truvity/atoom/key/slotplan v0.4.0 => ./key/slotplan
 replace github.com/truvity/atoom/key/software v0.4.0 => ./key/software
 
 replace github.com/truvity/atoom/key/yubikeypiv v0.4.0 => ./key/yubikeypiv
+
+replace github.com/truvity/atoom/policy v0.4.0 => ./policy
 
 replace github.com/truvity/atoom/socket v0.4.0 => ./socket
 

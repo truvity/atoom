@@ -1,0 +1,32 @@
+[package]
+name = "atoom-policy"
+description = "The Cedar policy loader (record 0019): a signed policy bundle read through the source port, verified, validated against its schema in strict mode and swapped in atomically, and decisions with cedar-policy that carry the digest of their set. The Go twin is the module github.com/truvity/atoom/policy, and both run the decision test set in testdata/."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+[lib]
+name = "atoom_policy"
+
+[dependencies]
+atoom-socket = { path = "../socket" }
+atoom-source = { path = "../source" }
+aws-lc-rs = "1"
+base64 = "0.22"
+# The reference engine, pinned exactly as sluis pins it (record 0019).
+cedar-policy = "=4.14.1"
+connectrpc = { version = "=0.9.1", default-features = false, features = ["json", "gzip", "client", "server"] }
+serde = "1"
+serde_json = "1"
+tokio = { version = "1", features = ["sync", "time"] }
+
+[dev-dependencies]
+buffa-types = { version = "=0.9.2", features = ["json"] }
+futures = "0.3"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time"] }

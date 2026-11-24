@@ -5,6 +5,16 @@ libraries changed. `just release-prepare X.Y.Z` writes the section.
 
 <!-- release-prepare: new sections go below this line -->
 
+## Unreleased
+
+New library, no change to a contract ([record 0019](docs/decisions/0019-the-policy-bundle-and-its-loader.md)):
+
+- **The Cedar loader `policy`** (B5), a Go module (`github.com/truvity/atoom/policy`, over `cedar-go` v1.9.3) and a Rust crate (`atoom-policy`, over `cedar-policy` 4.14.1) with one behaviour: a signed policy bundle read through the source port, verified before it is parsed, validated against its schema in strict mode, swapped in atomically, the last good set kept on a failed reload, a cold start refused without a valid set, refreshed by watch or poll with a minimum interval, and decisions with no I/O that carry the SHA-384 digest of their set.
+- **The signed bundle** is sluis's signed-config document (JWS in the general JSON serialisation, ES384, protected header `alg`, `kid`, `seq`, `kind`, pinned keys and co-signers, a growing `seq`) with the kind `PolicyBundle` and a JSON payload of the schema, the policies and templates by id, and the links.
+- **The decision test set** in `policy/testdata/`: sluis's signed-document vectors, about fifty bundle cases and thirty-five decision cases, run by both libraries in CI. The known gaps of `cedar-go` are listed in it: no templates, and a policy that no request can satisfy fails validation where `cedar-policy` warns.
+- `just check-isolation` knows a fifth kind of library, a library around an engine (`policy`): it may require `common`, the ports and the shared libraries, and nothing in the repository requires it.
+- `.cargo/audit.toml` lets through RUSTSEC-2026-0543 (`chrono` unmaintained, through `cedar-policy-core`), as sluis does, until 2026-12-18.
+
 ## 0.4.0 - 2026-11-22
 
 One version for the whole repository: every library is tagged 0.4.0, changed or not.

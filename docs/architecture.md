@@ -2,7 +2,7 @@
 
 How the repository is laid out, what each kind of directory is, and the rules that keep the libraries apart. The decisions behind it are the [records](decisions/README.md).
 
-## The four kinds of thing
+## The kinds of thing
 
 | Kind | What it is | Records |
 | --- | --- | --- |
@@ -10,6 +10,7 @@ How the repository is laid out, what each kind of directory is, and the rules th
 | **Driver** | one implementation of one port: a library plus a thin main that serves it on a socket | [0002](decisions/0002-ports-and-drivers-over-connectrpc.md), [0010](decisions/0010-distribution-per-driver-and-lambda.md) |
 | **Block** | a contract built from other ports and blocks, with no backend code, a kit, and rules supplied by its host | [0008](decisions/0008-blocks.md) |
 | **Kit** | the tests of a port or a block, run through its ConnectRPC endpoint in any language | [0002](decisions/0002-ports-and-drivers-over-connectrpc.md), [0014](decisions/0014-what-atoom-proves.md) |
+| **Library around an engine** | code a consumer links directly around a library of its language, reading through ports, with a test set that holds the Go and Rust twins to one behaviour: [`policy`](../policy/README.md), the Cedar loader | [0011](decisions/0011-cedar-as-a-library.md), [0019](decisions/0019-the-policy-bundle-and-its-loader.md) |
 
 ```mermaid
 flowchart TB
@@ -18,6 +19,7 @@ flowchart TB
   end
   subgraph atoom["truvity/atoom (one version)"]
     B["Blocks: seal (built); state, token, export (planned)"]
+    E["policy: the Cedar loader (a library around an engine)"]
     P["Ports: contract + stubs + docs + kit"]
     D["Drivers: library + thin main"]
     K["Kits"]
@@ -25,12 +27,14 @@ flowchart TB
   C1 -- "ConnectRPC: in-process, socket or extension" --> B
   C1 -- "ConnectRPC" --> P
   B -- "calls only ports and blocks" --> P
+  C1 -- "links" --> E
+  E -- "reads the bundle through source" --> P
   D -- implements --> P
   K -- tests --> D
   K -- tests --> B
 ```
 
-A consumer calls a port or a block through its generated client, always, also in one process ([0009](decisions/0009-connectrpc-in-process.md)). The one exception is Cedar, which is used as a library ([0011](decisions/0011-cedar-as-a-library.md)).
+A consumer calls a port or a block through its generated client, always, also in one process ([0009](decisions/0009-connectrpc-in-process.md)). The one exception is Cedar, which is used as a library ([0011](decisions/0011-cedar-as-a-library.md)); atoom's [`policy`](../policy/README.md) loads the signed bundle for it, in Go and in Rust ([0019](decisions/0019-the-policy-bundle-and-its-loader.md)).
 
 ## Repository layout
 
@@ -49,6 +53,7 @@ atoom/
   store/                 port: items
     conformance/  rqlite/  memory/  dynamodb/
   source/  blob/  transport/  index/  destination/    the other ports, same shape
+  policy/                the Cedar loader: Go module and Rust crate side by side, and the decision test set in testdata/ (record 0019)
   blocks/                blocks, one directory each
     seal/                the seal block: proto, stubs, the Go implementation, README, docs/, the kit (package conformance)
   deploy/release/        the Dockerfile templates of the images
@@ -80,6 +85,7 @@ Checked in CI by `just check-isolation` ([0003](decisions/0003-libraries-with-th
 - a **driver** may require the `common` types, its own port, the kit of its own port (for tests), a shared library and its own backend SDK. It may not require another driver or the code of another port;
 - **no driver requires another driver.** A small library that several drivers of one port need is a shared library, listed in `tools/isolation/shared.txt` (`socket`, `key/slotplan`, `key/pinrelease`, `blob/fsdir`);
 - a **block** requires only `common`, ports, shared libraries and other blocks, with no cycle, and never a driver or a backend ([0008](decisions/0008-blocks.md)); no port and no driver requires a block. A block may require the libraries it needs besides (`blocks/seal`: AES key wrap from `go-jose`);
+- a **library around an engine** (`policy`, [0019](decisions/0019-the-policy-bundle-and-its-loader.md)) requires only `common`, ports, shared libraries and its engine, never a driver or a block, and no library of the repository requires it;
 - a consumer that takes `key` and `key/software` has no AWS SDK, PC/SC, DynamoDB or PostgreSQL code in its module graph.
 
 The cgo and PC/SC dependency of `key/yubikeypiv` is behind the build tag `atoom_card`. Without the tag the driver builds with no C code and refuses to open a card.

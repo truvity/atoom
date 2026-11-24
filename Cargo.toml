@@ -15,6 +15,7 @@ members = [
   "index",
   "index/conformance",
   "index/sqlite",
+  "policy",
   "socket",
   "source",
   "source/conformance",

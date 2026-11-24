@@ -9,7 +9,7 @@ Ports, drivers, blocks and kits shared by [sluis](https://github.com/truvity/slu
 - **Blocks** are contracts built from other ports and blocks. A block has no backend code, declares its dependencies and gets them passed in, has no cycles, and takes its rules from its host. There is one implementation per block, in the language of its main host. A block moves into atoom at its second consumer. The first blocks are `seal`, `state`, `token` and `export`; [`seal`](blocks/seal/README.md) is built.
 - **Kits** are the tests every driver of a port, and every block, must pass. A kit runs through the ConnectRPC endpoint, in any language.
 
-A consumer calls a port or a block through its generated client, always, also when the driver runs in the same process. The one exception is Cedar, which is used as a library. Anyone can write a driver, inside or outside this repository, and prove it with the port's kit. Each library has its own thin dependencies and its own documentation, and the whole repository has one version.
+A consumer calls a port or a block through its generated client, always, also when the driver runs in the same process. The one exception is Cedar, which is used as a library; atoom's [policy](policy/README.md) loads its signed bundle. Anyone can write a driver, inside or outside this repository, and prove it with the port's kit. Each library has its own thin dependencies and its own documentation, and the whole repository has one version.
 
 ## What atoom is not
 
@@ -37,6 +37,8 @@ atoom 0.2.0 is released. Seven ports with kits and thirteen drivers are built:
 | [destination](destination/README.md) | where a published document goes | [dir](destination/dir/README.md) |
 
 One block is built: [seal](blocks/seal/README.md), data keys per purpose and scope, sealing, keyed hashes and signing by purpose, over the key and store ports.
+
+The Cedar loader is [policy](policy/README.md): the signed policy bundle, its loading rules and the decision test set, in Go and Rust ([record 0019](docs/decisions/0019-the-policy-bundle-and-its-loader.md)).
 
 The shared libraries are [common](common/README.md) (the types every port speaks), [socket](socket/README.md) (the socket host and its guard) and, for the card driver, [key/slotplan](key/slotplan/README.md) and [key/pinrelease](key/pinrelease/README.md).
 
@@ -68,7 +70,7 @@ The environment is [devbox](https://www.jetify.com/devbox) (`devbox shell`, or d
 | `just lint` | golangci-lint, rustfmt and Clippy, `buf lint`, shellcheck, actionlint |
 | `just conformance` | build each conformance kit once and run it against every driver built on this machine, through the driver's socket |
 | `just gen`, `just gen-check` | generate the code of every port from its proto files; fail when it is not current |
-| `just check-isolation` | the dependency rules: no driver requires another driver, a port requires only the runtimes |
+| `just check-isolation` | the dependency rules: no driver requires another driver, a port requires only the runtimes, a library around an engine requires no driver or block |
 | `just check-versions` | every pinned runtime agrees with [versions.yaml](versions.yaml) |
 | `just release-prepare X.Y.Z`, `just release-tag X.Y.Z --dry-run`, `just release-rehearsal` | the release flow, see [docs/release.md](docs/release.md) |
 | `just release-packages`, `just release-smoke`, `just release-images-rehearsal` | build every driver's tarball, packages and image on this machine (docker needed), install and run them in containers, push the images to a throw-away registry; see [docs/packages.md](docs/packages.md) |
