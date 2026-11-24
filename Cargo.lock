@@ -330,6 +330,7 @@ dependencies = [
  "hyper",
  "hyper-util",
  "rustix",
+ "sync_wrapper",
  "tempfile",
  "tokio",
  "tower",

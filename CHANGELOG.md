@@ -15,6 +15,8 @@ New library, no change to a contract ([record 0019](docs/decisions/0019-the-poli
 - `just check-isolation` knows a fifth kind of library, a library around an engine (`policy`): it may require `common`, the ports and the shared libraries, and nothing in the repository requires it.
 - `.cargo/audit.toml` lets through RUSTSEC-2026-0543 (`chrono` unmaintained, through `cedar-policy-core`), as sluis does, until 2026-12-18.
 
+**Breaking in the Rust API of `socket`**: `atoom_socket::ResponseBody` is now an opaque struct (its two public variants are gone; nothing in the repository matched on them), and it is `Send + Sync + 'static` through a socket and in process. A response stream can now be held in a struct that a spawned task borrows across an await; before, `connectrpc`'s in-process body made every `ServerStream<ResponseBody, _>` `Send` only. The in-process body is wrapped in `sync_wrapper::SyncWrapper` (no lock, no `unsafe`; the crate was already in the tree through `connectrpc` and `tower`). Go and the wire do not change.
+
 ## 0.4.0 - 2026-11-22
 
 One version for the whole repository: every library is tagged 0.4.0, changed or not.

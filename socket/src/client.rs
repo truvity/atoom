@@ -18,6 +18,7 @@ use connectrpc::{ConnectRpcService, DeadlinePolicy, Router};
 use futures::future::BoxFuture;
 use http::{Request, Response};
 use hyper::body::{Body, Frame, SizeHint};
+use sync_wrapper::SyncWrapper;
 
 use crate::call::Inherit;
 use crate::server::DEFAULT_DEADLINE;
@@ -165,12 +166,17 @@ enum Inner {
     InProcess(ServiceTransport<ConnectRpcService>),
 }
 
-/// The body of a response, from a socket or from the router of this process.
-pub enum ResponseBody {
-    /// From a socket.
+/// The body of a response, from a socket or from the router of this process. It is `Send + Sync + 'static`, so a response stream
+/// (`connectrpc`'s `ServerStream<ResponseBody, _>`) can sit in a struct that a spawned task borrows across an await.
+pub struct ResponseBody(Source);
+
+enum Source {
+    /// From a socket: hyper's body, which is `Send + Sync` already.
     Socket(hyper::body::Incoming),
-    /// From the router of this process.
-    InProcess(ConnectRpcBody),
+    /// From the router of this process. `connectrpc`'s body holds a boxed stream that is `Send` but not `Sync`; the wrapper makes it
+    /// `Sync` by giving no access through a shared reference at all, only through `&mut` or `Pin<&mut>`, so two threads can never
+    /// touch the inner body at once (`sync_wrapper`, no lock and no `unsafe` here).
+    InProcess(SyncWrapper<ConnectRpcBody>),
 }
 
 impl Body for ResponseBody {
@@ -181,25 +187,27 @@ impl Body for ResponseBody {
         self: Pin<&mut Self>,
         cx: &mut Context<'_>,
     ) -> Poll<Option<Result<Frame<Self::Data>, Self::Error>>> {
-        match self.get_mut() {
-            Self::Socket(b) => Pin::new(b).poll_frame(cx),
-            Self::InProcess(b) => Pin::new(b)
+        match &mut self.get_mut().0 {
+            Source::Socket(b) => Pin::new(b).poll_frame(cx),
+            Source::InProcess(b) => Pin::new(b.get_mut())
                 .poll_frame(cx)
                 .map(|o| o.map(|r| r.map_err(|e: Infallible| match e {}))),
         }
     }
 
+    // The two hints take `&self`, which the wrapper does not reach through. `ConnectRpcBody` does not override them either, so the
+    // defaults below are the answers it gives itself: nothing is lost.
     fn is_end_stream(&self) -> bool {
-        match self {
-            Self::Socket(b) => b.is_end_stream(),
-            Self::InProcess(b) => b.is_end_stream(),
+        match &self.0 {
+            Source::Socket(b) => b.is_end_stream(),
+            Source::InProcess(_) => false,
         }
     }
 
     fn size_hint(&self) -> SizeHint {
-        match self {
-            Self::Socket(b) => b.size_hint(),
-            Self::InProcess(b) => b.size_hint(),
+        match &self.0 {
+            Source::Socket(b) => b.size_hint(),
+            Source::InProcess(_) => SizeHint::default(),
         }
     }
 }
@@ -228,14 +236,16 @@ impl ClientTransport for Transport {
                 Box::pin(async move {
                     conn.send(request)
                         .await
-                        .map(|r| r.map(ResponseBody::Socket))
+                        .map(|r| r.map(|b| ResponseBody(Source::Socket(b))))
                 })
             }
             Inner::InProcess(service) => {
                 let sent = service.send(request);
                 Box::pin(async move {
                     match sent.await {
-                        Ok(r) => Ok(r.map(ResponseBody::InProcess)),
+                        Ok(r) => {
+                            Ok(r.map(|b| ResponseBody(Source::InProcess(SyncWrapper::new(b)))))
+                        }
                         Err(never) => match never {},
                     }
                 })

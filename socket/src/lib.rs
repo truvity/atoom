@@ -55,3 +55,6 @@ mod call_tests;
 
 #[cfg(test)]
 mod in_process_tests;
+
+#[cfg(test)]
+mod body_tests;
