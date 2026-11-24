@@ -1,6 +1,6 @@
 # 0019. The signed policy bundle, its loading rules and the loader in Go and Rust
 
-Status: proposed, 2026-11-24 (step B5 of the [plan](../plan.md); it carries out [0011](0011-cedar-as-a-library.md))
+Status: accepted, 2026-11-24 (owner decision on the pull request of step B5) (step B5 of the [plan](../plan.md); it carries out [0011](0011-cedar-as-a-library.md))
 
 ## Context
 
