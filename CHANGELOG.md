@@ -5,7 +5,13 @@ libraries changed. `just release-prepare X.Y.Z` writes the section.
 
 <!-- release-prepare: new sections go below this line -->
 
-## Unreleased
+## 0.5.0 - 2026-11-24
+
+One version for the whole repository: every library is tagged 0.5.0, changed or not.
+
+Libraries that changed since v0.4.0:
+- `policy`
+- `socket`
 
 New library, no change to a contract ([record 0019](docs/decisions/0019-the-policy-bundle-and-its-loader.md)):
 
