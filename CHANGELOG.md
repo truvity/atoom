@@ -13,7 +13,7 @@ libraries changed. `just release-prepare X.Y.Z` writes the section.
 
 ### Changed
 
-- **The plan's order: session to done first** ([record 0023](docs/decisions/0023-session-to-done-first.md), owner direction, superseding the order of record 0022): B9 with session's parts first (`source/appconfig`, then `transport/sqs` and the kit's redelivery case), then B8b, B6, B12, B7, B10, B11 and B15. An in-process Go driver needs no Lambda zip, so session's step 5 needs no packaging from atoom.
+- **The plan's order: session to done first** ([record 0023](docs/decisions/0023-session-to-done-first.md), owner direction, superseding the order of record 0022): B9 with session's parts first (`source/appconfig`, owner's D71 A; then `transport/nats`, moved from B15 by the owner's D65 A for session's first site; then `transport/sqs`; both transports with the kit's redelivery case), then B8b, B6, B12, B7, B10, B11 and B15. An in-process Go driver needs no Lambda zip, so session's step 5 needs no packaging from atoom.
 
 ### Fixed
 

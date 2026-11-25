@@ -47,7 +47,7 @@ Every refusal is a Connect error with the `Refusal` detail of [common](../../com
 | --- | --- | --- |
 | [transport/spool](../spool/README.md) | a local directory of fsync'd segment files, bounded | a host with a disk, where a message must survive the consumer being down |
 | `transport/sqs` | an Amazon SQS queue | Lambda (planned, step B9): a Go driver that the function mounts in process, so audit on Lambda needs no spool sidecar as an extension ([record 0022](../../docs/decisions/0022-the-blocks-order-after-0-7-0.md)). SQS delivers at least once: the driver and the kit prove that a usage-class message survives a redelivery as exactly one record, through the writer's dedup by message id (a redelivery and duplicate case in the kit) |
-| `transport/nats` | NATS JetStream | a cluster that already runs NATS (planned, step B15) |
+| `transport/nats` | NATS JetStream | a cluster that runs NATS: a Go driver a host mounts in process, as for SQS (planned, step B9, [record 0023](../../docs/decisions/0023-session-to-done-first.md)) |
 
 ## The call context
 

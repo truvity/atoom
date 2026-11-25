@@ -35,7 +35,7 @@ Planned drivers, each released in every form it can run in once it is built:
 | `source/ssm` | SSM Parameter Store | extension zip | B9 |
 | `blob/s3` | an S3 bucket | extension zip | B9 |
 | `transport/sqs` | an Amazon SQS queue | none for audit: a Go driver that the Lambda host mounts in process, with no spool sidecar as an extension ([record 0022](decisions/0022-the-blocks-order-after-0-7-0.md)) | B9 |
-| `transport/nats` | NATS JetStream | extension zip | B15 |
+| `transport/nats` | NATS JetStream | extension zip, for a function in another language; a Go host links the library | B9 |
 | `index/rqlite`, `index/postgres` | rqlite; PostgreSQL with row-level security | `index/postgres`: extension zip | B15 |
 
 ## The Go file driver
