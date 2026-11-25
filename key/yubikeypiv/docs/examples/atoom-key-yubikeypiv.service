@@ -1,0 +1,61 @@
+# An example unit for atoom's own thin main of the card driver (package atoom-driver-key-yubikeypiv, /usr/bin/atoom-key-yubikeypiv).
+# The names, the paths and the variables are an example; a host chooses its own. It names no installation: the host's environment
+# file gives the card's serial and the numeric ids, and nothing in this unit changes with where it runs.
+[Unit]
+Description=atoom key driver: YubiKey PIV
+Documentation=https://github.com/truvity/atoom/tree/master/key/yubikeypiv
+Requires=pcscd.socket
+After=pcscd.socket
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+User=atoom-key-yubikeypiv
+Group=atoom-key-yubikeypiv
+# The group of the card service's socket (atoom-pcscd-socket.dropin); only this user joins it.
+SupplementaryGroups=atoom-pcsc
+StateDirectory=atoom-key-yubikeypiv
+StateDirectoryMode=0700
+RuntimeDirectory=atoom-key-yubikeypiv
+RuntimeDirectoryMode=0700
+# ATOOM_CARD_SERIAL (the serial of the card), ATOOM_KEY_CALLERS_GID (the group of the callers of the key socket) and
+# ATOOM_ADMIN_UID (the uid that may deliver the PIN on the admin socket).
+EnvironmentFile=/etc/atoom/key-yubikeypiv.env
+Environment=GOMEMLIMIT=24MiB
+ExecStart=/usr/bin/atoom-key-yubikeypiv serve --purposes /etc/atoom/key-yubikeypiv-purposes.json --node %H --socket /run/atoom-key-yubikeypiv/key-store.sock --admin-socket /run/atoom-key-yubikeypiv/admin.sock --admin-uid ${ATOOM_ADMIN_UID} --state-dir /var/lib/atoom-key-yubikeypiv --serial ${ATOOM_CARD_SERIAL} --socket-gid ${ATOOM_KEY_CALLERS_GID}
+# A bench or a developer's card in factory state only: the driver then makes absent keys with the factory management key and may take
+# the only card without --serial. Never on a provisioned card.
+#ExecStart=
+#ExecStart=/usr/bin/atoom-key-yubikeypiv serve --allow-factory-defaults --purposes /etc/atoom/key-yubikeypiv-purposes.json --node %H --socket /run/atoom-key-yubikeypiv/key-store.sock --admin-socket /run/atoom-key-yubikeypiv/admin.sock --admin-uid ${ATOOM_ADMIN_UID} --state-dir /var/lib/atoom-key-yubikeypiv --socket-gid ${ATOOM_KEY_CALLERS_GID}
+Restart=on-failure
+RestartSec=2s
+
+# Hardening
+NoNewPrivileges=yes
+CapabilityBoundingSet=
+AmbientCapabilities=
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+ProtectProc=invisible
+ProcSubset=pid
+RestrictSUIDSGID=yes
+RestrictRealtime=yes
+RestrictNamespaces=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+UMask=0077
+PrivateNetwork=yes
+RestrictAddressFamilies=AF_UNIX
+SocketBindDeny=any
+ReadWritePaths=/run/atoom-key-yubikeypiv

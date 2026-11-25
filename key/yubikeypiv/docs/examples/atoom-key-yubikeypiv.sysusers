@@ -1,0 +1,5 @@
+# An example sysusers.d file for atoom-key-yubikeypiv.service: the driver's user, the group of the card service's socket, and the
+# group of the callers of the key socket (its gid is ATOOM_KEY_CALLERS_GID in the unit's environment file). The names are an example.
+u atoom-key-yubikeypiv - "atoom key driver: YubiKey PIV" - /usr/sbin/nologin
+g atoom-pcsc -
+g atoom-key-callers -

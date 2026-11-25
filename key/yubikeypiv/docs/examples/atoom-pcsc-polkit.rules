@@ -1,0 +1,7 @@
+// An example polkit rule (/etc/polkit-1/rules.d/50-atoom-pcsc.rules), for a pcscd built with polkit (it ships
+// org.debian.pcsc-lite.policy): only the card driver's user and root reach the card service and the cards.
+polkit.addRule(function(action, subject) {
+    if (action.id == "org.debian.pcsc-lite.access_pcsc" || action.id == "org.debian.pcsc-lite.access_card") {
+        return (subject.user == "root" || subject.user == "atoom-key-yubikeypiv") ? polkit.Result.YES : polkit.Result.NO;
+    }
+});
