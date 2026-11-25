@@ -23,7 +23,7 @@ These are the choices the contract left open. Every driver makes them, and a con
 
 It cannot change the backend, so that a `NOTIFY` driver says a newer version exists when the content changes, and says the empty label when a name goes away, is the test of each driver (the file driver has one that replaces and removes a document under a watch). It cannot make the backend unavailable, so the `unavailable/engine` refusal is a driver test too, and so are the rules of the backend itself (the file driver's links and size limit, the credential driver's owner and mode rules): each driver has a backend suite for them (`suite::run_temp`).
 
-It cannot test a `POLL` driver beyond the `poll_after` of a read: no driver in this repository polls.
+It cannot test a `POLL` driver beyond the `poll_after` of a read: that a poll brings a new deployment is the test of each driver (the AppConfig driver has one over its fake).
 
 ## Running it
 

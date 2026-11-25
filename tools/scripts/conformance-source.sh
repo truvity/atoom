@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Runs the conformance kit of the source port (the binary source-conformance) against every source driver, each through the socket of
 # its own thin main: the file driver over a directory holding one signed-config document, in Rust and in Go (the same directory, the same
-# kit, two thin mains), and the credential driver over a directory holding one credential (mode 0400). The Rust drivers are Linux only,
+# kit, two thin mains), the credential driver over a directory holding one credential (mode 0400), and the AppConfig driver over the
+# fake AppConfig data plane of its tests (source/appconfig/internal/appconfigfake), served on a loopback port. The Rust drivers are Linux only,
 # so on any other system the run says so and does nothing (the Go driver's own tests run everywhere: `just go-test`).
 #
 #   tools/scripts/conformance-source.sh
@@ -65,5 +66,18 @@ pids+=($!)
 wait_for "the credential driver" test -S "$tmp/credential.sock"
 echo "conformance-source: source-conformance against source-credential"
 "$bin/source-conformance" --socket "$tmp/credential.sock" --present upstream-workforce --bytes "$tmp/bytes"
+
+# The AppConfig driver, over the fake data plane of its tests on a loopback port. The thin main reaches it through the SDK's endpoint
+# variable; the credentials are placeholders that the fake does not check.
+(cd source/appconfig && CGO_ENABLED=0 go build -o "$tmp/source-appconfig" ./cmd/appconfig && go build -o "$tmp/appconfigfake" ./internal/appconfigfake/cmd/appconfigfake)
+"$tmp/appconfigfake" --url-file "$tmp/appconfig.url" --application conformance --environment conformance --deploy "boundary=$tmp/bytes" &
+pids+=($!)
+wait_for "the fake AppConfig" test -s "$tmp/appconfig.url"
+AWS_ENDPOINT_URL_APPCONFIGDATA=$(cat "$tmp/appconfig.url") AWS_ACCESS_KEY_ID=placeholder AWS_SECRET_ACCESS_KEY=placeholder AWS_REGION=us-east-1 \
+    "$tmp/source-appconfig" serve --socket "$tmp/appconfig.sock" --application conformance --environment conformance &
+pids+=($!)
+wait_for "the AppConfig driver" test -S "$tmp/appconfig.sock"
+echo "conformance-source: source-conformance against source/appconfig (cmd/appconfig, over the fake data plane)"
+"$bin/source-conformance" --socket "$tmp/appconfig.sock" --present boundary --bytes "$tmp/bytes"
 
 echo "conformance-source: done"

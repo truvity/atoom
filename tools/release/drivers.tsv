@@ -21,6 +21,7 @@ store-memory	rust	store/memory	atoom-store-memory:store-memory	portable	linux	-	
 # source/file is also a Go module (library + cmd/file, for in-process Go consumers and the conformance run). It has no row: the id is the directory, one
 # executable is released for one driver, and this row holds it (docs/packages.md, "The Go file driver").
 source-file	rust	source/file	atoom-source-file:source-file	portable	linux	-	-	-	-	The file driver of the source port: a directory of signed config documents served on a UNIX socket
+source-appconfig	go	source/appconfig	./cmd/appconfig	portable	linux,darwin	-	-	-	-	The AWS AppConfig driver of the source port: the configurations AppConfig deploys, served on a UNIX socket
 source-credential	rust	source/credential	atoom-source-credential:source-credential	portable	linux	-	-	-	-	The credential driver of the source port: systemd credentials served on a UNIX socket
 blob-fs	rust	blob/fs	atoom-blob-fs:blob-fs	portable	linux	-	-	-	-	The fs driver of the blob port: a local directory served on a UNIX socket
 blob-fsreadonly	rust	blob/fsreadonly	atoom-blob-fsreadonly:blob-fsreadonly	portable	linux	-	-	-	-	The read-only fs driver of the blob port: the directory of blob-fs, read only, on a UNIX socket

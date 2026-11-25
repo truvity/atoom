@@ -100,7 +100,7 @@ Every port has one page, `<port>/docs/<port>-port.md`, in the same shape: the ca
 | --- | --- | --- | --- |
 | `key` | [key port](../key/docs/key-port.md) | private keys: sign, agree, attest | `software`, `yubikeypiv`, `awskms` |
 | `store` | [store port](../store/docs/store-port.md) | items with versions, expiry, indexes and a change log | `rqlite`, `memory`, `dynamodb` |
-| `source` | [source port](../source/docs/source-port.md) | named values and their bytes, watched or not | `file`, `credential` |
+| `source` | [source port](../source/docs/source-port.md) | named values and their bytes, watched or not | `file`, `credential`, `appconfig` |
 | `blob` | [blob port](../blob/docs/blob-port.md) | write-once objects and a few conditional pointers | `fs`, `fsreadonly` |
 | `transport` | [transport port](../transport/docs/transport-port.md) | a durable ordered queue to one consumer | `spool` |
 | `index` | [index port](../index/docs/index-port.md) | a search index of the records of an append-only log | `sqlite` |
