@@ -23,7 +23,7 @@ func twoCards() (*cardtest.Bench, *cardtest.Card, *cardtest.Card) {
 // operator's daily card.
 func TestTheDriverOpensOnlyTheNamedReader(t *testing.T) {
 	b, mine, daily := twoCards()
-	s, err := yubikeypiv.New(yubikeypiv.Options{Purposes: refPurposes(), Environment: yubikeypiv.Production, Reader: "Fake Reader A 00 00", Serial: mine.SerialNo, Open: b.Opener()})
+	s, err := yubikeypiv.New(yubikeypiv.Options{Purposes: refPurposes(), Reader: "Fake Reader A 00 00", Serial: mine.SerialNo, Open: b.Opener()})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -35,21 +35,21 @@ func TestTheDriverOpensOnlyTheNamedReader(t *testing.T) {
 
 // Two readers and no reader named: the driver does not start, whatever the serial, and no reader is connected to.
 func TestTheDriverRefusesToChooseAmongReaders(t *testing.T) {
-	for _, env := range []string{yubikeypiv.Development, yubikeypiv.Production} {
+	for _, factory := range []bool{factoryDefaults, provisioned} {
 		b, mine, _ := twoCards()
-		_, err := yubikeypiv.New(yubikeypiv.Options{Purposes: refPurposes(), Environment: env, Serial: mine.SerialNo, Open: b.Opener()})
+		_, err := yubikeypiv.New(yubikeypiv.Options{Purposes: refPurposes(), AllowFactoryDefaults: factory, Serial: mine.SerialNo, Open: b.Opener()})
 		if !errors.Is(err, card.ErrAmbiguousReader) || !strings.Contains(err.Error(), "--reader") {
-			t.Fatalf("%s: got %v, want the refusal that names --reader", env, err)
+			t.Fatalf("factory defaults %v: got %v, want the refusal that names --reader", factory, err)
 		}
 		if b.TotalOpens() != 0 {
-			t.Fatalf("%s: %d connections, want none", env, b.TotalOpens())
+			t.Fatalf("factory defaults %v: %d connections, want none", factory, b.TotalOpens())
 		}
 	}
 }
 
 func TestTheDriverRefusesTheSerialOfAnotherReader(t *testing.T) {
 	b, _, daily := twoCards()
-	_, err := yubikeypiv.New(yubikeypiv.Options{Purposes: refPurposes(), Environment: yubikeypiv.Production, Reader: "Fake Reader A 00 00", Serial: daily.SerialNo, Open: b.Opener()})
+	_, err := yubikeypiv.New(yubikeypiv.Options{Purposes: refPurposes(), Reader: "Fake Reader A 00 00", Serial: daily.SerialNo, Open: b.Opener()})
 	if !errors.Is(err, card.ErrSerialMismatch) {
 		t.Fatalf("got %v, want ErrSerialMismatch", err)
 	}

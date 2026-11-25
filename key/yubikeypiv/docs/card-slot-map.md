@@ -37,4 +37,4 @@ Every key is generated with PIN once and touch never, except the PIN release key
 
 ## Keys are generated on the card
 
-A key is made on the card, with the policies of its row, in development only and with the factory management key. In any other environment the driver adopts a key it finds in the slot after it verifies the attestation (Yubico's roots, the firmware floor, the slot, the algorithm and both policies), and refuses a key that fails ([cards.md](cards.md)).
+A key is made on the card, with the policies of its row, only when the host allows factory defaults, and with the factory management key. Otherwise the driver adopts a key it finds in the slot after it verifies the attestation (Yubico's roots, the firmware floor, the slot, the algorithm and both policies), and refuses a key that fails ([cards.md](cards.md)).

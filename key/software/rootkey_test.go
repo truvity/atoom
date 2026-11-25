@@ -18,7 +18,7 @@ import (
 //
 // verifies: REQ-PKI-027
 func TestTheSoftwareDriverMakesNoRootKeyAndThePortHasNoWayOut(t *testing.T) {
-	r := start(t, "development")
+	r := start(t)
 	ctx := context.Background()
 	for _, purpose := range []string{"root", "root-ca", "ca-root", "x509-root", "root-key", "trust-anchor", "Root", "x509-root-ca"} {
 		for _, alg := range []string{"ES384", "ES256", "ECDH-P384"} {

@@ -88,9 +88,9 @@ From sluis `3f0afea`.
 
 | Here | From sluis | Changed |
 | --- | --- | --- |
-| `software.go`, `pinrelease.go` | `drivers/key/software/internal/driver/driver.go`, `pinrelease.go` | `Run` takes a `Host` in place of `rpc.ServerConfig`; the registry owner and the peer name in the journal left (`Options.Caller` names the caller); the production floor is `Options.RefuseProduction`, off in atoom's own main; `New` and `Handler` are new, for in-process use |
+| `software.go`, `pinrelease.go` | `drivers/key/software/internal/driver/driver.go`, `pinrelease.go` | `Run` takes a `Host` in place of `rpc.ServerConfig`; the registry owner and the peer name in the journal left (`Options.Caller` names the caller); the production floor left with the environment (record 0021: a host that must not use file keys somewhere does not mount the driver there); `New` and `Handler` are new, for in-process use |
 | `internal/keystore/` | `drivers/key/software/internal/keystore/` | none |
-| `software_test.go`, `rootkey_test.go`, `internal/keystore/keystore_test.go` | `drivers/key/software/internal/driver/` tests | served on an in-process HTTP server; the suite is the kit's; tests of the owner check, the socket mode and sluis's registry stayed; tests of the floor as an option added |
+| `software_test.go`, `rootkey_test.go`, `internal/keystore/keystore_test.go` | `drivers/key/software/internal/driver/` tests | served on an in-process HTTP server; the suite is the kit's; tests of the owner check, the socket mode and sluis's registry stayed; the tests of the floor left with it (record 0021) |
 | `cmd/software/` | `drivers/key/software/main.go` | rewritten as a thin main on the standard library |
 | `conformance.sh` | | new: runs the kit binary against the main's socket |
 | `docs/` | ritueel `docs/reference/software-store.md`, `docs/learn/a-key-in-a-file.mdx`, `docs/research/software-key-backends-2026-11-01.md`, `docs/research/age-or-jwe-for-the-key-file-2026-11-13.md` | rewritten as driver documentation |

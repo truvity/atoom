@@ -143,8 +143,8 @@ func newBoundary(t *testing.T) *boundary {
 	c := cardtest.New()
 	c.SerialNo = 87654321
 	c.PKI = a
-	b.releaser = startOpts(t, a, yubikeypiv.Development, self(), yubikeypiv.Options{Purposes: refPurposes(), Node: releaserNode, PeerKeys: b.newPeers(), StateDir: b.releaserState})
-	b.locked = startOpts(t, c, yubikeypiv.Development, self(), yubikeypiv.Options{Purposes: refPurposes(), Node: lockedNode, PeerKeys: b.newPeers(), StateDir: stateDir(t)})
+	b.releaser = startOpts(t, a, factoryDefaults, self(), yubikeypiv.Options{Purposes: refPurposes(), Node: releaserNode, PeerKeys: b.newPeers(), StateDir: b.releaserState})
+	b.locked = startOpts(t, c, factoryDefaults, self(), yubikeypiv.Options{Purposes: refPurposes(), Node: lockedNode, PeerKeys: b.newPeers(), StateDir: stateDir(t)})
 	b.releaser.unlock(t, "123456")
 	b.plan = b.signPlan(t, 1, b.entry(t, releaserNode, b.releaser), b.entry(t, lockedNode, b.locked))
 	return b
@@ -381,7 +381,7 @@ func TestARequestOfAnotherBoundaryIsRefused(t *testing.T) {
 	b := newBoundary(t)
 	c := cardtest.New()
 	c.PKI = b.releaser.card
-	other := startOpts(t, c, yubikeypiv.Development, self(), yubikeypiv.Options{Purposes: refPurposes(), Node: "node-o", Boundary: "other", PeerKeys: b.newPeers()})
+	other := startOpts(t, c, factoryDefaults, self(), yubikeypiv.Options{Purposes: refPurposes(), Node: "node-o", Boundary: "other", PeerKeys: b.newPeers()})
 	plan := b.signPlan(t, 2, b.entry(t, releaserNode, b.releaser), b.entry(t, "node-o", other))
 	text, sig := begin(t, other)
 	if r, err := pinrelease.ParseRequest(text); err != nil || r.Boundary != "other" {
@@ -423,7 +423,7 @@ func TestTheDriverTakesTheHostsRefusalOfAKeyPlan(t *testing.T) {
 	wantRefused(t, err, connect.CodeFailedPrecondition, "key_plan")
 
 	// A driver without a PeerKeys can check no plan and releases nothing.
-	none := startOpts(t, cardtest.New(), yubikeypiv.Development, self(), yubikeypiv.Options{Purposes: refPurposes(), Node: releaserNode})
+	none := startOpts(t, cardtest.New(), factoryDefaults, self(), yubikeypiv.Options{Purposes: refPurposes(), Node: releaserNode})
 	none.unlock(t, "123456")
 	_, err = sealPin(none, text, sig, b.plan)
 	wantRefused(t, err, connect.CodeFailedPrecondition, "key_plan")
@@ -524,7 +524,7 @@ func TestARefusedReleasedPINStopsTheReleaseAcrossARestart(t *testing.T) {
 	c.PIN = "654321"
 	state := stateDir(t)
 	opts := yubikeypiv.Options{Purposes: refPurposes(), Node: lockedNode, PeerKeys: b.newPeers(), StateDir: state}
-	locked := startOpts(t, c, yubikeypiv.Development, self(), opts)
+	locked := startOpts(t, c, factoryDefaults, self(), opts)
 	plan := b.signPlan(t, 2, b.entry(t, releaserNode, b.releaser), b.entry(t, lockedNode, locked))
 
 	text, sig := begin(t, locked)
@@ -551,7 +551,7 @@ func TestARefusedReleasedPINStopsTheReleaseAcrossARestart(t *testing.T) {
 	c2 := cardtest.New()
 	c2.SerialNo = 55667788
 	c2.PKI = b.releaser.card
-	again := startOpts(t, c2, yubikeypiv.Development, self(), opts)
+	again := startOpts(t, c2, factoryDefaults, self(), opts)
 	wantStopped(again)
 	if c.LoginAttempts+c2.LoginAttempts != 1 {
 		t.Fatalf("%d PIN attempts in all, want 1", c.LoginAttempts+c2.LoginAttempts)
@@ -573,7 +573,7 @@ func TestAStopThatCannotBeSavedEndsTheDriver(t *testing.T) {
 	c.PKI = b.releaser.card
 	c.PIN = "654321"
 	state := stateDir(t)
-	locked, res := startRun(t, c, yubikeypiv.Development, self(), yubikeypiv.Options{Purposes: refPurposes(), Node: lockedNode, PeerKeys: b.newPeers(), StateDir: state}, false)
+	locked, res := startRun(t, c, factoryDefaults, self(), yubikeypiv.Options{Purposes: refPurposes(), Node: lockedNode, PeerKeys: b.newPeers(), StateDir: state}, false)
 	plan := b.signPlan(t, 2, b.entry(t, releaserNode, b.releaser), b.entry(t, lockedNode, locked))
 	text, sig := begin(t, locked)
 	a, err := sealPin(b.releaser, text, sig, plan)
@@ -614,7 +614,7 @@ func TestADriverDoesNotStartOnAStateDirectoryItCannotWrite(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = os.Chmod(state, 0o700) }) //nolint:gosec // a directory, back to the mode of a state directory
 	c := cardtest.New()
-	if _, err := yubikeypiv.New(yubikeypiv.Options{Purposes: refPurposes(), Environment: yubikeypiv.Development, Node: lockedNode, StateDir: state, Serial: c.SerialNo, Open: c.Opener()}); err == nil ||
+	if _, err := yubikeypiv.New(yubikeypiv.Options{Purposes: refPurposes(), AllowFactoryDefaults: true, Node: lockedNode, StateDir: state, Serial: c.SerialNo, Open: c.Opener()}); err == nil ||
 		!strings.Contains(err.Error(), "cannot be written") {
 		t.Fatalf("New on an unwritable state directory: %v", err)
 	}
@@ -640,7 +640,7 @@ func TestALockedDriverSealsNothingAndAnIdleOneFinishesNothing(t *testing.T) {
 	_, err = sealPin(b.releaser, []byte("x"), nil, b.plan)
 	wantRefused(t, err, connect.CodeInvalidArgument, "request_text")
 	// No request in flight: an answer finds no one-time key.
-	idle := startOpts(t, cardtest.New(), yubikeypiv.Development, self(), yubikeypiv.Options{Purposes: refPurposes(), Node: lockedNode, PeerKeys: b.newPeers()})
+	idle := startOpts(t, cardtest.New(), factoryDefaults, self(), yubikeypiv.Options{Purposes: refPurposes(), Node: lockedNode, PeerKeys: b.newPeers()})
 	a := seal(t, b, text, sig)
 	wantRefused(t, finish(idle, a.GetAnswerText(), a.GetAnswerSignatureDer(), b.plan), connect.CodeFailedPrecondition, "one_time_key")
 }

@@ -79,7 +79,7 @@ go-card:
 # The card driver (key/yubikeypiv) against a REAL YubiKey in factory state, by hand: `just card-bench READER="<exact PC/SC reader name>" SERIAL=<serial>`.
 # Both are required, and it refuses to run when CI is set. It builds the thin main with the tag atoom_card, checks the card (read only), makes the
 # negative checks, serves on UNIX sockets in a short temp dir, unlocks with the FACTORY PIN and runs the key conformance kit, runs the
-# several-readers and busy-reader cases, and ends with `check --environment staging`. It writes keys to the card's slots (docs/bench.md),
+# several-readers and busy-reader cases, and ends with a `check` without factory defaults. It writes keys to the card's slots (docs/bench.md),
 # never changes a PIN, a PUK or a management key and never resets a card. Read key/yubikeypiv/docs/bench.md before the first run.
 [positional-arguments]
 card-bench *args:

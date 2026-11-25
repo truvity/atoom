@@ -31,7 +31,7 @@ func status(t *testing.T, r running) *keyv1alpha1.StatusResponse {
 }
 
 func newOpts(c *cardtest.Card) yubikeypiv.Options {
-	return yubikeypiv.Options{Purposes: refPurposes(), Environment: yubikeypiv.Development, Serial: c.SerialNo, Open: c.Opener(), Node: "node-a"}
+	return yubikeypiv.Options{Purposes: refPurposes(), AllowFactoryDefaults: true, Serial: c.SerialNo, Open: c.Opener(), Node: "node-a"}
 }
 
 // verifies: REQ-KEYS-228
@@ -42,7 +42,7 @@ func TestAVerifiedCardIsResetWhenTheDriverStarts(t *testing.T) {
 	c := cardtest.New()
 	c.Retries = 2 // a counter that is not full, so a change to it shows
 	c.Verify()
-	r := startWith(t, c, yubikeypiv.Development, self())
+	r := startWith(t, c, factoryDefaults, self())
 	if c.ResetCount() == 0 || c.Verified() {
 		t.Fatalf("resets %d, verified %v: the card was not logged out at the start", c.ResetCount(), c.Verified())
 	}
@@ -64,12 +64,12 @@ func TestAVerifiedCardIsResetWhenTheDriverStarts(t *testing.T) {
 // card after the reset, and the driver signs with its key afterwards.
 func TestTheResetKeepsTheKeysOfTheCard(t *testing.T) {
 	c := cardtest.New()
-	r := startWith(t, c, yubikeypiv.Development, self())
+	r := startWith(t, c, factoryDefaults, self())
 	pub := ensure(t, r.key, "token-signing", "ES384").GetSpkiDer()
 	r.unlock(t, "123456")
 	c.Verify()
 	// A new driver on the same card, as after a restart: it resets, and finds the same key.
-	r2 := startWith(t, c, yubikeypiv.Development, self())
+	r2 := startWith(t, c, factoryDefaults, self())
 	if got := ensure(t, r2.key, "token-signing", "ES384").GetSpkiDer(); string(got) != string(pub) {
 		t.Fatal("the key changed")
 	}
@@ -80,7 +80,7 @@ func TestTheResetKeepsTheKeysOfTheCard(t *testing.T) {
 // is reset and its counter read again; the PIN is then sent once. Nothing was sent before the counter was read.
 func TestAVerifiedCardAtUnlockIsResetAndUnlocked(t *testing.T) {
 	c := cardtest.New()
-	r := startWith(t, c, yubikeypiv.Development, self())
+	r := startWith(t, c, factoryDefaults, self())
 	before := c.ResetCount()
 	c.Verify()
 	r.unlock(t, "123456")
@@ -100,7 +100,7 @@ func TestAVerifiedCardAtUnlockIsResetAndUnlocked(t *testing.T) {
 // logged out, so that the state the driver reports is the state of the card.
 func TestStatusLogsOutACardThatTheDriverDoesNotHoldAPINFor(t *testing.T) {
 	c := cardtest.New()
-	r := startWith(t, c, yubikeypiv.Development, self())
+	r := startWith(t, c, factoryDefaults, self())
 	c.Verify()
 	st := status(t, r)
 	if !st.GetLocked() || st.GetPinRetries() != 3 || c.Verified() {
@@ -126,7 +126,7 @@ func TestACounterThatCannotBeReadAfterTheResetRefusesTheUnlock(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			c := cardtest.New()
-			r := startWith(t, c, yubikeypiv.Development, self())
+			r := startWith(t, c, factoryDefaults, self())
 			c.Verify()
 			c.Configure(set)
 			_, err := r.admin.Unlock(context.Background(), connect.NewRequest(&keyv1alpha1.UnlockRequest{Pin: []byte("123456")}))
@@ -179,7 +179,7 @@ func TestTheDriverDoesNotStartOnACardItCannotLogOut(t *testing.T) {
 // A clean exit leaves the card logged out: a driver that ended while it held the PIN must not leave a verified card.
 func TestACleanExitLeavesTheCardLoggedOut(t *testing.T) {
 	c := cardtest.New()
-	r := startWith(t, c, yubikeypiv.Development, self())
+	r := startWith(t, c, factoryDefaults, self())
 	r.unlock(t, "123456")
 	if !c.Verified() {
 		t.Fatal("the card is not logged in after the unlock")
@@ -329,7 +329,7 @@ func TestTheResetAtStartIsInTheJournal(t *testing.T) {
 // that name the place. A Status that finds nothing wrong resets nothing and writes no such line.
 func TestTheResetAtUnlockAndAtStatusAreInTheJournal(t *testing.T) {
 	c := cardtest.New()
-	r := startWith(t, c, yubikeypiv.Development, self())
+	r := startWith(t, c, factoryDefaults, self())
 	j := captureJournal(t) // after the start, so that only the later resets are counted
 	status(t, r)
 	if n := len(j.resets()); n != 0 {
@@ -353,7 +353,7 @@ func TestTheResetAtExitIsInTheJournal(t *testing.T) {
 		c := cardtest.New()
 		// The cleanups run last in, first out: the driver ends first (startWith), then this check, then the logger is put back.
 		t.Cleanup(func() { wantReset(t, j, "exit", "INFO", "logged_in", true) })
-		r := startWith(t, c, yubikeypiv.Development, self())
+		r := startWith(t, c, factoryDefaults, self())
 		r.unlock(t, "123456")
 	})
 	t.Run("found logged in without a PIN", func(t *testing.T) {

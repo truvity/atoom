@@ -43,7 +43,7 @@ func serveWith(t *testing.T, extra ...string) (socket string, stop func() int) {
 	}
 	t.Cleanup(func() { _ = os.RemoveAll(dir) })
 	socket = filepath.Join(dir, "s")
-	args := append([]string{"serve", "--socket", socket, "--state-dir", filepath.Join(dir, "st"), "--purposes", purposesFile(t), "--environment", "development"}, extra...)
+	args := append([]string{"serve", "--socket", socket, "--state-dir", filepath.Join(dir, "st"), "--purposes", purposesFile(t)}, extra...)
 	done := make(chan int, 1)
 	go func() { done <- run(args, &bytes.Buffer{}, &bytes.Buffer{}) }()
 	deadline := time.Now().Add(10 * time.Second)
@@ -135,7 +135,7 @@ func TestTheSocketGroupAndModeAreApplied(t *testing.T) {
 
 func TestABadGuardFlagIsAUsageError(t *testing.T) {
 	for _, bad := range [][]string{{"--socket-gid", "0"}, {"--allow-uid", "root"}, {"--allow-any-uid", "--allow-uid", "1"}, {"--socket-mode", "1777"}} {
-		args := append([]string{"serve", "--socket", "/x", "--state-dir", "/y", "--environment", "development"}, bad...)
+		args := append([]string{"serve", "--socket", "/x", "--state-dir", "/y"}, bad...)
 		var errb bytes.Buffer
 		if code := run(args, &bytes.Buffer{}, &errb); code != 2 {
 			t.Errorf("run(%v) = %d, want 2 (%s)", bad, code, errb.String())

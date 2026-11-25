@@ -14,7 +14,7 @@ A key file is a copy by nature. It can be copied and read without a trace. It gi
 
 A key file is the home of development, tests, CI and a local installation. The volume is the boundary, and the people and programs that can read it are the ones trusted with the key.
 
-It is not for a key that others rely on and that must be tied to one place. For that use a store that cannot be copied: [a YubiKey or a cloud key](../../docs/key-stores.md). Whether the driver may run in production at all is a choice of the host: it can turn the [production floor](software-store.md#the-production-floor) on.
+It is not for a key that others rely on and that must be tied to one place. For that use a store that cannot be copied: [a YubiKey or a cloud key](../../docs/key-stores.md). Where the driver may run at all is a choice of the host, which mounts it or does not ([where it may run](software-store.md#where-it-may-run)).
 
 ## How a key file could be protected
 

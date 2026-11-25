@@ -37,7 +37,7 @@ func startDriver(t *testing.T, c *cardtest.Card) keyv1alpha1connect.UnlockServic
 		<-ctx.Done()
 		return nil
 	}}
-	opts := yubikeypiv.Options{Purposes: purpose.Reference(), Environment: yubikeypiv.Development, Node: "bench", Serial: c.SerialNo, Open: c.Opener()}
+	opts := yubikeypiv.Options{Purposes: purpose.Reference(), AllowFactoryDefaults: true, Node: "bench", Serial: c.SerialNo, Open: c.Opener()}
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
 	go func() {

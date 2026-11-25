@@ -46,32 +46,9 @@ import (
 // StoreName is what Capabilities says the store is.
 const StoreName = slotplan.CardStore
 
-// The environments of an installation.
-const (
-	Development = "development"
-	Staging     = "staging"
-	Production  = "production"
-)
-
-// The errors of the options.
-var (
-	// ErrEnvironment is an environment that is not development, staging or production.
-	ErrEnvironment = errors.New("the environment must be development, staging or production")
-	// ErrSerial is a start outside development without the serial of the card: the driver is bound to one card.
-	ErrSerial = errors.New("the serial is required outside development: the driver is bound to one card")
-)
-
-// Floor checks the environment. It returns ErrEnvironment for a value that is not an environment. Unlike the software driver, this one
-// runs in every environment: what differs is that only development makes a key with the factory management key (Ensure); a staging or
-// production card is provisioned by its owners' ceremony.
-func Floor(environment string) error {
-	switch environment {
-	case Development, Staging, Production:
-		return nil
-	default:
-		return ErrEnvironment
-	}
-}
+// ErrSerial is a start without the serial of the card by a host that does not allow factory defaults (Options.AllowFactoryDefaults):
+// the driver is bound to one card.
+var ErrSerial = errors.New("the serial is required unless the host allows factory defaults: the driver is bound to one card")
 
 // Host is what a program that runs the driver provides.
 type Host struct {
@@ -101,7 +78,12 @@ var ErrUnlisted = errors.New("the node is not listed with a pin-release key")
 
 // Options are what the driver needs besides the host.
 type Options struct {
-	Environment string
+	// AllowFactoryDefaults is the host's switch for a card in factory state, on a bench or a developer's machine: Ensure makes an absent
+	// key on the card with the management key (ManagementKey, the factory default when nil), and Serial 0 means the only card. The
+	// default, false, refuses both: an absent key is refused as absent, because the card is provisioned by its owners and a management
+	// key does not sit on a board, and Serial is required. The driver knows nothing of the installation it runs in (record 0021); the
+	// host decides where this is on.
+	AllowFactoryDefaults bool
 	// Purposes are the purposes the host declares: the only names the driver holds a key for, each with its algorithm (ES256, ES384,
 	// RS256 or ECDH-P384), its operations and, when it names one, its PIV slot; a purpose that names none takes the slot of the reference
 	// map (slotplan.Default). Required. The driver refuses a declaration that the card cannot follow (two purposes in one slot, a slot
@@ -119,8 +101,8 @@ type Options struct {
 	// StateDir is the driver's own durable state: the stop that a refused released PIN leaves (pin-release.refused), so that a restart
 	// does not try another released PIN. Empty keeps it in memory only (the check command).
 	StateDir string
-	// Serial binds the driver to one card. Outside development it is required: without it any genuine YubiKey whose
-	// attestations match the slot map would be adopted. In development, 0 means the only card.
+	// Serial binds the driver to one card. It is required unless AllowFactoryDefaults is set: without it any genuine YubiKey whose
+	// attestations match the slot map would be adopted. With AllowFactoryDefaults, 0 means the only card.
 	Serial uint32
 	// Reader is the exact PC/SC reader name of the card (as SCardListReaders gives it; Readers lists them). When it is set, the
 	// driver connects to that reader only, reads the card's serial and, when Serial is set and differs, refuses: no other reader
@@ -130,7 +112,7 @@ type Options struct {
 	Reader string
 	// Open opens the card; card.Open when nil. Tests pass a fake.
 	Open card.Opener
-	// ManagementKey is what Ensure generates keys with in development; the factory default when nil.
+	// ManagementKey is what Ensure generates keys with when AllowFactoryDefaults is set; the factory default when nil.
 	ManagementKey []byte
 	// RSAQueue is how many RSA signatures the driver admits at once, the one on the card and those waiting for it; the default is
 	// RSAQueueDefault when 0. The rest are refused as busy at once. Another call (ES384, ECDH, a checkpoint, a PIN release) can
@@ -157,7 +139,7 @@ type slotKey struct {
 type Service struct {
 	keyv1alpha1connect.UnimplementedKeyStoreServiceHandler
 
-	env     string
+	factory bool // AllowFactoryDefaults
 	node    string
 	mgmtKey []byte
 
@@ -203,10 +185,7 @@ func Readers() ([]string, error) { return card.ListReaders() }
 // New opens the card, checks its firmware, and verifies the attestation of every key it already holds. It
 // returns a *Problems error when the card or one of its keys is refused. The caller closes the service.
 func New(opts Options) (*Service, error) {
-	if err := Floor(opts.Environment); err != nil {
-		return nil, err
-	}
-	if opts.Environment != Development && opts.Serial == 0 {
+	if !opts.AllowFactoryDefaults && opts.Serial == 0 {
 		return nil, ErrSerial
 	}
 	set, err := purpose.New(opts.Purposes)
@@ -229,7 +208,7 @@ func New(opts Options) (*Service, error) {
 	if queue <= 0 {
 		queue = RSAQueueDefault
 	}
-	s := &Service{env: opts.Environment, node: opts.Node, mgmtKey: opts.ManagementKey, plan: plan, infos: planInfos(plan), card: c,
+	s := &Service{factory: opts.AllowFactoryDefaults, node: opts.Node, mgmtKey: opts.ManagementKey, plan: plan, infos: planInfos(plan), card: c,
 		keys: map[string]*slotKey{}, dead: make(chan struct{}),
 		rsaTickets: make(chan struct{}, queue),
 		boundary:   opts.Boundary, peers: opts.PeerKeys, caller: opts.Caller, refused: refusedMark{dir: opts.StateDir}}
@@ -518,9 +497,9 @@ func (s *Service) planFor(name string) (entry, bool) {
 }
 
 // Ensure returns the public key of a purpose. A key that the card holds was verified at start (or when it was
-// made), so it is returned as it is. An absent key is made on the card in development, with the factory
-// management key, and refused as absent in every other environment: a staging or production card is provisioned
-// by its owners, and a management key does not sit on a board.
+// made), so it is returned as it is. An absent key is made on the card when the host allows factory defaults
+// (Options.AllowFactoryDefaults), with the management key, and refused as absent otherwise: such a card is
+// provisioned by its owners, and a management key does not sit on a board.
 func (s *Service) Ensure(ctx context.Context, req *connect.Request[keyv1alpha1.EnsureRequest]) (*connect.Response[keyv1alpha1.EnsureResponse], error) {
 	purpose, algorithm := req.Msg.GetPurpose(), req.Msg.GetAlgorithm()
 	e, ok := s.planFor(purpose)
@@ -539,7 +518,7 @@ func (s *Service) Ensure(ctx context.Context, req *connect.Request[keyv1alpha1.E
 	if k, ok := s.keys[purpose]; ok {
 		return connect.NewResponse(&keyv1alpha1.EnsureResponse{SpkiDer: k.spki}), nil
 	}
-	if s.env != Development {
+	if !s.factory {
 		return nil, s.refuse(ctx, "Ensure", connect.CodeNotFound, reasonAbsent, "purpose")
 	}
 	k, err := s.generate(e)
@@ -805,14 +784,11 @@ func (s *Service) Handler(opts ...connect.HandlerOption) (string, http.Handler) 
 	return keyv1alpha1connect.NewKeyStoreServiceHandler(s, opts...)
 }
 
-// Run applies the floor, opens the card and serves the key-store port on the host's server, and the unlock service on admin, until ctx
+// Run opens the card and serves the key-store port on the host's server, and the unlock service on admin, until ctx
 // ends. The card is closed and the PIN wiped on the way out. A card or a key that is refused is a *Problems error.
 func Run(ctx context.Context, opts Options, host Host, admin AdminConfig) error {
 	if host.Serve == nil {
 		return errors.New("yubikeypiv: the host has no Serve")
-	}
-	if err := Floor(opts.Environment); err != nil {
-		return err
 	}
 	if err := hardenProcess(); err != nil {
 		return err
@@ -822,7 +798,7 @@ func Run(ctx context.Context, opts Options, host Host, admin AdminConfig) error 
 		return err
 	}
 	defer func() { _ = svc.Close() }()
-	slog.Info("yubikey-piv key driver starting, locked", "environment", opts.Environment, "boundary", opts.Boundary,
+	slog.Info("yubikey-piv key driver starting, locked", "factory_defaults", opts.AllowFactoryDefaults, "boundary", opts.Boundary,
 		"purposes", svc.Present())
 	path, h := svc.Handler(host.HandlerOptions...)
 	ctx, cancel := context.WithCancel(ctx)

@@ -49,15 +49,13 @@ A call is refused with a reason from the port's list: `purpose`, `algorithm`, `d
 |---|---|
 | `StateDir` | The directory of the key files. |
 | `Purposes` | The host's declaration: name, algorithm and operations of each purpose. Required; none, or one that is not a declaration, is refused before anything is opened. |
-| `Environment` | `development`, `staging` or `production`; empty names nothing. Staging logs a warning at the start: anyone who can read the volume has the keys. Any other value is refused. |
-| `RefuseProduction` | The production floor, below. |
 | `Caller` | Names the caller in the journal line of a refusal, when the host knows it. |
 
-The thin main takes the same as `--state-dir`, `--purposes`, `--environment` and `--refuse-production`, and the flags of the [socket guard](../../../docs/socket-guard.md).
+The thin main takes the same as `--state-dir` and `--purposes`, and the flags of the [socket guard](../../../docs/socket-guard.md).
 
-## The production floor
+## Where it may run
 
-`RefuseProduction` makes the driver refuse the environment `production` with the error "software key driver refused in production", before anything is opened and before any key is read. It is off by default, so a consumer that keeps a key in a file in production may; the choice and its risk are the consumer's. A host that wants a floor turns it on, and a configuration then cannot make a software key a production authority key by mistake.
+The driver has no option that names an installation ([record 0021](../../../docs/decisions/0021-drivers-know-no-deployment-shapes.md)). Anyone who can read the volume has the keys, wherever it runs. A host that must not hold an authority key in a file in some installation does not mount this driver there, and a configuration of that host then cannot make a software key such a key by mistake.
 
 ## What it does not do
 

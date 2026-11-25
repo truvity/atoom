@@ -45,11 +45,11 @@ func rsaPublic(t *testing.T, spki []byte) *rsa.PublicKey {
 }
 
 // verifies: REQ-KEYS-274
-// In development the driver makes the key of the RS256 purpose on the card, in slot 88, RSA-2048, PIN once and touch never,
+// With factory defaults the driver makes the key of the RS256 purpose on the card, in slot 88, RSA-2048, PIN once and touch never,
 // verifies the attestation of the new key like every other, and returns the same key the second time. The algorithm of another
 // purpose is refused for it, and its algorithm for the others.
 func TestTheRS256KeyIsMadeInSlot88WithItsPolicies(t *testing.T) {
-	r := start(t, yubikeypiv.Development)
+	r := start(t, factoryDefaults)
 	res := ensure(t, r.key, rsPurpose, "RS256")
 	if !res.GetCreated() {
 		t.Fatal("not created on a factory card")
@@ -89,7 +89,7 @@ func TestTheRS256KeyIsMadeInSlot88WithItsPolicies(t *testing.T) {
 // library (and is not PSS); a locked driver, a wrong algorithm, a digest of the wrong length and a purpose that holds an EC key
 // are refused before the card is asked, and the key does not agree on a secret.
 func TestTheRS256KeySignsPKCS1v15OnTheCardOnceUnlocked(t *testing.T) {
-	r := start(t, yubikeypiv.Development)
+	r := start(t, factoryDefaults)
 	pub := rsaPublic(t, ensure(t, r.key, rsPurpose, "RS256").GetSpkiDer())
 	ensure(t, r.key, "token-signing", "ES384")
 	d := digest256()
@@ -149,7 +149,7 @@ func TestTheRS256KeySignsPKCS1v15OnTheCardOnceUnlocked(t *testing.T) {
 // driver like any other.
 func TestAWrongRSASignatureFromTheCardDoesNotLeaveTheDriver(t *testing.T) {
 	c := cardtest.New()
-	r := startWith(t, c, yubikeypiv.Development, self())
+	r := startWith(t, c, factoryDefaults, self())
 	ensure(t, r.key, rsPurpose, "RS256")
 	r.unlock(t, "123456")
 	c.Configure(func(c *cardtest.Card) { c.RSACorrupt = true })
@@ -162,7 +162,7 @@ func TestAWrongRSASignatureFromTheCardDoesNotLeaveTheDriver(t *testing.T) {
 }
 
 // verifies: REQ-KEYS-274
-// A card that holds a key in slot 88 that is not the RSA-2048 key of the plan does not stop the driver, in production as well: an
+// A card that holds a key in slot 88 that is not the RSA-2048 key of the plan does not stop the driver, without factory defaults as well: an
 // EC key, an RSA key of another size, a key whose attestation states another policy, a key made by another card and an imported
 // key. The RS256 purpose is optional, so the driver starts, serves the other keys and leaves that purpose absent (it never
 // uses the key, and never replaces it). An RSA key in the slot of an EC purpose is refused at start, as before: the refusal
@@ -201,7 +201,7 @@ func TestAWrongKeyInSlot88OrAnRSAKeyInAnotherSlotIsRefusedAtStart(t *testing.T) 
 		t.Run(tt.name, func(t *testing.T) {
 			c := cardtest.New()
 			tt.setup(c)
-			svc, err := yubikeypiv.New(yubikeypiv.Options{Purposes: refPurposes(), Environment: yubikeypiv.Production, Serial: c.SerialNo, Open: c.Opener()})
+			svc, err := yubikeypiv.New(yubikeypiv.Options{Purposes: refPurposes(), Serial: c.SerialNo, Open: c.Opener()})
 			if tt.want == "" || tt.want == "absent" {
 				if err != nil {
 					t.Fatalf("refused: %v", err)
@@ -223,12 +223,12 @@ func TestAWrongKeyInSlot88OrAnRSAKeyInAnotherSlotIsRefusedAtStart(t *testing.T) 
 			}
 		})
 	}
-	// Staging and production never make the key: a card that has none answers absent.
-	r := start(t, yubikeypiv.Staging)
+	// Without factory defaults the driver never makes the key: a card that has none answers absent.
+	r := start(t, provisioned)
 	_, err := r.key.Ensure(context.Background(), connect.NewRequest(&keyv1alpha1.EnsureRequest{Purpose: rsPurpose, Algorithm: "RS256"}))
 	wantRefused(t, err, connect.CodeNotFound, "absent")
 	if ec, _ := r.card.Attest(0x88); ec != nil {
-		t.Fatal("a staging driver made a key")
+		t.Fatal("a driver without factory defaults made a key")
 	}
 }
 
@@ -248,7 +248,7 @@ func TestOnlyAFewRSASignaturesAreAdmittedAndTheRestAreRefusedAtOnce(t *testing.T
 		}
 		t.Run(fmt.Sprintf("places-%d", queue), func(t *testing.T) {
 			c := cardtest.New()
-			r := startOpts(t, c, yubikeypiv.Development, self(), yubikeypiv.Options{Purposes: refPurposes(), Node: "node-a", RSAQueue: given})
+			r := startOpts(t, c, factoryDefaults, self(), yubikeypiv.Options{Purposes: refPurposes(), Node: "node-a", RSAQueue: given})
 			ensure(t, r.key, rsPurpose, "RS256")
 			ensure(t, r.key, "token-signing", "ES384")
 			r.unlock(t, "123456")
@@ -305,7 +305,7 @@ func TestOnlyAFewRSASignaturesAreAdmittedAndTheRestAreRefusedAtOnce(t *testing.T
 // verifies: REQ-KEYS-276
 func TestAnES384SignatureWaitsForTheRSAOneOnTheCardAndNotForTheFlood(t *testing.T) {
 	c := cardtest.New()
-	r := startOpts(t, c, yubikeypiv.Development, self(), yubikeypiv.Options{Purposes: refPurposes(), Node: "node-a"})
+	r := startOpts(t, c, factoryDefaults, self(), yubikeypiv.Options{Purposes: refPurposes(), Node: "node-a"})
 	ensure(t, r.key, rsPurpose, "RS256")
 	ensure(t, r.key, "token-signing", "ES384")
 	r.unlock(t, "123456")
@@ -357,7 +357,7 @@ func TestAnES384SignatureWaitsForTheRSAOneOnTheCardAndNotForTheFlood(t *testing.
 // key other than the one it attests: the key Generate returns must be the attested one.
 func TestGenerateAndAttestAgreeForTheRSAKey(t *testing.T) {
 	c := cardtest.New()
-	r := startWith(t, c, yubikeypiv.Development, self())
+	r := startWith(t, c, factoryDefaults, self())
 	res := ensure(t, r.key, rsPurpose, "RS256")
 	att, err := c.Attest(0x88)
 	if err != nil {
@@ -373,9 +373,9 @@ func TestGenerateAndAttestAgreeForTheRSAKey(t *testing.T) {
 }
 
 // verifies: REQ-KEYS-274
-// The driver in development makes the RS256 key only into an empty slot. A foreign key in slot 88 (an imported key, one of another
+// The driver with factory defaults makes the RS256 key only into an empty slot. A foreign key in slot 88 (an imported key, one of another
 // type) leaves the purpose absent, and Ensure does not replace it: the card still holds the key it held.
-func TestADevelopmentDriverNeverReplacesAForeignKeyInSlot88(t *testing.T) {
+func TestAFactoryDefaultsDriverNeverReplacesAForeignKeyInSlot88(t *testing.T) {
 	ec := card.KeySpec{Algorithm: card.EC384, PIN: card.PINOnce, Touch: card.TouchNever}
 	for name, setup := range map[string]func(c *cardtest.Card){
 		"an imported RSA key": func(c *cardtest.Card) { _ = c.PutImportedKey(0x88, rsaSpec) },
@@ -385,7 +385,7 @@ func TestADevelopmentDriverNeverReplacesAForeignKeyInSlot88(t *testing.T) {
 			c := cardtest.New()
 			setup(c)
 			before, errBefore := c.Attest(0x88)
-			r := startWith(t, c, yubikeypiv.Development, self())
+			r := startWith(t, c, factoryDefaults, self())
 			_, err := r.key.Ensure(context.Background(), connect.NewRequest(&keyv1alpha1.EnsureRequest{Purpose: rsPurpose, Algorithm: "RS256"}))
 			wantRefused(t, err, connect.CodeFailedPrecondition, "card")
 			_, err = r.key.PublicKey(context.Background(), connect.NewRequest(&keyv1alpha1.PublicKeyRequest{Purpose: rsPurpose}))

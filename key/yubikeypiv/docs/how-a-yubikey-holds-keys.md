@@ -40,7 +40,7 @@ The default only applies when a key is made without stating a rule. The numbers 
 
 - **PIN.** Three wrong PINs block it. The counters can be set from 1 to 255, for PIN and PUK together; setting them resets both to their defaults. The driver sends the PIN once, never retries, and sends none to a card with one attempt left; the PIN lives in locked memory ([slots-pin-touch.md](slots-pin-touch.md)).
 - **PUK.** It unblocks the PIN; three wrong PUKs block it. The driver never uses the PUK. A card that is blocked is for a person to recover.
-- **Management key.** It authorises writing slots. From firmware 5.7 it is AES-192 (3DES before), with the same octets. When it is stored PIN-protected (a convention of ykman and other tools, not a firmware feature), whoever knows the PIN can authenticate as manager and overwrite or delete any slot. The authority is all-or-nothing, not scoped per slot (Yubico PIV admin access page). The slots are one area of trust, not twenty-four. The driver uses the management key only to make a key in development.
+- **Management key.** It authorises writing slots. From firmware 5.7 it is AES-192 (3DES before), with the same octets. When it is stored PIN-protected (a convention of ykman and other tools, not a firmware feature), whoever knows the PIN can authenticate as manager and overwrite or delete any slot. The authority is all-or-nothing, not scoped per slot (Yubico PIV admin access page). The slots are one area of trust, not twenty-four. The driver uses the management key only to make a key, and only when its host allows factory defaults.
 - **One PIN for all 24 slots.** That is why a host gives one driver the whole card.
 
 ## How a PIV signature happens

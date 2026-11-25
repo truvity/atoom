@@ -1,5 +1,5 @@
 // Package software is the software key driver of atoom: the key port, atoom.key.v1alpha1, served over keys held in files (sluis
-// ADR 0006, "Floors in code"; ADR 0011, "The local installation"). It holds a key for every purpose its host declares, ES256, ES384,
+// ADR 0011, "The local installation"). It holds a key for every purpose its host declares, ES256, ES384,
 // RS256 or ECDH-P384 as the declaration says (key/purpose), and for no other name. The Go module is github.com/truvity/atoom/key/software.
 //
 // It is a library and a thin main. The library is the Connect handler and the logic behind it: New opens a state directory and returns
@@ -8,8 +8,9 @@
 // peer check, the registry owner and the command line of a larger system are the host's, and stay in that system.
 //
 // It exists for the local installation, for CI, for a smoke installation without cards and for a consumer that keeps a key in a
-// file. It has no audit emitter: a driver is private to its owner, and the caller audits what it asks for. Whether it may run in
-// production is the host's choice (Options.RefuseProduction): sluis turns the floor on, atoom's own main leaves it off.
+// file. It has no audit emitter: a driver is private to its owner, and the caller audits what it asks for. It knows nothing of the
+// installation it runs in (record 0021): where keys in files are acceptable is the host's choice, and a host that must not use them
+// somewhere does not mount the driver there.
 package software
 
 import (
@@ -29,43 +30,8 @@ import (
 	"github.com/truvity/atoom/key/software/internal/keystore"
 )
 
-// The environments of an installation.
-const (
-	Development = "development"
-	Staging     = "staging"
-	Production  = "production"
-)
-
-// RefusedInProduction is what the driver says when the floor refuses production.
-const RefusedInProduction = "software key driver refused in production"
-
-// The errors of the floor.
-var (
-	// ErrProduction is a start in production by a host that turned the floor on.
-	ErrProduction = errors.New(RefusedInProduction)
-	// ErrEnvironment is an environment that is not development, staging or production.
-	ErrEnvironment = errors.New("the environment must be development, staging or production")
-)
-
 // Problems is a state directory or a key file that the driver refuses. Each problem is a path and a word, never a byte of a key.
 type Problems = keystore.ProblemsError
-
-// Floor is the floor in code (sluis ADR 0006): when refuseProduction is true the driver does not run in production. It returns
-// ErrProduction for production and ErrEnvironment for a value that is not an environment; an empty environment is accepted (it names
-// nothing).
-func Floor(environment string, refuseProduction bool) error {
-	switch environment {
-	case "", Development, Staging:
-		return nil
-	case Production:
-		if refuseProduction {
-			return ErrProduction
-		}
-		return nil
-	default:
-		return ErrEnvironment
-	}
-}
 
 // Options are what the driver needs.
 type Options struct {
@@ -75,11 +41,6 @@ type Options struct {
 	// operations (key/purpose). Required. A key file in the state directory of a purpose that is not declared, or of another algorithm
 	// than the declared one, refuses the start. The field Slot of a declaration is read by the card driver only.
 	Purposes []purpose.Declaration
-	// Environment names the installation: development, staging or production. Empty names nothing. Staging logs a warning at the start.
-	Environment string
-	// RefuseProduction makes New and Run refuse the environment production, before anything is opened (sluis's floor). The default
-	// is off: a consumer that keeps a key in a file in production may.
-	RefuseProduction bool
 	// Caller names the caller of a call for the journal line of a refusal; none when nil. The host knows its callers.
 	Caller func(context.Context) string
 }
@@ -92,18 +53,11 @@ type Host struct {
 	HandlerOptions []connect.HandlerOption
 }
 
-// New applies the floor, opens the state directory and returns the service. In production with RefuseProduction nothing is opened and
-// no key is read. A refused state directory is a *Problems error.
+// New opens the state directory and returns the service. A refused state directory is a *Problems error.
 func New(opts Options) (*Service, error) {
-	if err := Floor(opts.Environment, opts.RefuseProduction); err != nil {
-		return nil, err
-	}
 	set, err := purpose.New(opts.Purposes)
 	if err != nil {
 		return nil, err
-	}
-	if opts.Environment == Staging {
-		slog.Warn("software keys in staging: anyone who can read the volume has the keys", "environment", Staging)
 	}
 	st, err := keystore.Open(opts.StateDir, set)
 	if err != nil {
@@ -120,8 +74,7 @@ func (s *Service) Handler(opts ...connect.HandlerOption) (string, http.Handler) 
 // Present returns the purposes that have a key, for the start-up log.
 func (s *Service) Present() []string { return s.store.Present() }
 
-// Run applies the floor, opens the state directory and serves the key-store port on the host's server until ctx ends. The floor
-// comes first: in production, with RefuseProduction, nothing is opened and no key is read.
+// Run opens the state directory and serves the key-store port on the host's server until ctx ends.
 func Run(ctx context.Context, opts Options, host Host) error {
 	if host.Serve == nil {
 		return errors.New("software: the host has no Serve")
@@ -130,7 +83,7 @@ func Run(ctx context.Context, opts Options, host Host) error {
 	if err != nil {
 		return err
 	}
-	slog.Info("software key driver starting", "environment", opts.Environment, "purposes", svc.Present())
+	slog.Info("software key driver starting", "purposes", svc.Present())
 	path, h := svc.Handler(host.HandlerOptions...)
 	return host.Serve(ctx, path, h)
 }

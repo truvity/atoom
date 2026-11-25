@@ -4,18 +4,17 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/truvity/atoom/key/yubikeypiv"
 	"github.com/truvity/atoom/key/yubikeypiv/internal/card"
 )
 
 // verifies: REQ-KEYS-048
-// A slot of the board plan holds a key only when its purpose was asked for. On a fresh development card the driver
+// A slot of the board plan holds a key only when its purpose was asked for. On a fresh card with factory defaults the driver
 // is asked for token-signing: slot 9a then holds a key and the slot of release-signing (85), like every other slot of the plan,
 // is empty. A second request, for release-signing, fills slot 85 and no other: enabling a purpose adds exactly one key
 // and one slot. This is the card half of the row; key@ asks only for the purposes of the KeyPlan (key@'s test in
 // actors/key/internal/keyd).
-func TestADevelopmentCardHoldsAKeyOnlyInTheSlotsEnsured(t *testing.T) {
-	r := start(t, yubikeypiv.Development)
+func TestAFactoryDefaultsCardHoldsAKeyOnlyInTheSlotsEnsured(t *testing.T) {
+	r := start(t, factoryDefaults)
 	slots := map[string]card.Slot{
 		"x509-intermediate": 0x9c, "token-signing": 0x9a, "wrapping": 0x9d, "ssh-user": 0x82, "ssh-host": 0x83,
 		"audit-log": 0x84, "release-signing": 0x85, "workload-issuer": 0x86, "pin-release": 0x87,

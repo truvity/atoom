@@ -8,18 +8,17 @@ import (
 	"connectrpc.com/connect"
 
 	keyv1alpha1 "github.com/truvity/atoom/key/gen/atoom/key/v1alpha1"
-	"github.com/truvity/atoom/key/yubikeypiv"
 	"github.com/truvity/atoom/key/yubikeypiv/internal/card"
 )
 
 // The card driver makes no key for a root (REQ-PKI-027): a request for a root purpose, under any algorithm, is refused
-// as a purpose the card does not serve, in a development install where the driver makes keys, and no slot of the card
+// as a purpose the card does not serve, with factory defaults, where the driver makes keys, and no slot of the card
 // holds a key afterwards. The slot plan has no row that names a root. The driver offers no operation that exports a
 // private key: Ensure never exports, and Sign and Ecdh answer with a signature and a shared secret.
 //
 // verifies: REQ-PKI-027
 func TestTheCardDriverMakesNoRootKey(t *testing.T) {
-	r := start(t, yubikeypiv.Development)
+	r := start(t, factoryDefaults)
 	ctx := context.Background()
 	for _, purpose := range []string{"root", "root-ca", "ca-root", "x509-root", "root-key", "trust-anchor", "Root"} {
 		for _, alg := range []string{"ES384", "ES256", "ECDH-P384"} {

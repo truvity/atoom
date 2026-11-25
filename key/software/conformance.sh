@@ -16,7 +16,7 @@ trap cleanup EXIT
 go build -o "$tmp/software" ./cmd/software
 # The kit declares its own purposes; the driver is started with them, as a host would declare its own.
 "$kit" --print-declaration >"$tmp/purposes.json"
-"$tmp/software" serve --socket "$tmp/s" --state-dir "$tmp/state" --purposes "$tmp/purposes.json" --environment development &
+"$tmp/software" serve --socket "$tmp/s" --state-dir "$tmp/state" --purposes "$tmp/purposes.json" &
 pid=$!
 for _ in $(seq 1 200); do
     [ -S "$tmp/s" ] && break

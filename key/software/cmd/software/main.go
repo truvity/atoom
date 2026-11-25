@@ -2,7 +2,7 @@
 // socket, and does nothing else. The library (github.com/truvity/atoom/key/software) is the driver; a larger system that needs names for
 // its callers or a command line of its own wraps the library instead (sluis does, until its host is deleted).
 //
-//	software serve --socket PATH --state-dir DIR --purposes FILE [--environment development|staging|production] [--refuse-production]
+//	software serve --socket PATH --state-dir DIR --purposes FILE
 //	               [--allow-uid UID]... [--allow-any-uid] [--socket-gid GID] [--socket-mode MODE]
 //	software check --state-dir DIR --purposes FILE
 //	software version  (also --version)
@@ -17,7 +17,6 @@ package main
 
 import (
 	"context"
-	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -75,8 +74,6 @@ func serve(args []string, stderr io.Writer) int {
 	guard.Register(fs)
 	socket := fs.String("socket", "", "the UNIX socket to serve on (required)")
 	state := fs.String("state-dir", "", "the directory of the key files, mode 0700 (required)")
-	env := fs.String("environment", "", "development, staging or production; staging logs a warning")
-	refuse := fs.Bool("refuse-production", false, "refuse the environment production (the floor of a system that wants it)")
 	purposes := fs.String("purposes", "", "the JSON file of the purposes the host declares (required)")
 	if err := fs.Parse(args); err != nil {
 		return 2
@@ -100,12 +97,9 @@ func serve(args []string, stderr io.Writer) int {
 	host := software.Host{Serve: func(ctx context.Context, path string, h http.Handler) error {
 		return atoomsocket.Serve(ctx, cfg, path, h)
 	}}
-	opts := software.Options{StateDir: *state, Environment: *env, RefuseProduction: *refuse, Purposes: decls}
+	opts := software.Options{StateDir: *state, Purposes: decls}
 	if err := software.Run(ctx, opts, host); err != nil {
 		_, _ = fmt.Fprintln(stderr, "software:", err)
-		if errors.Is(err, software.ErrEnvironment) {
-			return 2
-		}
 		return 1
 	}
 	return 0

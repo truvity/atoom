@@ -27,13 +27,13 @@ func purposesFile(t *testing.T) string {
 
 func TestUsage(t *testing.T) {
 	for _, args := range [][]string{
-		nil, {"nope"}, {"serve"}, {"serve", "--environment", "development"}, {"check", "extra"}, {"check"},
-		{"serve", "--environment", "development", "--socket", "/x", "--admin-socket", "/y", "--node", "n"},
-		{"serve", "--environment", "development", "--socket", "/x", "--admin-socket", "/y", "--node", "n", "--purposes", "/none.json"},
+		nil, {"nope"}, {"serve"}, {"serve", "--allow-factory-defaults"}, {"check", "extra"}, {"check"},
+		{"serve", "--allow-factory-defaults", "--socket", "/x", "--admin-socket", "/y", "--node", "n"},
+		{"serve", "--allow-factory-defaults", "--socket", "/x", "--admin-socket", "/y", "--node", "n", "--purposes", "/none.json"},
 		{"check", "--purposes", "/none.json"},
-		{"serve", "--environment", "development", "--socket", "/x", "--admin-socket", "/y", "--node", "n", "--purposes", "/none.json", "--socket-mode", "zz"},
-		{"serve", "--environment", "development", "--socket", "/x", "--admin-socket", "/y", "--node", "n", "--purposes", "/none.json", "--socket-gid", "0"},
-		{"serve", "--environment", "development", "--socket", "/x", "--admin-socket", "/y", "--node", "n", "--purposes", "/none.json", "--allow-any-uid", "--allow-uid", "1"},
+		{"serve", "--allow-factory-defaults", "--socket", "/x", "--admin-socket", "/y", "--node", "n", "--purposes", "/none.json", "--socket-mode", "zz"},
+		{"serve", "--allow-factory-defaults", "--socket", "/x", "--admin-socket", "/y", "--node", "n", "--purposes", "/none.json", "--socket-gid", "0"},
+		{"serve", "--allow-factory-defaults", "--socket", "/x", "--admin-socket", "/y", "--node", "n", "--purposes", "/none.json", "--allow-any-uid", "--allow-uid", "1"},
 	} {
 		var out, errb bytes.Buffer
 		if code := run(args, &out, &errb); code != 2 {
@@ -52,20 +52,26 @@ func TestVersion(t *testing.T) {
 	}
 }
 
-// The environment is checked before anything is opened: a value that is not one is a usage error, and no socket or card is touched.
-func TestAnUnknownEnvironmentIsAUsageError(t *testing.T) {
+// The driver knows no installation (record 0021): --environment is gone, and a host that still passes it gets a usage error.
+func TestTheEnvironmentFlagIsGone(t *testing.T) {
 	var errb bytes.Buffer
-	code := run([]string{"serve", "--environment", "prod", "--socket", "/nonexistent/s", "--admin-socket", "/nonexistent/a", "--node", "n", "--purposes", purposesFile(t)}, &bytes.Buffer{}, &errb)
-	if code != 2 || !strings.Contains(errb.String(), "environment") {
+	code := run([]string{"serve", "--environment", "development", "--socket", "/nonexistent/s", "--admin-socket", "/nonexistent/a", "--node", "n", "--purposes", purposesFile(t)}, &bytes.Buffer{}, &errb)
+	if code != 2 {
 		t.Fatalf("exit %d (%s)", code, errb.String())
 	}
 }
 
-// Outside development the card is named by its serial: without one the start is a usage error.
-func TestOutsideDevelopmentASerialIsRequired(t *testing.T) {
-	var errb bytes.Buffer
-	if code := run([]string{"check", "--environment", "production", "--purposes", purposesFile(t)}, &bytes.Buffer{}, &errb); code != 2 {
-		t.Fatalf("exit %d (%s)", code, errb.String())
+// Without --allow-factory-defaults the card is named by its serial: without one the start is a usage error, before a socket or a card
+// is touched.
+func TestWithoutFactoryDefaultsASerialIsRequired(t *testing.T) {
+	for _, args := range [][]string{
+		{"check", "--purposes", purposesFile(t)},
+		{"serve", "--socket", "/nonexistent/s", "--admin-socket", "/nonexistent/a", "--node", "n", "--purposes", purposesFile(t)},
+	} {
+		var errb bytes.Buffer
+		if code := run(args, &bytes.Buffer{}, &errb); code != 2 || !strings.Contains(errb.String(), "serial") {
+			t.Fatalf("%s: exit %d (%s)", args[0], code, errb.String())
+		}
 	}
 }
 
@@ -84,7 +90,7 @@ func TestADeclarationThatIsRefusedIsAUsageError(t *testing.T) {
 			t.Fatal(err)
 		}
 		var errb bytes.Buffer
-		code := run([]string{"check", "--environment", "development", "--purposes", path}, &bytes.Buffer{}, &errb)
+		code := run([]string{"check", "--allow-factory-defaults", "--purposes", path}, &bytes.Buffer{}, &errb)
 		// A file that is not a declaration is refused at once (2). One that is a declaration the card cannot follow is refused by the
 		// driver before a card is opened (1, with the reason of the card slot map); a build without the tag never gets so far.
 		want := map[string]int{"syntax": 2, "a name": 2, "no purpose": 2, "no slot": 1, "one slot": 1}[name]

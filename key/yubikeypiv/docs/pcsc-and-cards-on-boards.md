@@ -21,7 +21,7 @@ The Ubuntu 22.04 row was measured on boards, where the policy file does not exis
 
 ## Which reader and which card
 
-The driver connects to one reader only: a machine with one reader needs no option, and a machine with several readers must name the card's reader with `--reader`. It never tries the readers one after the other, and a serial alone does not choose a reader. A reader that another process holds is an error that says so, not a skip. `--serial` binds the driver to one card and is required outside development. The rules and their reasons are in [which card it opens](../README.md#which-card-it-opens).
+The driver connects to one reader only: a machine with one reader needs no option, and a machine with several readers must name the card's reader with `--reader`. It never tries the readers one after the other, and a serial alone does not choose a reader. A reader that another process holds is an error that says so, not a skip. `--serial` binds the driver to one card and is required unless the host allows factory defaults (`--allow-factory-defaults`). The rules and their reasons are in [which card it opens](../README.md#which-card-it-opens).
 
 ## The card driver is linked with C
 

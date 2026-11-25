@@ -5,6 +5,15 @@ libraries changed. `just release-prepare X.Y.Z` writes the section.
 
 <!-- release-prepare: new sections go below this line -->
 
+## Unreleased
+
+**Breaking** in the Go API of `key/software` and `key/yubikeypiv` and in the command lines of their thin mains ([record 0021](docs/decisions/0021-drivers-know-no-deployment-shapes.md), proposed): drivers know nothing of the installation they run in, and hosts decide. The wire and the contracts do not change.
+
+- **`key/software`**: the environments are gone. Removed: `Development`, `Staging`, `Production`, `Floor`, `RefusedInProduction`, `ErrProduction`, `ErrEnvironment`, `Options.Environment`, `Options.RefuseProduction` and the warning at the start in staging; the driver opens its key files and nothing more. `software serve` no longer takes `--environment` or `--refuse-production` (passing them is a usage error). A host that must not use file keys in some installation does not mount the driver there.
+- **`key/yubikeypiv`**: `Options.Environment`, `Development`, `Staging`, `Production`, `Floor` and `ErrEnvironment` are gone. The new `Options.AllowFactoryDefaults` (default false) is the old `development` behaviour behind a neutral name: with it, `Ensure` makes an absent key with the management key (the factory default when `ManagementKey` is nil) and a serial of 0 takes the only card; without it, an absent key is refused as absent and the serial is required (`ErrSerial`). `yubikeypiv serve` and `check` take `--allow-factory-defaults` in place of `--environment` (which is now a usage error); a missing serial without it is refused before a socket or a card is opened.
+- **`store/rqlite`**: the refusal of another schema version no longer names the first host's recipes; it says the driver migrates no data and the host recreates the store's data.
+- `just card-bench`, the conformance scripts and the documentation follow.
+
 ## 0.6.0 - 2026-11-25
 
 One version for the whole repository: every library is tagged 0.6.0, changed or not.
