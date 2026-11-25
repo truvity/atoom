@@ -34,6 +34,7 @@ The records were rewritten once, in a clean state, on 2026-11-21, so that each s
 | [0022](0022-the-blocks-order-after-0-7-0.md) | The order of the blocks phase after 0.7.0; audit on Lambda through an in-process `transport/sqs` that survives redelivery (its order superseded by 0023) | 2026-11-25 |
 | [0023](0023-session-to-done-first.md) | session to done first: B9's session parts lead the order; AppConfig before SSM; `transport/nats` joins B9; no Lambda zip for an in-process Go driver | 2026-11-25 |
 | [0024](0024-the-rotation-ring-of-the-token-block.md) | The rotation ring of the token block: slots, states and a ring item on the store port | 2026-11-25 |
+| [0025](0025-generic-blob-transport-and-index.md) | Generic blob, transport and index contracts: the host declares its pointers, its payload and its columns (proposed) | 2026-11-25 |
 
 ## Renumbered in the clean rewrite of 2026-11-21
 
