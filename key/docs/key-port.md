@@ -50,7 +50,7 @@ A host declares its purposes to a driver in one list. Each entry is:
 | `name` | the purpose: 1 to 64 characters of `a-z`, `0-9` and `-`, not beginning or ending with `-` (it becomes a file name in the software driver and a part of a KMS alias) |
 | `algorithm` | `ES256`, `ES384`, `RS256` or `ECDH-P384`: the algorithm of the key for the life of the purpose |
 | `operations` | `["sign"]` for `ES256`, `ES384` and `RS256`; `["agree"]` for `ECDH-P384`; `[]` for a key that is made and read and never used |
-| `slot` | optional, the card driver only: the PIV slot (two lower-case hex digits). Empty takes the slot of the reference map ([slotplan](../slotplan/README.md), `Default`). Other drivers ignore it |
+| `slot` | the card driver only, and required there: the PIV slot (two lower-case hex digits). No slot is taken from the reference map ([slotplan](../slotplan/README.md), `Reference`; [record 0021](../../docs/decisions/0021-drivers-know-no-deployment-shapes.md)); `purpose.Reference()` carries its slots, and `pin-release` takes its own, `87`. Other drivers ignore it |
 
 ```json
 {"purposes": [

@@ -54,7 +54,7 @@ const (
 )
 
 // Declaration is the declaration of the kit's purposes, for the host that starts the driver under test. The slots are those of a card
-// (the spare slots 90 to 94, which the reference map of key/slotplan gives to no purpose, and the PIN release key's own 87 by default);
+// (the spare slots 90 to 94, which the reference map of key/slotplan gives to no purpose, and the PIN release key's own 87, which the card driver gives it);
 // the other drivers ignore them.
 func Declaration() []purpose.Declaration {
 	return []purpose.Declaration{

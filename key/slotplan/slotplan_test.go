@@ -56,6 +56,7 @@ func TestTheSlotMapVectors(t *testing.T) {
 		for _, x := range c.Check {
 			ps = append(ps, Purpose{x.Purpose, x.Algorithm, x.Slot})
 		}
+		ps = WithReference(ps)
 		want(c.Name+" (check)", c.Error, Check(ps))
 		if c.Error == "" {
 			want(c.Name+" (card)", c.Card, CheckCard(ps))
@@ -68,20 +69,20 @@ func TestTheSlotMapVectors(t *testing.T) {
 // docs/architecture/keys.yaml is checked by sluis, which holds that file.
 //
 // verifies: REQ-KEYS-046, REQ-KEYS-278
-func TestTheDefaultIsTheReferenceMap(t *testing.T) {
-	if len(Default) < 9 {
-		t.Fatalf("the default map has %d slots", len(Default))
+func TestTheReferenceIsTheReferenceMap(t *testing.T) {
+	if len(Reference) < 9 {
+		t.Fatalf("the default map has %d slots", len(Reference))
 	}
 	// Version 2 changed only slots that version 1 left spare: the ten rows of version 1 are where they were.
 	v1 := map[string]string{"x509-intermediate": "9c", "token-signing": "9a", "wrapping": "9d", "ssh-user": "82", "ssh-host": "83",
 		"audit-log": "84", "release-signing": "85", "workload-issuer": "86", "pin-release": "87", "token-signing-rs256": "88"}
 	for purpose, slot := range v1 {
-		if Default[purpose] != slot {
-			t.Errorf("%s: version 1 had slot %s, the default has %q", purpose, slot, Default[purpose])
+		if Reference[purpose] != slot {
+			t.Errorf("%s: version 1 had slot %s, the default has %q", purpose, slot, Reference[purpose])
 		}
 	}
 	// The map holds nothing in the rotation spares 90 to 95.
-	for purpose, slot := range Default {
+	for purpose, slot := range Reference {
 		if n, err := strconv.ParseUint(slot, 16, 8); err != nil || n >= 0x90 && n <= 0x95 {
 			t.Errorf("%s: slot %s lies in the rotation spares", purpose, slot)
 		}
@@ -91,16 +92,33 @@ func TestTheDefaultIsTheReferenceMap(t *testing.T) {
 	}
 	// What a card holds is part of the map: every row but the three of PS256 (8b) and EdDSA (8d, 8e), which a card driver does not hold.
 	for purpose := range CardServed {
-		if _, ok := Default[purpose]; !ok {
+		if _, ok := Reference[purpose]; !ok {
 			t.Errorf("the card serves %s, which the default map lacks", purpose)
 		}
 	}
-	for purpose, slot := range Default {
+	for purpose, slot := range Reference {
 		if served, notServed := CardServed[purpose], slot == "8b" || slot == "8d" || slot == "8e"; served == notServed {
 			t.Errorf("%s (slot %s): served by a card is %v", purpose, slot, served)
 		}
 	}
-	if len(CardServed) != len(Default)-3 {
-		t.Errorf("a card holds %d purposes of %d; the three of PS256 and EdDSA are the ones it does not", len(CardServed), len(Default))
+	if len(CardServed) != len(Reference)-3 {
+		t.Errorf("a card holds %d purposes of %d; the three of PS256 and EdDSA are the ones it does not", len(CardServed), len(Reference))
+	}
+}
+
+// The mechanism knows no purpose name (record 0021): Resolve takes no slot from the reference map. A card-key purpose that names no
+// slot is refused, even one the map holds; WithReference fills it in when the host asks, and leaves a named slot and a purpose the map
+// does not hold as they are.
+func TestResolveTakesNoSlotFromTheReferenceMap(t *testing.T) {
+	plan := []Purpose{{Name: "token-signing", Algorithm: "ES384"}}
+	if _, err := Resolve(plan); err == nil || !strings.Contains(err.Error(), "no slot") {
+		t.Fatalf("Resolve without a slot: %v, want the refusal", err)
+	}
+	filled := WithReference(append(plan, Purpose{Name: "wrapping", Algorithm: "ECDH-P384", Slot: "92"}, Purpose{Name: "other", Algorithm: "ES384"}))
+	if filled[0].Slot != Reference["token-signing"] || filled[1].Slot != "92" || filled[2].Slot != "" {
+		t.Fatalf("WithReference = %+v", filled)
+	}
+	if plan[0].Slot != "" {
+		t.Fatal("WithReference changed the host's list")
 	}
 }

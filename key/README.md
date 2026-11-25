@@ -22,7 +22,7 @@ Each is its own Go module with its own README and documentation; a consumer that
 | [software](software/README.md) | driver: keys held in files (P-256, P-384, RSA-2048); library and a thin main | the port, the kit (tests only) |
 | [yubikeypiv](yubikeypiv/README.md) | driver: the keys of a YubiKey 5 over PIV; library and a thin main; the C code is behind the build tag `atoom_card` | the port, the kit (tests only), `slotplan`, `pinrelease` |
 | [awskms](awskms/README.md) | driver: asymmetric keys in AWS KMS, found by alias; library (links into a Lambda function) and a thin main; no attestation | the port, the kit (tests only), the AWS SDK |
-| [slotplan](slotplan/README.md) | the check of a card slot map: which slot each purpose lives in, which the card driver uses to place the purposes of its host; its `Default` is a reference map that holds the purposes of sluis | nothing |
+| [slotplan](slotplan/README.md) | the check of a card slot map: which slot each purpose lives in, which the card driver uses to place the purposes of its host; its `Reference` is a reference map that holds the purposes of sluis, which no driver takes a slot from | nothing |
 | [pinrelease](pinrelease/README.md) | the wire format of the PIN release between boards: signed texts and a sealed PIN | nothing |
 
 ## A driver of your own

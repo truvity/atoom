@@ -1,10 +1,10 @@
 # The reference slot map
 
-The table of `slotplan.Default`: the slot, the algorithm and the policy of each purpose. The purposes are sluis's, the first host of the card driver, so this is the reference map and not a list that the library or the driver prescribes: a host declares its own purposes to the driver and names the slot of each that the map does not hold.
+The table of `slotplan.Reference`: the slot, the algorithm and the policy of each purpose. The purposes are sluis's, the first host of the card driver, so this is the reference map and not a list that the library or the driver prescribes: a host declares its own purposes to the driver and names the slot of each, the names of the map included (or fills those in with `WithReference`; `purpose.Reference()` carries them).
 
 ## The table
 
-`Default` is version 2 of the map. A purpose that a host does not enable gets no slot and no key.
+`Reference` is version 2 of the map. A purpose that a host does not enable gets no slot and no key.
 
 | Slot | Purpose | Algorithm on the card | PIN policy | Touch policy | A card holds it |
 |---|---|---|---|---|---|

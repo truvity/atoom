@@ -53,7 +53,7 @@ func TestTheSlotPlanGivesEveryKeyASlotOfItsOwn(t *testing.T) {
 // verifies: REQ-KEYS-278
 func TestThePlanOfTheReferencePurposesIsTheReferenceMap(t *testing.T) {
 	for _, e := range mustPlan(t, purpose.Reference()) {
-		if got := slotplan.Default[e.purpose]; got != e.slot.String() {
+		if got := slotplan.Reference[e.purpose]; got != e.slot.String() {
 			t.Errorf("%s: the driver's slot %s, the reference map's %q", e.purpose, e.slot, got)
 		}
 		if !slotplan.CardServed[e.purpose] {
@@ -90,13 +90,13 @@ func TestThePlanOfTheReferencePurposesIsTheReferenceMap(t *testing.T) {
 	}
 }
 
-// A purpose that no driver knew, with ES256 or ES384, takes a slot that its host names (a spare, 90 to 95) or the one of the reference map,
-// and the plan follows the order of the declaration.
+// A purpose that no driver knew, with ES256 or ES384, takes the slot that its host names (a spare, 90 to 95), and a name of the reference
+// map takes no slot from it (record 0021): it too names its slot. The plan follows the order of the declaration.
 func TestAHostDeclaredPurposeTakesTheSlotItNames(t *testing.T) {
 	plan := mustPlan(t, []purpose.Declaration{
 		{Name: "client-assertion", Algorithm: purpose.ES256, Operations: []purpose.Operation{purpose.Sign}, Slot: "90"},
 		{Name: "identity-header", Algorithm: purpose.ES384, Operations: []purpose.Operation{purpose.Sign}, Slot: "91"},
-		{Name: "token-signing", Algorithm: purpose.ES256, Operations: []purpose.Operation{purpose.Sign}},
+		{Name: "token-signing", Algorithm: purpose.ES256, Operations: []purpose.Operation{purpose.Sign}, Slot: "9a"},
 	})
 	want := []struct {
 		name, slot, alg string
@@ -123,7 +123,8 @@ func TestADeclarationThatACardCannotFollowIsRefused(t *testing.T) {
 	}{
 		"a purpose with no slot":          {[]purpose.Declaration{{Name: "mine", Algorithm: purpose.ES256, Operations: sign}}, "purposes[0]: no slot"},
 		"two purposes in one slot":        {[]purpose.Declaration{{Name: "a", Algorithm: purpose.ES256, Slot: "90"}, {Name: "b", Algorithm: purpose.ES384, Slot: "90"}}, "shared with a"},
-		"a slot of the default holder":    {[]purpose.Declaration{{Name: "token-signing", Algorithm: purpose.ES384}, {Name: "mine", Algorithm: purpose.ES384, Slot: "9a"}}, "shared with token-signing"},
+		"a slot of another purpose":       {[]purpose.Declaration{{Name: "token-signing", Algorithm: purpose.ES384, Slot: "9a"}, {Name: "mine", Algorithm: purpose.ES384, Slot: "9a"}}, "shared with token-signing"},
+		"a reference name with no slot":   {[]purpose.Declaration{{Name: "token-signing", Algorithm: purpose.ES384, Operations: sign}}, "purposes[0]: no slot"},
 		"the card authentication slot":    {[]purpose.Declaration{{Name: "mine", Algorithm: purpose.ES384, Slot: "9e"}}, "not a slot of a board"},
 		"the attestation slot":            {[]purpose.Declaration{{Name: "mine", Algorithm: purpose.ES384, Slot: "f9"}}, "not a slot of a board"},
 		"the PIN release key as ES256":    {[]purpose.Declaration{{Name: "pin-release", Algorithm: purpose.ES256}}, "the PIN release key is ES384"},

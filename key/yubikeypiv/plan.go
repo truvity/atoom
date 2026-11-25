@@ -61,8 +61,8 @@ func cardSpec(algorithm string, pin card.PINPolicy) (spec card.KeySpec, curveBit
 }
 
 // buildPlan makes the slot plan of the host's purposes (ADR 0006, "The slot plan"; key/slotplan). A purpose names its slot in its
-// declaration, or takes the slot of the reference map (slotplan.Default); one with neither is refused, and so are two purposes in one
-// slot, a slot that is no slot of a board, and an algorithm that a card does not hold. Every key is generated with PIN once and touch
+// declaration (record 0021: no slot is taken from the reference map; purpose.Reference() names them), except the PIN release key,
+// whose slot is the PIN release's own; one with none is refused, and so are two purposes in one slot, a slot that is no slot of a board, and an algorithm that a card does not hold. Every key is generated with PIN once and touch
 // never, except the PIN release key (the purpose pin-release, ES384, slot 87), which signs while the board is locked: PIN never, touch
 // never. The refusal is a *Problems that names an entry and a word and never a value.
 func buildPlan(set *purpose.Set) ([]entry, error) {
@@ -71,6 +71,9 @@ func buildPlan(set *purpose.Set) ([]entry, error) {
 	sp := make([]slotplan.Purpose, len(decls))
 	for i, d := range decls {
 		sp[i] = slotplan.Purpose{Name: d.Name, Algorithm: d.Algorithm, Slot: d.Slot}
+		if d.Name == pinrelease.PurposePinRelease && d.Slot == "" {
+			sp[i].Slot = pinrelease.SlotPinRelease // the PIN release's own slot, not a reference map's
+		}
 		if _, _, ok := cardSpec(d.Algorithm, card.PINOnce); !ok {
 			problems = append(problems, fmt.Sprintf("purposes[%d].algorithm: a card holds no key of it", i))
 		}
