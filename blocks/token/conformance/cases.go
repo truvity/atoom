@@ -180,6 +180,19 @@ func thumbprint(spki []byte) (string, error) {
 	return b64.EncodeToString(sum[:]), nil
 }
 
+// headerJSON is the header the block writes: exactly alg, kid and typ, in that order, no white space, no HTML escaping.
+func headerJSON(alg, kid, typ string) string {
+	var buf bytes.Buffer
+	enc := json.NewEncoder(&buf)
+	enc.SetEscapeHTML(false)
+	_ = enc.Encode(struct {
+		Alg string `json:"alg"`
+		Kid string `json:"kid"`
+		Typ string `json:"typ"`
+	}{alg, kid, typ}) // three strings
+	return strings.TrimSuffix(buf.String(), "\n")
+}
+
 func capabilities(ctx context.Context, k *Kit) error {
 	res, err := k.Client.Capabilities(ctx, connect.NewRequest(&tokenv1alpha1.CapabilitiesRequest{}))
 	if err != nil {
@@ -221,8 +234,7 @@ func signCase(ctx context.Context, k *Kit) error {
 			if err1 != nil || err2 != nil || err3 != nil {
 				return fmt.Errorf("%s: a part is not strict base64url", p.Name)
 			}
-			kid, _ := json.Marshal(res.GetKid())
-			if want := `{"alg":"` + p.Algorithm + `","kid":` + string(kid) + `,"typ":"` + typ + `"}`; string(h) != want {
+			if want := headerJSON(p.Algorithm, res.GetKid(), typ); string(h) != want {
 				return fmt.Errorf("%s: the header is %s, want %s", p.Name, h, want)
 			}
 			if !bytes.Equal(payload, claims) {
@@ -444,7 +456,7 @@ func verifyHostKey(ctx context.Context, k *Kit) error {
 		return err
 	}
 	claims := k.claims(`,"by":"host"`)
-	input := b64.EncodeToString([]byte(`{"alg":"ES256","kid":"`+host.GetKid()+`","typ":"kit+jwt"}`)) + "." + b64.EncodeToString(claims)
+	input := b64.EncodeToString([]byte(headerJSON(purpose.ES256, host.GetKid(), TypeKit))) + "." + b64.EncodeToString(claims)
 	d := sha256.Sum256([]byte(input))
 	r, s, err := ecdsa.Sign(rand.Reader, priv, d[:])
 	if err != nil {
