@@ -10,16 +10,19 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use atoom_common::refusal;
-use atoom_index::atoom::index::v1alpha1::{
+use atoom_index::atoom::index::v1alpha2::__buffa::oneof::value::Kind;
+use atoom_index::atoom::index::v1alpha2::{
     ApplyRequest, ApplyResponse, Cursor, GetCursorRequest, GetCursorResponse, IndexReadService,
-    IndexReadServiceExt, IndexService, IndexServiceExt, Row, SearchRequest, SearchResponse,
+    IndexReadServiceExt, IndexService, IndexServiceExt, LogRef, Row, SearchRequest, SearchResponse,
+    Value,
 };
-use atoom_index_conformance::{Case, index_suite, report};
+use atoom_index::declaration::{Schema, Type};
+use atoom_index_conformance::{Case, declaration, index_suite, report};
 use atoom_socket::{ServerConfig, dial};
 use connectrpc::error::ErrorCode;
 use connectrpc::{RequestContext, Response, Router, ServiceRequest, ServiceResult};
 
-/// The log a row belongs to: project, kind, log.
+/// The log a row belongs to: scope, kind, log.
 type LogKey = (String, String, String);
 
 #[derive(Default)]
@@ -38,8 +41,31 @@ struct Index {
     stores_repeats: bool,
     /// A query reads every tenant, whatever it names.
     ignores_tenants: bool,
-    /// The usage log has an index.
-    indexes_usage: bool,
+    /// A kind that is not declared has an index.
+    indexes_any_kind: bool,
+    /// Columns are taken as they come, declared or not.
+    ignores_declaration: bool,
+    /// A word search reaches every text column, not only the declared word columns.
+    words_everywhere: bool,
+}
+
+fn schema() -> Schema {
+    declaration()
+}
+
+fn value_ok(s: &Schema, name: &str, v: &Value) -> bool {
+    matches!(
+        (s.column_named(name).map(|c| c.ty), v.kind.as_ref()),
+        (Some(Type::Text), Some(Kind::Text(_))) | (Some(Type::Int), Some(Kind::Int(_)))
+    )
+}
+
+fn key_of(l: &LogRef) -> LogKey {
+    (l.scope.to_string(), l.kind.to_string(), l.log.to_string())
+}
+
+fn row_key(r: &Row) -> LogKey {
+    key_of(r.log.as_option().unwrap())
 }
 
 fn words(s: &str) -> Vec<String> {
@@ -59,7 +85,7 @@ impl IndexService for Index {
             .log
             .as_option()
             .ok_or_else(|| refusal::new(ErrorCode::InvalidArgument, "argument", "log"))?;
-        let key = (l.project.to_string(), l.kind.to_string(), l.log.to_string());
+        let key = (l.scope.to_string(), l.kind.to_string(), l.log.to_string());
         let c = self
             .state
             .lock()
@@ -83,8 +109,10 @@ impl IndexService for Index {
         let l = req
             .log
             .as_option()
+            .cloned()
             .ok_or_else(|| refusal::new(ErrorCode::InvalidArgument, "argument", "log"))?;
-        if !["audit", "issuance"].contains(&l.kind.as_str()) && !self.indexes_usage {
+        let s = schema();
+        if !s.has_kind(&l.kind) && !self.indexes_any_kind {
             return Err(refusal::new(
                 ErrorCode::PermissionDenied,
                 "rule",
@@ -106,15 +134,26 @@ impl IndexService for Index {
                     "rows.hash",
                 ));
             }
-            if r.record.is_empty() {
+            if r.entry.is_empty() {
                 return Err(refusal::new(
                     ErrorCode::InvalidArgument,
                     "argument",
-                    "rows.record",
+                    "rows.entry",
+                ));
+            }
+            let held = r.columns.iter().all(|(k, v)| value_ok(&s, k, v))
+                && s.columns()
+                    .iter()
+                    .all(|c| !c.required || r.columns.contains_key(&c.name));
+            if !held && !self.ignores_declaration {
+                return Err(refusal::new(
+                    ErrorCode::InvalidArgument,
+                    "argument",
+                    "rows.columns",
                 ));
             }
         }
-        let key = (l.project.to_string(), l.kind.to_string(), l.log.to_string());
+        let key = key_of(&l);
         let mut st = self.state.lock().unwrap();
         if let Some(n) = req.next.as_option() {
             if n.size <= req.expect_size || req.expect_size < 0 {
@@ -139,17 +178,16 @@ impl IndexService for Index {
         }
         let (mut inserted, mut duplicates) = (0, 0);
         for r in req.rows {
-            let dup = st.rows.iter().any(|o| {
-                (&o.project, &o.kind, &o.log) == (&key.0, &key.1, &key.2)
-                    && o.tenant == r.tenant
-                    && o.hash == r.hash
-            });
+            let dup = st
+                .rows
+                .iter()
+                .any(|o| row_key(o) == key && o.tenant == r.tenant && o.hash == r.hash);
             if dup && !self.stores_repeats {
                 duplicates += 1;
                 continue;
             }
             let mut r = r;
-            (r.project, r.kind, r.log) = (key.0.clone(), key.1.clone(), key.2.clone());
+            r.log = ::buffa::MessageField::some(l.clone());
             st.rows.push(r);
             inserted += 1;
         }
@@ -172,12 +210,21 @@ impl IndexReadService for Index {
         request: ServiceRequest<'_, SearchRequest>,
     ) -> ServiceResult<SearchResponse> {
         let q = request.to_owned_message();
-        if q.partitions.is_empty()
-            || q.partitions
-                .iter()
-                .any(|p| !["audit", "issuance"].contains(&p.kind.as_str()))
-        {
+        let s = schema();
+        if q.partitions.is_empty() || q.partitions.iter().any(|p| !s.has_kind(&p.kind)) {
             return Err(argument("partitions"));
+        }
+        for m in &q.matches {
+            if !s.column_named(&m.column).is_some_and(|c| c.filter) {
+                return Err(argument("matches.column"));
+            }
+            if !m
+                .value
+                .as_option()
+                .is_some_and(|v| value_ok(&s, &m.column, v))
+            {
+                return Err(argument("matches.value"));
+            }
         }
         let star = q.tenants.iter().any(|t| t == "*");
         if q.tenants.is_empty() || (star && q.tenants.len() > 1) {
@@ -191,20 +238,30 @@ impl IndexReadService for Index {
             .rows
             .iter()
             .filter(|r| {
+                let (scope, kind, _) = row_key(r);
                 q.partitions
                     .iter()
-                    .any(|p| p.project == r.project && p.kind == r.kind)
+                    .any(|p| p.scope == scope && p.kind == kind)
                     && (star || self.ignores_tenants || q.tenants.contains(&r.tenant))
-                    && (q.action.is_empty() || q.action == r.action)
-                    && (q.status_code.is_empty() || q.status_code == r.status_code)
-                    && (q.status_id == 0 || q.status_id == r.status_id)
-                    && (q.actor_uid.is_empty() || q.actor_uid == r.actor_uid)
-                    && (q.trace_id.is_empty() || q.trace_id == r.trace_id)
-                    && (q.record_id.is_empty() || q.record_id == r.record_id)
+                    && q.matches
+                        .iter()
+                        .all(|m| r.columns.get(&m.column) == m.value.as_option())
+                    && (q.entry_id.is_empty() || q.entry_id == r.entry_id)
                     && (q.from_ms == 0 || r.time_ms >= q.from_ms)
                     && (q.to_ms == 0 || r.time_ms < q.to_ms)
                     && {
-                        let have = words(&r.action);
+                        let have: Vec<String> = r
+                            .columns
+                            .iter()
+                            .filter(|(k, _)| {
+                                self.words_everywhere || s.column_named(k).is_some_and(|c| c.words)
+                            })
+                            .filter_map(|(_, v)| match v.kind.as_ref() {
+                                Some(Kind::Text(t)) => Some(words(t)),
+                                _ => None,
+                            })
+                            .flatten()
+                            .collect();
                         wanted.iter().all(|w| match w.strip_suffix('*') {
                             Some(p) => have.iter().any(|h| h.starts_with(p)),
                             None => have.contains(w),
@@ -274,7 +331,7 @@ async fn a_driver_that_does_what_the_contract_asks_passes_every_case() {
     let mut out = Vec::new();
     let verdict = report(&cases, &mut out);
     assert!(verdict.is_ok(), "{}", String::from_utf8_lossy(&out));
-    assert_eq!(cases.len(), 11);
+    assert_eq!(cases.len(), 12);
 }
 
 #[tokio::test]
@@ -303,10 +360,24 @@ async fn each_wrong_driver_fails_the_case_that_looks_for_it() {
         ),
         (
             Index {
-                indexes_usage: true,
+                indexes_any_kind: true,
                 ..Index::default()
             },
             "apply_refuses_what_it_cannot_hold",
+        ),
+        (
+            Index {
+                ignores_declaration: true,
+                ..Index::default()
+            },
+            "the_declared_columns_are_held",
+        ),
+        (
+            Index {
+                words_everywhere: true,
+                ..Index::default()
+            },
+            "search_by_words",
         ),
     ] {
         let cases = judge(index).await;

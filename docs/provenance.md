@@ -287,7 +287,7 @@ From sluis `df108e5`.
 
 | Here | From sluis | Changed |
 | --- | --- | --- |
-| `proto/atoom/index/v1alpha1/index.proto` | `proto/sluis/port/index/v2alpha1/index.proto` | package renamed; comments no longer point at sluis's socket names |
+| `proto/atoom/index/v1alpha2/index.proto` | `proto/sluis/port/index/v2alpha1/index.proto` | package renamed; comments no longer point at sluis's socket names; in 0.9.0 (record 0025) `v1alpha1` became `v1alpha2`, generic: the scope, the fixed columns any log has, the declared columns and kinds, exact matches |
 | `conformance/src/` | the `suite.rs` of `drivers/indexer/sqlite` | new, not merged; the binary `index-conformance` |
 | `sqlite/src/{lib,suite}.rs` | `drivers/indexer/sqlite/src/` | the suite is the backend suite; `Index::open` resolves the state directory (`canonicalize`, after the check that it is no symlink) before it gives SQLite the path, because SQLite with `NOFOLLOW` refuses a symlink in any component and a system directory can be one (macOS `/var`); the file itself is still opened with `NOFOLLOW` |
 | `sqlite/src/service.rs` | `drivers/indexer/sqlite/src/service.rs` | `Write::router()` and `Read::router()` are new |

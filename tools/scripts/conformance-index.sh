@@ -30,9 +30,11 @@ wait_for() { # description command...
     return 1
 }
 
-# The sqlite driver: a state directory that only its owner can write.
+# The sqlite driver: a state directory that only its owner can write, under the kit's declaration of kinds and columns.
 mkdir -m 0750 "$tmp/state"
-"$bin/index-sqlite" serve --socket "$tmp/index.sock" --read-socket "$tmp/index-ro.sock" --state-dir "$tmp/state" &
+"$bin/index-conformance" --print-declaration >"$tmp/declaration.json"
+"$bin/index-sqlite" serve --socket "$tmp/index.sock" --read-socket "$tmp/index-ro.sock" --state-dir "$tmp/state" \
+    --declaration "$tmp/declaration.json" &
 pids+=($!)
 wait_for "the sqlite driver" test -S "$tmp/index.sock"
 wait_for "the sqlite driver" test -S "$tmp/index-ro.sock"

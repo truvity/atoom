@@ -6,7 +6,7 @@
 
 use std::time::Duration;
 
-use atoom_index::atoom::index::v1alpha1::{
+use atoom_index::atoom::index::v1alpha2::{
     ApplyRequest, GetCursorRequest, IndexReadServiceClient, IndexServiceClient, SearchRequest,
 };
 use atoom_socket::call::{self, Call};

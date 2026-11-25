@@ -272,6 +272,7 @@ dependencies = [
  "connectrpc",
  "connectrpc-build",
  "serde",
+ "serde_json",
 ]
 
 [[package]]

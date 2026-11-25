@@ -9,16 +9,16 @@ import (
 	"connectrpc.com/connect"
 	"google.golang.org/protobuf/proto"
 
-	indexv1alpha1 "github.com/truvity/atoom/index/gen/atoom/index/v1alpha1"
-	"github.com/truvity/atoom/index/gen/atoom/index/v1alpha1/indexv1alpha1connect"
+	indexv1alpha2 "github.com/truvity/atoom/index/gen/atoom/index/v1alpha2"
+	"github.com/truvity/atoom/index/gen/atoom/index/v1alpha2/indexv1alpha2connect"
 )
 
 // The procedure names are part of the contract: a driver in another language is dialled by them.
 func TestTheProceduresHaveTheNamesOfTheContract(t *testing.T) {
 	for got, want := range map[string]string{
-		indexv1alpha1connect.IndexServiceGetCursorProcedure:  "/atoom.index.v1alpha1.IndexService/GetCursor",
-		indexv1alpha1connect.IndexServiceApplyProcedure:      "/atoom.index.v1alpha1.IndexService/Apply",
-		indexv1alpha1connect.IndexReadServiceSearchProcedure: "/atoom.index.v1alpha1.IndexReadService/Search",
+		indexv1alpha2connect.IndexServiceGetCursorProcedure:  "/atoom.index.v1alpha2.IndexService/GetCursor",
+		indexv1alpha2connect.IndexServiceApplyProcedure:      "/atoom.index.v1alpha2.IndexService/Apply",
+		indexv1alpha2connect.IndexReadServiceSearchProcedure: "/atoom.index.v1alpha2.IndexReadService/Search",
 	} {
 		if got != want {
 			t.Errorf("procedure = %q, want %q", got, want)
@@ -26,9 +26,9 @@ func TestTheProceduresHaveTheNamesOfTheContract(t *testing.T) {
 	}
 }
 
-// The field numbers are the ones sluis used, so that the bytes of a message did not change with the move.
+// The field numbers of the cursor are the ones sluis used: a verified position in a log did not change with record 0025.
 func TestACursorKeepsTheFieldNumbersOfSluis(t *testing.T) {
-	b, err := proto.Marshal(&indexv1alpha1.Cursor{Size: 3, Root: []byte("r"), State: []byte("s")})
+	b, err := proto.Marshal(&indexv1alpha2.Cursor{Size: 3, Root: []byte("r"), State: []byte("s")})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -40,47 +40,47 @@ func TestACursorKeepsTheFieldNumbersOfSluis(t *testing.T) {
 }
 
 type write struct {
-	indexv1alpha1connect.UnimplementedIndexServiceHandler
+	indexv1alpha2connect.UnimplementedIndexServiceHandler
 }
 
-func (write) GetCursor(_ context.Context, req *connect.Request[indexv1alpha1.GetCursorRequest]) (*connect.Response[indexv1alpha1.GetCursorResponse], error) {
-	return connect.NewResponse(&indexv1alpha1.GetCursorResponse{Cursor: &indexv1alpha1.Cursor{Size: int64(len(req.Msg.GetLog().GetLog()))}}), nil
+func (write) GetCursor(_ context.Context, req *connect.Request[indexv1alpha2.GetCursorRequest]) (*connect.Response[indexv1alpha2.GetCursorResponse], error) {
+	return connect.NewResponse(&indexv1alpha2.GetCursorResponse{Cursor: &indexv1alpha2.Cursor{Size: int64(len(req.Msg.GetLog().GetLog()))}}), nil
 }
 
 type read struct {
-	indexv1alpha1connect.UnimplementedIndexReadServiceHandler
+	indexv1alpha2connect.UnimplementedIndexReadServiceHandler
 }
 
-func (read) Search(_ context.Context, req *connect.Request[indexv1alpha1.SearchRequest]) (*connect.Response[indexv1alpha1.SearchResponse], error) {
-	return connect.NewResponse(&indexv1alpha1.SearchResponse{Rows: []*indexv1alpha1.Row{{RecordId: req.Msg.GetQ()}}}), nil
+func (read) Search(_ context.Context, req *connect.Request[indexv1alpha2.SearchRequest]) (*connect.Response[indexv1alpha2.SearchResponse], error) {
+	return connect.NewResponse(&indexv1alpha2.SearchResponse{Rows: []*indexv1alpha2.Row{{EntryId: req.Msg.GetQ()}}}), nil
 }
 
 // A Go consumer mounts a driver's handlers on an in-memory server and calls them through the clients, which is how a library is linked
 // in process (docs/archive/extraction-plan.md, section 1). The two sides are two services, so a host can put them on two servers.
 func TestTheClientsCallTheHandlers(t *testing.T) {
 	mux := http.NewServeMux()
-	mux.Handle(indexv1alpha1connect.NewIndexServiceHandler(write{}))
-	mux.Handle(indexv1alpha1connect.NewIndexReadServiceHandler(read{}))
+	mux.Handle(indexv1alpha2connect.NewIndexServiceHandler(write{}))
+	mux.Handle(indexv1alpha2connect.NewIndexReadServiceHandler(read{}))
 	srv := httptest.NewServer(mux)
 	defer srv.Close()
 
-	w := indexv1alpha1connect.NewIndexServiceClient(srv.Client(), srv.URL)
-	got, err := w.GetCursor(context.Background(), connect.NewRequest(&indexv1alpha1.GetCursorRequest{Log: &indexv1alpha1.LogRef{Log: "main"}}))
+	w := indexv1alpha2connect.NewIndexServiceClient(srv.Client(), srv.URL)
+	got, err := w.GetCursor(context.Background(), connect.NewRequest(&indexv1alpha2.GetCursorRequest{Log: &indexv1alpha2.LogRef{Log: "main"}}))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if got.Msg.GetCursor().GetSize() != 4 {
 		t.Fatalf("cursor = %v", got.Msg)
 	}
-	if _, err := w.Apply(context.Background(), connect.NewRequest(&indexv1alpha1.ApplyRequest{})); connect.CodeOf(err) != connect.CodeUnimplemented {
+	if _, err := w.Apply(context.Background(), connect.NewRequest(&indexv1alpha2.ApplyRequest{})); connect.CodeOf(err) != connect.CodeUnimplemented {
 		t.Fatalf("an unserved call: code = %v, want unimplemented (%v)", connect.CodeOf(err), err)
 	}
-	r := indexv1alpha1connect.NewIndexReadServiceClient(srv.Client(), srv.URL)
-	found, err := r.Search(context.Background(), connect.NewRequest(&indexv1alpha1.SearchRequest{Q: "exchange"}))
+	r := indexv1alpha2connect.NewIndexReadServiceClient(srv.Client(), srv.URL)
+	found, err := r.Search(context.Background(), connect.NewRequest(&indexv1alpha2.SearchRequest{Q: "exchange"}))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(found.Msg.GetRows()) != 1 || found.Msg.GetRows()[0].GetRecordId() != "exchange" {
+	if len(found.Msg.GetRows()) != 1 || found.Msg.GetRows()[0].GetEntryId() != "exchange" {
 		t.Fatalf("search = %v", found.Msg)
 	}
 }

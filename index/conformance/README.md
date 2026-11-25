@@ -5,14 +5,16 @@ The conformance kit of the [index port](../docs/index-port.md): the cases every 
 | | |
 | --- | --- |
 | Library | crate `atoom-index-conformance`: `index_suite(write_client, read_client)` runs the cases and returns their results, `report(&cases, out)` prints them and fails on a failed case and on none run |
-| Binary | `index-conformance --socket PATH --read-socket PATH` runs the suite against the driver that serves its write side (`IndexService`) on the UNIX socket PATH and its read side (`IndexReadService`) on the other (the same path twice for a driver that serves both on one), whatever its language; the exit status is 0 only when every case passed |
+| Binary | `index-conformance --print-declaration` prints the kit's declaration, to start the driver with; `index-conformance --socket PATH --read-socket PATH` runs the suite against the driver that serves its write side (`IndexService`) on the UNIX socket PATH and its read side (`IndexReadService`) on the other (the same path twice for a driver that serves both on one), whatever its language; the exit status is 0 only when every case passed |
 
-The suite writes under a project of its own, `conformance-<run>`, and **cannot remove what it wrote**: the contract has no delete. Run it against a scratch index.
+The driver is started under the kit's declaration (`DECLARATION`, `--print-declaration`). The suite writes under a scope of its own, `conformance-<run>`, and **cannot remove what it wrote**: the contract has no delete. Run it against a scratch index.
 
 ```sh
 cargo build -p atoom-index-sqlite -p atoom-index-conformance
 mkdir -m 0750 /tmp/index-state
-target/debug/index-sqlite serve --socket /tmp/index.sock --read-socket /tmp/index-ro.sock --state-dir /tmp/index-state &
+target/debug/index-conformance --print-declaration >/tmp/index-declaration.json
+target/debug/index-sqlite serve --socket /tmp/index.sock --read-socket /tmp/index-ro.sock --state-dir /tmp/index-state \
+  --declaration /tmp/index-declaration.json &
 target/debug/index-conformance --socket /tmp/index.sock --read-socket /tmp/index-ro.sock
 ```
 
