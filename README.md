@@ -32,7 +32,7 @@ atoom 0.2.0 is released. Seven ports with kits and thirteen drivers are built:
 | [store](store/README.md) | items with versions, expiry, indexes and a change log | [rqlite](store/rqlite/README.md), [memory](store/memory/README.md), [dynamodb](store/dynamodb/README.md) |
 | [source](source/README.md) | named values and their bytes | [file](source/file/README.md), [credential](source/credential/README.md), [appconfig](source/appconfig/README.md) (unreleased) |
 | [blob](blob/README.md) | write-once objects and conditional pointers | [fs](blob/fs/README.md), [fsreadonly](blob/fsreadonly/README.md) |
-| [transport](transport/README.md) | a durable ordered queue | [spool](transport/spool/README.md) |
+| [transport](transport/README.md) | a durable ordered queue | [spool](transport/spool/README.md), [nats](transport/nats/README.md) (unreleased) |
 | [index](index/README.md) | a search index of an append-only log | [sqlite](index/sqlite/README.md) |
 | [destination](destination/README.md) | where a published document goes | [dir](destination/dir/README.md) |
 
@@ -42,7 +42,7 @@ The Cedar loader is [policy](policy/README.md): the signed policy bundle, its lo
 
 The shared libraries are [common](common/README.md) (the types every port speaks), [socket](socket/README.md) (the socket host and its guard) and, for the card driver, [key/slotplan](key/slotplan/README.md) and [key/pinrelease](key/pinrelease/README.md).
 
-Planned: the blocks `state`, `token` and `export`, Lambda extension zips, more drivers (PostgreSQL and Valkey stores, an SSM source, an S3 blob store, SQS and NATS JetStream transports, rqlite and PostgreSQL indexes), and generic blob, transport and index contracts. The order is the [plan](docs/plan.md).
+Planned: the blocks `state`, `token` and `export`, Lambda extension zips, more drivers (PostgreSQL and Valkey stores, an SSM source, an S3 blob store, an SQS transport, rqlite and PostgreSQL indexes), and generic blob, transport and index contracts. The order is the [plan](docs/plan.md).
 
 ## Documents
 
