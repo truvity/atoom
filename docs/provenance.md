@@ -279,6 +279,19 @@ New code written for atoom (step B9, records [0022](decisions/0022-the-blocks-or
 | `cmd/sqs/` | `key/awskms/cmd/awskms/`, `transport/nats/cmd/nats/` | |
 | `docs/sqs.md` | new | |
 
+### blob/s3
+
+<a id="blob-s3"></a>
+
+New code written for atoom (step B12, the owner's D112 A, [record 0025](decisions/0025-generic-blob-transport-and-index.md)); nothing came from sluis.
+
+| Here | From | Changed |
+| --- | --- | --- |
+| `s3.go` | new; the path rules and the entity tag of `blob/fsdir` | the blob port over an S3 bucket, with S3's conditional writes |
+| `internal/s3fake/` | new; the shape of `transport/sqs/internal/sqsfake/` | an in-process fake of the S3 calls the driver makes |
+| `cmd/s3/` | `transport/sqs/cmd/sqs/` | |
+| `docs/s3.md` | new | |
+
 ## index
 
 <a id="index"></a>

@@ -182,8 +182,9 @@ conformance-store: rust-toolchain rqlite-fetch
 conformance-source: rust-toolchain
     tools/scripts/conformance-source.sh
 
-# The blob-port kit against the fs driver and the read-only fs driver, each through the socket of its thin main
-# (tools/scripts/conformance-blob.sh). Both drivers are Linux only, so elsewhere it says so and does nothing.
+# The blob-port kit against the fs driver, the read-only fs driver and the S3 driver (over the in-memory S3 fake of its tests, run as a
+# process), each through the socket of its thin main (tools/scripts/conformance-blob.sh). The fs drivers are Linux only, so elsewhere only
+# the S3 driver runs.
 [private]
 conformance-blob: rust-toolchain
     tools/scripts/conformance-blob.sh

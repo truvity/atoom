@@ -25,6 +25,7 @@ source-appconfig	go	source/appconfig	./cmd/appconfig	portable	linux,darwin	-	-	-
 source-credential	rust	source/credential	atoom-source-credential:source-credential	portable	linux	-	-	-	-	The credential driver of the source port: systemd credentials served on a UNIX socket
 blob-fs	rust	blob/fs	atoom-blob-fs:blob-fs	portable	linux	-	-	-	-	The fs driver of the blob port: a local directory served on a UNIX socket
 blob-fsreadonly	rust	blob/fsreadonly	atoom-blob-fsreadonly:blob-fsreadonly	portable	linux	-	-	-	-	The read-only fs driver of the blob port: the directory of blob-fs, read only, on a UNIX socket
+blob-s3	go	blob/s3	./cmd/s3	portable	linux,darwin	-	-	-	-	The S3 driver of the blob port: an S3 bucket under a key prefix, served on a UNIX socket
 transport-spool	rust	transport/spool	atoom-transport-spool:transport-spool	portable	linux	-	-	-	-	The spool driver of the transport port: a durable local queue served on a UNIX socket
 transport-nats	go	transport/nats	./cmd/nats	portable	linux,darwin	-	-	-	-	The NATS JetStream driver of the transport port: a JetStream stream and durable consumer served on a UNIX socket
 transport-sqs	go	transport/sqs	./cmd/sqs	portable	linux,darwin	-	-	-	-	The SQS driver of the transport port: an SQS FIFO queue served on a UNIX socket
