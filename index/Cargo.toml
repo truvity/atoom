@@ -1,6 +1,6 @@
 [package]
 name = "atoom-index"
-description = "The index port: the ConnectRPC contract (atoom.index.v1alpha1.IndexService and IndexReadService) for a search index of audit records: a write side that applies the rows of one log and moves its cursor, and a read side that searches, as buffa messages and a generated client and service."
+description = "The index port: the ConnectRPC contract (atoom.index.v1alpha2.IndexService and IndexReadService) for a search index of the entries of append-only logs: a write side that applies the rows of one log and moves its cursor, and a read side that searches, as buffa messages and a generated client and service; and the checks of a host's declaration of kinds and columns."
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -21,6 +21,8 @@ buffa-types = { version = "=0.9.2", features = ["json"] }
 connectrpc = { version = "=0.9.1", default-features = false, features = ["json", "gzip", "client", "server"] }
 # The generated messages derive serde for the JSON form (the buffa `json` feature).
 serde = { version = "1", features = ["derive"] }
+# The JSON form of a declaration (the --declaration file of a thin main); in buffa's own graph.
+serde_json = "1"
 
 [build-dependencies]
 connectrpc-build = "=0.9.0"

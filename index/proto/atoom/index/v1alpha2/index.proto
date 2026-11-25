@@ -1,0 +1,132 @@
+// The index port: a search index of the entries of append-only logs. The write side is what an indexer uses, and the read side is what
+// a reader uses. They are two services, which a host puts on two sockets, so a driver serves the read side without any way to write.
+//
+// The index knows no product. A row has the columns any log has (tenant, hash, sequence number, time, entry id, the entry itself); the
+// host declares the rest when it starts the driver (Declaration): the log kinds that have an index, and each further column with its
+// type and whether it is reached by words, by an exact match, or required (record 0025).
+syntax = "proto3";
+
+package atoom.index.v1alpha2;
+
+// IndexService is the write side of the index, for the indexer only.
+service IndexService {
+  rpc GetCursor(GetCursorRequest) returns (GetCursorResponse);  // where the indexer stands in one log
+  rpc Apply(ApplyRequest) returns (ApplyResponse);              // rows of one log and its next cursor, in one transaction
+}
+
+// IndexReadService is the read side of the index, for the reader only.
+service IndexReadService {
+  rpc Search(SearchRequest) returns (SearchResponse);  // rows of named partitions and tenants, newest first
+}
+
+// Declaration is what the host declares to the driver it starts: the log kinds that have an index and the columns beyond the fixed
+// ones. Its JSON form (the proto JSON mapping) is the file of a thin main's --declaration flag. Another declaration is another schema.
+message Declaration {
+  repeated string kinds = 1;              // the log kinds that have an index; at least one
+  repeated ColumnDeclaration columns = 2; // the declared columns, at most 32
+}
+
+// ColumnDeclaration is one declared column.
+message ColumnDeclaration {
+  string name = 1;     // [a-z][a-z0-9_]{0,31}, not a fixed column's name
+  ColumnType type = 2; // text or int
+  bool words = 3;      // reached by a word search (q); text only
+  bool filter = 4;     // reached by an exact match (matches)
+  bool required = 5;   // a row without it is refused
+}
+
+// ColumnType is the type of a declared column.
+enum ColumnType {
+  COLUMN_TYPE_UNSPECIFIED = 0;
+  COLUMN_TYPE_TEXT = 1;  // a string of at most 1024 bytes, no NUL
+  COLUMN_TYPE_INT = 2;   // a signed 64-bit integer
+}
+
+// Value is one value of a declared column.
+message Value {
+  oneof kind {
+    string text = 1;  // a text column's value
+    int64 int = 2;    // an int column's value
+  }
+}
+
+// LogRef names one log: a scope (the host's partition key, such as a project), a declared kind, and the log's id.
+message LogRef {
+  string scope = 1;  // the host's partition key
+  string kind = 2;   // a declared log kind
+  string log = 3;    // the log's id
+}
+
+// Cursor is where the indexer stands in a log: the last checkpoint it verified and indexed to.
+message Cursor {
+  int64 size = 1;    // the tree size of that checkpoint
+  bytes root = 2;    // the root hash of that checkpoint (SHA-256, RFC 6962)
+  bytes state = 3;   // the indexer's own proof state at that size; opaque to the index
+}
+
+// GetCursorRequest asks for the cursor of a log.
+message GetCursorRequest {
+  LogRef log = 1;  // the log
+}
+
+// GetCursorResponse carries the cursor; a log never indexed has size 0 and no root.
+message GetCursorResponse {
+  Cursor cursor = 1;  // the cursor
+}
+
+// Row is one indexed entry: the fixed columns, the declared ones, and the entry itself, once.
+message Row {
+  string tenant = 1;               // the owner of the row; the grant filters on it
+  bytes hash = 2;                  // SHA-384 of the entry's bytes: the key of idempotent indexing
+  int64 seq = 3;                   // the entry's position in the log
+  int64 time_ms = 4;               // the entry's time, in milliseconds; the order of a page
+  string entry_id = 5;             // the entry's own id
+  bytes entry = 6;                 // the entry's bytes, opaque, returned as stored
+  map<string, Value> columns = 7;  // the declared columns of the row
+  LogRef log = 8;                  // the log the row came from; set by the index on a read, ignored on a write
+}
+
+// ApplyRequest registers a batch of one log: its rows and the cursor after them.
+message ApplyRequest {
+  LogRef log = 1;           // the log
+  int64 expect_size = 2;    // the size of the cursor the indexer read; the write is refused when it has moved
+  Cursor next = 3;          // the cursor after the rows; its size must be larger than expect_size
+  repeated Row rows = 4;    // the rows; one already present (same tenant and hash) is a repeat
+}
+
+// ApplyResponse counts what the batch did.
+message ApplyResponse {
+  int64 inserted = 1;    // rows that were new
+  int64 duplicates = 2;  // rows that were already there
+}
+
+// Partition is a scope and a log kind that a query reads.
+message Partition {
+  string scope = 1;  // the host's partition key
+  string kind = 2;   // a declared log kind
+}
+
+// Match is an exact filter over a declared filter column.
+message Match {
+  string column = 1;  // the column's name
+  Value value = 2;    // the value it must have
+}
+
+// SearchRequest is a query. The partitions and the tenants are mandatory: they are the grant's filter.
+message SearchRequest {
+  repeated Partition partitions = 1;  // the partitions to read; at least one
+  repeated string tenants = 2;        // the tenants to read; at least one, "*" alone for every tenant
+  string q = 3;                       // words over the declared word columns; a trailing * makes a prefix
+  string entry_id = 4;                // only this entry, when set
+  repeated Match matches = 5;         // exact filters over declared filter columns; all must hold
+  int64 from_ms = 6;                  // time at or after, when not 0
+  int64 to_ms = 7;                    // time before, when not 0
+  int32 page_size = 8;                // rows per page; 0 is the driver's default, at most its largest page
+  bytes page_token = 9;               // from the previous page; opaque
+}
+
+// SearchResponse is one page, newest first.
+message SearchResponse {
+  repeated Row rows = 1;      // the rows
+  bytes next_page_token = 2;  // empty on the last page
+}

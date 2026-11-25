@@ -8,9 +8,10 @@ use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 
 use atoom_common::refusal::reason as refusal_reason;
-use atoom_index::atoom::index::v1alpha1::{
+use atoom_index::atoom::index::v1alpha2::__buffa::oneof::value::Kind;
+use atoom_index::atoom::index::v1alpha2::{
     ApplyRequest, Cursor, GetCursorRequest, IndexReadServiceClient, IndexServiceClient, LogRef,
-    Partition, Row, SearchRequest,
+    Partition, Row, SearchRequest, Value,
 };
 use atoom_index_sqlite::service::{Read, Write};
 use atoom_index_sqlite::{Index, suite};
@@ -47,24 +48,32 @@ fn dir() -> tempfile::TempDir {
     d
 }
 
+fn text(t: &str) -> Value {
+    Value {
+        kind: Some(Kind::Text(t.into())),
+        ..Value::default()
+    }
+}
+
 fn row(n: u8) -> Row {
-    Row {
+    let mut r = Row {
         tenant: "acme".into(),
         hash: vec![n; 48],
         seq: i64::from(n),
         time_ms: i64::from(n) * 10,
-        action: "token.exchange".into(),
-        status_code: "ok".into(),
-        record_id: format!("rec-{n}"),
-        record: b"{}".to_vec(),
+        entry_id: format!("rec-{n}"),
+        entry: b"{}".to_vec(),
         ..Row::default()
-    }
+    };
+    r.columns.insert("action".into(), text("token.exchange"));
+    r.columns.insert("status_code".into(), text("ok"));
+    r
 }
 
 fn log() -> LogRef {
     LogRef {
-        project: "sluis".into(),
-        kind: "audit".into(),
+        scope: "alpha".into(),
+        kind: "events".into(),
         log: "main".into(),
         ..LogRef::default()
     }
@@ -73,8 +82,8 @@ fn log() -> LogRef {
 fn search() -> SearchRequest {
     SearchRequest {
         partitions: vec![Partition {
-            project: "sluis".into(),
-            kind: "audit".into(),
+            scope: "alpha".into(),
+            kind: "events".into(),
             ..Partition::default()
         }],
         tenants: vec!["acme".into()],
@@ -83,7 +92,7 @@ fn search() -> SearchRequest {
 }
 
 /// The backend suite: word search matches words without stemming, folds diacritics, finds a prefix and no substring, and reaches only
-/// the searchable columns.
+/// the declared word columns.
 #[test]
 fn the_backend_suite_passes() {
     suite::run_temp().unwrap();
@@ -92,7 +101,7 @@ fn the_backend_suite_passes() {
 #[tokio::test]
 async fn the_write_side_writes_and_the_read_side_reads_each_on_its_own_socket() {
     let (d, s) = (dir(), tempfile::tempdir().unwrap());
-    let index = Index::open(d.path()).unwrap();
+    let index = Index::open(d.path(), &suite::declaration()).unwrap();
     let (wsock, rsock) = (s.path().join("index.sock"), s.path().join("index-ro.sock"));
     let stop_w = serve(&wsock, Write(index.clone()).router());
     let stop_r = serve(&rsock, Read(index).router());
@@ -149,7 +158,7 @@ async fn the_write_side_writes_and_the_read_side_reads_each_on_its_own_socket() 
     assert_eq!(
         got.rows
             .iter()
-            .map(|r| r.record_id.as_str())
+            .map(|r| r.entry_id.as_str())
             .collect::<Vec<_>>(),
         ["rec-2", "rec-1"]
     );
@@ -193,7 +202,7 @@ async fn the_write_side_writes_and_the_read_side_reads_each_on_its_own_socket() 
 #[tokio::test]
 async fn the_conformance_kit_passes_through_the_sockets() {
     let (d, s) = (dir(), tempfile::tempdir().unwrap());
-    let index = Index::open(d.path()).unwrap();
+    let index = Index::open(d.path(), &atoom_index_conformance::declaration()).unwrap();
     let (wsock, rsock) = (s.path().join("index.sock"), s.path().join("index-ro.sock"));
     let stop_w = serve(&wsock, Write(index.clone()).router());
     let stop_r = serve(&rsock, Read(index).router());

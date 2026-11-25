@@ -1,14 +1,17 @@
 //! `index-sqlite`: the thin main of the sqlite driver of the index port.
 //!
 //! ```text
-//! index-sqlite serve --socket PATH --read-socket PATH --state-dir DIR
-//! index-sqlite check --state-dir DIR
+//! index-sqlite serve --socket PATH --read-socket PATH --state-dir DIR --declaration FILE
+//! index-sqlite check --state-dir DIR --declaration FILE
 //! index-sqlite version                          # and --version
 //! ```
 //!
 //! The sockets are guarded (`docs/socket-guard.md`): their mode is 0600 and they admit the callers of this process's uid, unless `serve` is
 //! given the guard flags `--allow-uid UID` (repeatable), `--allow-any-uid`, `--socket-gid GID` and `--socket-mode MODE`; `--read-allow-uid UID` is for the read socket. A caller
 //! outside the set is refused with the reason `caller`. `version` prints the version of the build.
+//!
+//! `--declaration FILE` is the host's declaration of the log kinds that have an index and of the columns beyond the fixed ones, the
+//! JSON form of `atoom.index.v1alpha2.Declaration` (record 0025); a file made under another declaration is refused: rebuild it.
 //!
 //! `serve` opens the index in `--state-dir` (a directory owned by this process and closed to others, mode no wider than 0750; the file
 //! `index.sqlite` is made there if it is not), then serves the write side (`IndexService`) on the UNIX socket `--socket` and the read
@@ -18,8 +21,8 @@
 use std::path::PathBuf;
 
 use anyhow::{Context, bail};
-use atoom_index_sqlite::Index;
 use atoom_index_sqlite::service::{Read, Write};
+use atoom_index_sqlite::{Index, Schema};
 use atoom_socket::cli::{self, GuardArgs};
 use clap::{Arg, Args as _, Command, FromArgMatches as _, value_parser};
 
@@ -31,6 +34,14 @@ fn command() -> Command {
             .required(true)
             .value_parser(value_parser!(PathBuf))
             .help("The directory of the index file")
+    };
+    let declaration = || {
+        Arg::new("declaration")
+            .long("declaration")
+            .value_name("FILE")
+            .required(true)
+            .value_parser(value_parser!(PathBuf))
+            .help("The declaration of the kinds and columns, as JSON (atoom.index.v1alpha2.Declaration)")
     };
     Command::new("index-sqlite")
         .version(atoom_socket::VERSION)
@@ -60,12 +71,14 @@ fn command() -> Command {
                     .value_parser(value_parser!(PathBuf))
                     .help("The UNIX socket of the read side (mode 0600 by default)"),
             )
-            .arg(state()),
+            .arg(state())
+            .arg(declaration()),
         )
         .subcommand(
             Command::new("check")
                 .about("Open the index by the rules of serve and ask the database a question")
-                .arg(state()),
+                .arg(state())
+                .arg(declaration()),
         )
 }
 
@@ -84,6 +97,15 @@ async fn shutdown_signal() {
         _ = term.recv() => {},
         _ = int.recv() => {},
     }
+}
+
+/// The declaration of `--declaration`, read and checked.
+fn schema(m: &clap::ArgMatches) -> anyhow::Result<Schema> {
+    let file = m
+        .get_one::<PathBuf>("declaration")
+        .context("--declaration is required")?;
+    let text = std::fs::read_to_string(file).with_context(|| format!("read {}", file.display()))?;
+    Ok(Schema::parse_json(&text)?)
 }
 
 #[tokio::main]
@@ -108,7 +130,7 @@ async fn main() -> anyhow::Result<()> {
                 .get_one::<PathBuf>("state-dir")
                 .context("--state-dir is required")?;
             // The database is checked before a socket exists: no index, no service.
-            let index = Index::open(state)?;
+            let index = Index::open(state, &schema(m)?)?;
             // One signal stops both servers; a server that ended takes the other with it.
             let (stop, _) = tokio::sync::broadcast::channel::<()>(1);
             let sig = tokio::spawn({
@@ -145,7 +167,10 @@ async fn main() -> anyhow::Result<()> {
             let state = m
                 .get_one::<PathBuf>("state-dir")
                 .context("--state-dir is required")?;
-            match Index::open(state).and_then(|i| i.ping().map_err(|e| anyhow::anyhow!("{e}"))) {
+            match schema(m)
+                .and_then(|s| Index::open(state, &s))
+                .and_then(|i| i.ping().map_err(|e| anyhow::anyhow!("{e}")))
+            {
                 Ok(()) => {
                     println!("index ok");
                     Ok(())

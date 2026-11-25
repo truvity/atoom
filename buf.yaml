@@ -41,3 +41,4 @@ breaking:
   # labels. They are compared with the last release, so each stays listed until 0.9.0 is released; the release's pull request removes them.
   ignore:
     - transport/proto/atoom/transport/v1alpha1/transport.proto
+    - index/proto/atoom/index/v1alpha1/index.proto

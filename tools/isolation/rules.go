@@ -33,6 +33,9 @@ var portExternal = map[string]map[string]bool{
 		// is base64). Both are in connectrpc's own graph, so a port that uses them adds nothing to a consumer's build.
 		"serde":  true,
 		"base64": true,
+		// The JSON form of a declaration a port checks (index: the kinds and columns of a host, record 0025). It is in buffa's own
+		// graph (its json feature), so a port that uses it adds nothing to a consumer's build.
+		"serde_json": true,
 	},
 }
 

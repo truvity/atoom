@@ -1,0 +1,9 @@
+{
+  "kinds": ["events", "certs"],
+  "columns": [
+    {"name": "action", "type": "COLUMN_TYPE_TEXT", "words": true, "filter": true, "required": true},
+    {"name": "status", "type": "COLUMN_TYPE_INT", "filter": true},
+    {"name": "note", "type": "COLUMN_TYPE_TEXT"},
+    {"name": "x_9_", "type": "COLUMN_TYPE_INT"}
+  ]
+}
