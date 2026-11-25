@@ -117,9 +117,8 @@ impl Driver {
             .context("the schema is not there: run serve once")?;
         anyhow::ensure!(
             version == SCHEMA_VERSION,
-            "the schema is version {version}, this driver speaks {SCHEMA_VERSION}: a development or board installation \
-             recreates its data (local: just local-down, then just local-up; boards: SLUIS_PURGE_STATE=1 just \
-             boards-undeploy, then just boards-deploy)"
+            "the schema is version {version}, this driver speaks {SCHEMA_VERSION}: the driver migrates no data, so \
+             the host recreates the data of this store"
         );
         Ok(())
     }

@@ -12,7 +12,7 @@ One set of tables per namespace, `durable` or `temp` (the two ports of a consume
 | `<ns>_meta` | `schema_version` and `log_epoch` |
 | `<ns>_guard` | always empty: a failed condition inserts a null into it, which fails the transaction and tells which statement failed |
 
-The schema is made idempotently (`ensure_schema`, which `serve` runs), so three nodes may run it at once. The version of the schema this build speaks (2) is checked at start; another version is refused with the instruction to recreate the data of a development or board installation. The log's epoch is drawn once, when the log is created, and the statements that take it are conditional, so a second run keeps the epoch it finds.
+The schema is made idempotently (`ensure_schema`, which `serve` runs), so three nodes may run it at once. The version of the schema this build speaks (2) is checked at start; another version is refused with the instruction to recreate the data of the store; the driver migrates nothing, and how a host recreates its data is the host's. The log's epoch is drawn once, when the log is created, and the statements that take it are conditional, so a second run keeps the epoch it finds.
 
 ## Statements
 

@@ -30,6 +30,7 @@ The records were rewritten once, in a clean state, on 2026-11-21, so that each s
 | [0018](0018-a-hosts-rule-on-the-socket-guard.md) | The socket guard runs a host's rule and tells it of refusals; the restart back-off is socket plumbing | 2026-11-22 |
 | [0019](0019-the-policy-bundle-and-its-loader.md) | The signed policy bundle, its loading rules and the loader in Go and Rust | 2026-11-24 |
 | [0020](0020-the-token-block-is-stateless.md) | The token block signs through seal and is stateless; the rotation ring is a step of its own (partly supersedes 0008) | 2026-11-25 |
+| [0021](0021-drivers-know-no-deployment-shapes.md) | Drivers and libraries know no deployment shapes; hosts decide (proposed) | 2026-11-25 |
 
 ## Renumbered in the clean rewrite of 2026-11-21
 

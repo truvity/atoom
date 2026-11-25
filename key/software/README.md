@@ -6,7 +6,7 @@ The software key driver of atoom: the [key port](../README.md) over keys held in
 | --- | --- |
 | Go module | `github.com/truvity/atoom/key/software` (requires the port, the common types, and the kit for its tests; no other driver) |
 | Library | package `software`: `New(Options)` (with `Options.Purposes`, the host's declaration) returns a `Service`; `Service.Handler()` is the Connect handler to mount in-process or on a server; `Run(ctx, opts, host)` serves it on a server the host provides; `Check(dir, purposes)` |
-| Thin main | `cmd/software`: `software serve --socket PATH --state-dir DIR --purposes FILE [--environment E] [--refuse-production]` (a socket of mode 0600 that admits this process's uid), `software check --state-dir DIR --purposes FILE`, `software version` |
+| Thin main | `cmd/software`: `software serve --socket PATH --state-dir DIR --purposes FILE` (a socket of mode 0600 that admits this process's uid), `software check --state-dir DIR --purposes FILE`, `software version` |
 | Guard flags | `--allow-uid UID` (repeatable; without it only this process's uid may call), `--allow-any-uid`, `--socket-gid GID`, `--socket-mode MODE`: the [socket guard](../../docs/socket-guard.md) |
 | Documentation | [docs/](docs/): [the software store](docs/software-store.md), [a key in a file](docs/a-key-in-a-file.md), [research](docs/research) |
 | Where it came from | [provenance](../../docs/provenance.md#key-software) |
@@ -29,9 +29,9 @@ client := keyv1alpha1connect.NewKeyStoreServiceClient(httpClient, baseURL)
 
 The driver holds a key for the purposes in `Options.Purposes` and for no other name: a name, an algorithm and the operations allowed ([the declaration](../docs/key-port.md#the-declaration-of-purposes)). The thin main reads the same list as the JSON file of `--purposes`. A host that wants the purposes of sluis as they were passes `purpose.Reference()`.
 
-## The production floor is an option
+## Where it runs is the host's choice
 
-sluis runs this driver only for development and staging, and refuses production. That is a policy of sluis, so it is an option here: `Options.RefuseProduction` makes `New` and `Run` fail with `ErrProduction` before anything is opened. atoom's own main leaves it off (`--refuse-production` turns it on), so a consumer that keeps a key in a file in production may; the choice and its risk are the consumer's.
+The driver knows nothing of the installation it runs in: it has no environment, no production floor and no warning for one ([record 0021](../../docs/decisions/0021-drivers-know-no-deployment-shapes.md)). Whether keys in files are acceptable somewhere is a policy of the host, and a host that must not use them there does not mount this driver there; the choice and its risk are the host's.
 
 ## What stays in the host
 

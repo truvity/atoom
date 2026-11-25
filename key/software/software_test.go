@@ -53,9 +53,9 @@ type running struct {
 
 // start serves the library on an in-process HTTP server and a new state directory, as a consumer that links the driver does, and
 // stops it at the end of the test.
-func start(t *testing.T, environment string) running {
+func start(t *testing.T) running {
 	t.Helper()
-	return startWith(t, software.Options{Environment: environment})
+	return startWith(t, software.Options{})
 }
 
 func startWith(t *testing.T, opts software.Options) running {
@@ -100,7 +100,7 @@ func wantRefused(t *testing.T, err error, code connect.Code, reason string) {
 }
 
 func TestSignVerifyAndEnsureTwice(t *testing.T) {
-	r := start(t, "development")
+	r := start(t)
 	ctx := context.Background()
 	first := ensure(t, r.client, "token-signing", "ES384")
 	if !first.GetCreated() {
@@ -131,7 +131,7 @@ func TestSignVerifyAndEnsureTwice(t *testing.T) {
 // Ensure says when the key was made, the first call and the second alike: a caller compares it with the time of a purpose
 // revocation, so that a replacement made after it signs (ADR 0041).
 func TestEnsureSaysWhenTheKeyWasMade(t *testing.T) {
-	r := start(t, "development")
+	r := start(t)
 	before := time.Now().Add(-2 * time.Second)
 	first := ensure(t, r.client, "token-signing", "ES384")
 	after := time.Now().Add(2 * time.Second)
@@ -150,7 +150,7 @@ func TestEnsureSaysWhenTheKeyWasMade(t *testing.T) {
 // form that verifies over the SHA-256 digest, and refuses every other digest, algorithm and use of the key. The key does
 // not change when Ensure is asked again.
 func TestTheRS256KeySignsPKCS1v15OverSHA256(t *testing.T) {
-	r := start(t, "development")
+	r := start(t)
 	ctx := context.Background()
 	first := ensure(t, r.client, "token-signing-rs256", "RS256")
 	if !first.GetCreated() {
@@ -229,7 +229,7 @@ func ecdhPoint(t *testing.T) []byte {
 }
 
 func TestSignRefusals(t *testing.T) {
-	r := start(t, "development")
+	r := start(t)
 	ctx := context.Background()
 	ensure(t, r.client, "token-signing", "ES384")
 	ensure(t, r.client, "wrapping", "ECDH-P384")
@@ -253,7 +253,7 @@ func TestSignRefusals(t *testing.T) {
 }
 
 func TestEnsureRefusals(t *testing.T) {
-	r := start(t, "development")
+	r := start(t)
 	ctx := context.Background()
 	e := func(purpose, alg string) error {
 		_, err := r.client.Ensure(ctx, connect.NewRequest(&keyv1alpha1.EnsureRequest{Purpose: purpose, Algorithm: alg}))
@@ -281,7 +281,7 @@ func TestEnsureRefusals(t *testing.T) {
 }
 
 func TestEcdhAgainstReference(t *testing.T) {
-	r := start(t, "development")
+	r := start(t)
 	ctx := context.Background()
 	drv := ensure(t, r.client, "wrapping", "ECDH-P384")
 	pk, err := x509.ParsePKIXPublicKey(drv.GetSpkiDer())
@@ -325,7 +325,7 @@ func TestEcdhAgainstReference(t *testing.T) {
 
 // verifies: REQ-KEYS-004
 func TestCapabilities(t *testing.T) {
-	r := start(t, "development")
+	r := start(t)
 	res, err := r.client.Capabilities(context.Background(), connect.NewRequest(&keyv1alpha1.CapabilitiesRequest{}))
 	if err != nil {
 		t.Fatal(err)
@@ -356,7 +356,7 @@ func TestAHostDeclaredPurposeIsServedWithES256AndES384(t *testing.T) {
 	}
 	state := filepath.Join(shortDir(t), "state")
 	serve := func() keyv1alpha1connect.KeyStoreServiceClient {
-		svc, err := software.New(software.Options{StateDir: state, Environment: "development", Purposes: decls})
+		svc, err := software.New(software.Options{StateDir: state, Purposes: decls})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -410,7 +410,7 @@ func TestAHostDeclaredPurposeIsServedWithES256AndES384(t *testing.T) {
 // What the host declared decides what may be done: a purpose declared without an operation is made and read and never used; an
 // agreement purpose does not sign and a signing purpose does not agree.
 func TestTheOperationsOfADeclarationAreEnforced(t *testing.T) {
-	r := startWith(t, software.Options{Environment: "development", Purposes: []purpose.Declaration{
+	r := startWith(t, software.Options{Purposes: []purpose.Declaration{
 		{Name: "made-only", Algorithm: purpose.ES384},
 		{Name: "signs", Algorithm: purpose.ES384, Operations: []purpose.Operation{purpose.Sign}},
 		{Name: "no-agree", Algorithm: purpose.ECDHP384},
@@ -499,7 +499,7 @@ func TestTheDeclarationIsCheckedBeforeAnythingIsOpened(t *testing.T) {
 
 // The kit of the port passes against the library, in-process. Every case runs but the one that needs a store that attests.
 func TestConformancePassesAgainstItself(t *testing.T) {
-	r := startWith(t, software.Options{Environment: "development", Purposes: conformance.Declaration()})
+	r := startWith(t, software.Options{Purposes: conformance.Declaration()})
 	var out bytes.Buffer
 	if err := conformance.Run(context.Background(), r.client, &out); err != nil {
 		t.Fatalf("%v\n%s", err, out.String())
@@ -542,68 +542,6 @@ func (c *capture) has(value string) bool {
 	return false
 }
 
-func (c *capture) warned() bool {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	for _, r := range c.recs {
-		if r.Level == slog.LevelWarn && strings.Contains(r.Message, "staging") {
-			return true
-		}
-	}
-	return false
-}
-
-func TestStagingStartsWithAWarning(t *testing.T) {
-	h := &capture{}
-	old := slog.Default()
-	slog.SetDefault(slog.New(h))
-	t.Cleanup(func() { slog.SetDefault(old) })
-	r := start(t, "staging")
-	ensure(t, r.client, "token-signing", "ES384") // it serves
-	if !h.warned() {
-		t.Fatal("no warning at the start in staging")
-	}
-}
-
-// The floor is the host's choice: with it on, production serves nothing and opens nothing.
-func TestProductionServesNothingWhenTheFloorIsOn(t *testing.T) {
-	base := shortDir(t)
-	served := false
-	host := software.Host{Serve: func(context.Context, string, http.Handler) error { served = true; return nil }}
-	err := software.Run(context.Background(), software.Options{Environment: "production", StateDir: filepath.Join(base, "state"), RefuseProduction: true, Purposes: purpose.Reference()}, host)
-	if !errors.Is(err, software.ErrProduction) || served {
-		t.Fatalf("production with the floor: err=%v served=%v", err, served)
-	}
-	if _, err := os.Lstat(filepath.Join(base, "state")); err == nil {
-		t.Fatal("the state directory was made")
-	}
-}
-
-// Without the floor (atoom's own main), production runs: a consumer may keep a key in a file.
-func TestProductionRunsWithoutTheFloor(t *testing.T) {
-	r := startWith(t, software.Options{Environment: "production"})
-	if !ensure(t, r.client, "token-signing", "ES384").GetCreated() {
-		t.Fatal("no key was made")
-	}
-}
-
-func TestTheFloorNamesTheEnvironments(t *testing.T) {
-	for _, env := range []string{"", "development", "staging"} {
-		if err := software.Floor(env, true); err != nil {
-			t.Errorf("Floor(%q): %v", env, err)
-		}
-	}
-	if err := software.Floor("production", true); !errors.Is(err, software.ErrProduction) {
-		t.Errorf("Floor(production, true): %v", err)
-	}
-	if err := software.Floor("production", false); err != nil {
-		t.Errorf("Floor(production, false): %v", err)
-	}
-	if err := software.Floor("prod", false); !errors.Is(err, software.ErrEnvironment) {
-		t.Errorf("Floor(prod): %v", err)
-	}
-}
-
 func TestARefusedStateDirectoryIsAProblemsError(t *testing.T) {
 	base := shortDir(t)
 	state := filepath.Join(base, "state")
@@ -615,7 +553,7 @@ func TestARefusedStateDirectoryIsAProblemsError(t *testing.T) {
 	}
 	served := false
 	host := software.Host{Serve: func(context.Context, string, http.Handler) error { served = true; return nil }}
-	err := software.Run(context.Background(), software.Options{Environment: "development", StateDir: state, Purposes: purpose.Reference()}, host)
+	err := software.Run(context.Background(), software.Options{StateDir: state, Purposes: purpose.Reference()}, host)
 	var pe *software.Problems
 	if !errors.As(err, &pe) || !strings.Contains(err.Error(), state) || served {
 		t.Fatalf("0755 state directory: err=%v served=%v", err, served)
@@ -631,7 +569,7 @@ func TestTheCallerIsNamedInTheJournal(t *testing.T) {
 	old := slog.Default()
 	slog.SetDefault(slog.New(h))
 	t.Cleanup(func() { slog.SetDefault(old) })
-	r := startWith(t, software.Options{Environment: "development", Caller: func(context.Context) string { return "a-host-caller" }})
+	r := startWith(t, software.Options{Caller: func(context.Context) string { return "a-host-caller" }})
 	_, err := r.client.Ensure(context.Background(), connect.NewRequest(&keyv1alpha1.EnsureRequest{Purpose: "nope", Algorithm: "ES384"}))
 	wantRefused(t, err, connect.CodeInvalidArgument, "purpose")
 	if !h.has("a-host-caller") {
@@ -641,7 +579,7 @@ func TestTheCallerIsNamedInTheJournal(t *testing.T) {
 
 // A software store takes no part in the PIN release: it is never locked and attests nothing, and says so by reason.
 func TestThePINReleaseCallsAreRefusedByReason(t *testing.T) {
-	r := start(t, "development")
+	r := start(t)
 	ctx := context.Background()
 	_, err := r.client.Attest(ctx, connect.NewRequest(&keyv1alpha1.AttestRequest{Purpose: "pin-release"}))
 	wantRefused(t, err, connect.CodeFailedPrecondition, "no_attestation")
@@ -659,7 +597,7 @@ func TestThePINReleaseCallsAreRefusedByReason(t *testing.T) {
 // PublicKey, and another for another key. The signatures are verified and never compared byte for byte: the driver signs with RFC 6979
 // nonces, which is its own business and not the port's, so no test of any driver may depend on the bytes.
 func TestTheKeyIDIsTheFingerprintOfThePublicKey(t *testing.T) {
-	r := start(t, "development")
+	r := start(t)
 	e := ensure(t, r.client, "token-signing", "ES384")
 	want := fmt.Sprintf("%x", sha256.Sum256(e.GetSpkiDer()))
 	pub, err := r.client.PublicKey(context.Background(), connect.NewRequest(&keyv1alpha1.PublicKeyRequest{Purpose: "token-signing"}))

@@ -127,22 +127,22 @@ yk=("$bin/yubikeypiv")
 other_serial=$((serial % 4294967295 + 1)) # a serial that is not the card's: serial + 1, wrapping to 1
 
 say "1. check, read only"
-"${yk[@]}" check --purposes "$purposes" --reader "$reader" --serial "$serial" --environment development || fail "check of the bench card"
-say "ok   check --environment development"
+"${yk[@]}" check --purposes "$purposes" --reader "$reader" --serial "$serial" --allow-factory-defaults || fail "check of the bench card"
+say "ok   check --allow-factory-defaults"
 
 say "2. negative checks"
 refused "a wrong serial is refused" 1 "another serial" -- \
-    "${yk[@]}" check --purposes "$purposes" --reader "$reader" --serial "$other_serial" --environment development
+    "${yk[@]}" check --purposes "$purposes" --reader "$reader" --serial "$other_serial" --allow-factory-defaults
 refused "a reader that does not exist is refused" 1 "is not there" -- \
-    "${yk[@]}" check --purposes "$purposes" --reader "atoom-bench no such reader 00 00" --serial "$serial" --environment development
-refused "staging without a serial is refused" 2 "serial is required" -- \
-    "${yk[@]}" check --purposes "$purposes" --reader "$reader" --environment staging
+    "${yk[@]}" check --purposes "$purposes" --reader "atoom-bench no such reader 00 00" --serial "$serial" --allow-factory-defaults
+refused "no serial without factory defaults is refused" 2 "serial is required" -- \
+    "${yk[@]}" check --purposes "$purposes" --reader "$reader"
 
 say "3. serve on UNIX sockets in $tmp, unlock with the factory PIN, run the key conformance kit"
 key_sock=$tmp/k.sock
 admin_sock=$tmp/a.sock
 [ "${#key_sock}" -lt 104 ] && [ "${#admin_sock}" -lt 104 ] || fail "the socket paths are too long for a UNIX socket"
-"${yk[@]}" serve --purposes "$purposes" --socket "$key_sock" --admin-socket "$admin_sock" --node bench --environment development \
+"${yk[@]}" serve --purposes "$purposes" --socket "$key_sock" --admin-socket "$admin_sock" --node bench --allow-factory-defaults \
     --reader "$reader" --serial "$serial" --admin-uid "$(id -u)" >"$tmp/driver.log" 2>&1 &
 driver_pid=$!
 for _ in $(seq 1 150); do
@@ -170,9 +170,9 @@ say "ok   the driver stopped"
 say "4. several readers and a busy reader (D12 C)"
 if [ "$count" -gt 1 ]; then
     refused "several readers and none named is refused, no card opened" 1 "more than one reader and none named" "no card was opened" -- \
-        "${yk[@]}" check --purposes "$purposes" --environment development
+        "${yk[@]}" check --purposes "$purposes" --allow-factory-defaults
     refused "a serial alone is refused with several readers" 1 "more than one reader and none named" "no card was opened" -- \
-        "${yk[@]}" check --purposes "$purposes" --serial "$serial" --environment staging
+        "${yk[@]}" check --purposes "$purposes" --serial "$serial"
 else
     say "SKIP: only one reader is present; the several-readers cases need a second reader (a reader with no card is enough)"
 fi
@@ -185,18 +185,18 @@ for _ in $(seq 1 100); do
 done
 grep -Fq 'held:' "$tmp/hold.out" || fail "the holder did not hold the reader in 20 seconds"
 refused "a busy reader gives the named error" 1 "is in use by another process" "$reader" -- \
-    "${yk[@]}" check --purposes "$purposes" --reader "$reader" --serial "$serial" --environment staging
+    "${yk[@]}" check --purposes "$purposes" --reader "$reader" --serial "$serial"
 kill "$holder_pid"
 wait "$holder_pid" || true
 holder_pid=""
 grep -Fq 'released:' "$tmp/hold.out" || fail "the holder did not let the reader go cleanly: $(cat "$tmp/hold.out")"
 say "ok   the holder released the reader"
 
-say "5. check --environment staging: the attestation of the keys"
-out=$("${yk[@]}" check --purposes "$purposes" --reader "$reader" --serial "$serial" --environment staging 2>&1) || fail "check --environment staging: $out"
+say "5. check without factory defaults: the attestation of the keys"
+out=$("${yk[@]}" check --purposes "$purposes" --reader "$reader" --serial "$serial" 2>&1) || fail "check without factory defaults: $out"
 printf '%s\n' "$out"
-grep -Fq 'card checked' <<<"$out" || fail "check --environment staging did not say the card was checked: $out"
+grep -Fq 'card checked' <<<"$out" || fail "check without factory defaults did not say the card was checked: $out"
 if grep -Eq 'purposes=\[\]' <<<"$out"; then fail "the card holds no key after the conformance run: $out"; fi
-say "ok   check --environment staging verified the attestation of the keys"
+say "ok   check without factory defaults verified the attestation of the keys"
 
 ok=1

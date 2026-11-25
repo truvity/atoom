@@ -4,7 +4,7 @@ What the `key/yubikeypiv` driver does with the keys of a card, with its PIN and 
 
 ## Keys on the card
 
-- **Every key is born on the card.** The driver adopts a key only after it verifies its attestation, and it refuses an imported key ([card-slot-map.md](card-slot-map.md)). The driver makes keys in development only.
+- **Every key is born on the card.** The driver adopts a key only after it verifies its attestation, and it refuses an imported key ([card-slot-map.md](card-slot-map.md)). The driver makes keys only when its host allows factory defaults.
 - **The card holds asymmetric keys only.** A host that needs data keys makes them in software and wraps them to the key-agreement key of a card (slot `9d`), so each card opens them with its own key.
 - **A card has no backup.** A host whose card is lost or stolen makes new keys on a new card and revokes the old ones. The driver has no way to copy a key.
 - **Signing speed is set by the card.** A YubiKey 5 Nano signs P-384 in about 147 ms with yubikit (measured 2026-10-31, firmware 5.8.0). Through the driver it takes 161 to 166 ms (the median of 50 signatures on each of three cards, measured 2026-11-04). The driver adds piv-go's command handling, one connect call and a check of each signature with the public key. That is about 6 signatures a second for a card. An RSA-2048 signature takes about 0.17 s ([pcsc-and-cards-on-boards.md](pcsc-and-cards-on-boards.md#the-rsa-key-and-the-queue)).
@@ -81,9 +81,9 @@ The driver has the card to itself, from start to stop. Measured 2026-10-31 on a 
 - the driver listens on UNIX sockets and checks the peer uid of every connection ([socket guard](../../../docs/socket-guard.md)), so that only the callers a host names reach the keys;
 - everything that signs on the host signs through the driver.
 
-## The environment floor
+## Factory defaults are the host's switch
 
-The driver runs in `development`, `staging` and `production` (`Floor`). Only `development` makes a key, with the factory management key. Outside it the serial of the card is required (`ErrSerial`): without it any genuine YubiKey with matching attestations would be adopted. The software driver differs: a host may turn on a floor that refuses it in production, and the card driver has no such floor.
+The driver knows nothing of the installation it runs in ([record 0021](../../../docs/decisions/0021-drivers-know-no-deployment-shapes.md)). One switch of the host, `Options.AllowFactoryDefaults` (`--allow-factory-defaults`, off by default), says the card is in factory state on a bench or a developer's machine: only then does the driver make a key, with the management key (the factory default unless the host gives one), and only then may the serial be left out, to take the only card. Without it the serial of the card is required (`ErrSerial`): without the serial any genuine YubiKey with matching attestations would be adopted.
 
 ## What the host provides
 

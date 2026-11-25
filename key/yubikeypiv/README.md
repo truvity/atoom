@@ -15,7 +15,7 @@ The YubiKey PIV key driver of atoom: the [key port](../README.md) over the keys 
 ## What it does
 
 - **Starts locked.** The driver holds the card exclusively and has no PIN until an administrator delivers it on the local admin socket (`UnlockService`); a key that needs the PIN is refused with the reason `locked` until then. A wrong PIN is tried once and never retried, and the driver does not send a PIN to a card with one attempt left.
-- **Keeps one slot for each key.** The host declares its purposes (a name, an algorithm, the operations, and a slot where the reference map has none), and the slot plan gives each a PIV slot, a policy for PIN and touch, and an algorithm. A key is made on the card in development with the factory management key and in no other environment (a staging or production card is provisioned by its owner before the driver sees it). It verifies the attestation of every key it adopts against Yubico's roots, refuses a firmware below 5.7 (the EUCLEAK fix) and a card whose serial is not the one it was told, and refuses an imported key.
+- **Keeps one slot for each key.** The host declares its purposes (a name, an algorithm, the operations, and a slot where the reference map has none), and the slot plan gives each a PIV slot, a policy for PIN and touch, and an algorithm. A key is made on the card, with the factory management key, only when the host allows factory defaults (`Options.AllowFactoryDefaults`, `--allow-factory-defaults`); any other card is provisioned by its owner before the driver sees it. It verifies the attestation of every key it adopts against Yubico's roots, refuses a firmware below 5.7 (the EUCLEAK fix) and a card whose serial is not the one it was told, and refuses an imported key.
 - **Resets the card's session** at start and exit, so that a card left PIN-verified by an earlier process is never trusted.
 - **Takes part in the PIN release** between cards (`BeginPinRelease`, `SealPin`, `FinishPinRelease`) when its host gives it a way to check the other node's key (below).
 
@@ -29,7 +29,7 @@ The driver connects to **one reader only** and never chooses one for the operato
 - **A reader that another process holds is an error, never a skip**: `reader "NAME" is in use by another process (e.g. a scdaemon or other pcscd client); stop it and retry` (it wraps `card.ErrSharing`; PC/SC says `SCARD_E_SHARING_VIOLATION`). The driver does not go on to the next reader.
 - **Listing the reader names connects to no card** (`SCardListReaders`) and is allowed: `yubikeypiv.Readers()` gives them, and the refusal for several readers prints them.
 - A name-to-serial table cannot be had without connecting to the card; the operator names the reader. The sources that were looked at and why none is safe are in [research/pcsc-reader-to-card-serial-2026-11-19.md](docs/research/pcsc-reader-to-card-serial-2026-11-19.md). To find which reader holds which card the first time, leave only that card in a reader.
-- Outside development `--serial` is still required (the driver is bound to one card); `--reader` is required as well whenever the machine has more than one reader, which a machine with one card does not.
+- Without `--allow-factory-defaults` `--serial` is still required (the driver is bound to one card); `--reader` is required as well whenever the machine has more than one reader, which a machine with one card does not.
 
 ## The host seam
 

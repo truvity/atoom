@@ -40,7 +40,7 @@ wait_for() { # description socket pid
 cmp -s "$tmp/key-purposes.json" "$tmp/key-purposes-main.json" \
     || { echo "::error::conformance-token: token key-purposes does not print the kit's key declaration" >&2; exit 1; }
 
-"$tmp/key-software" serve --socket "$tmp/k" --state-dir "$tmp/state" --purposes "$tmp/key-purposes.json" --environment development &
+"$tmp/key-software" serve --socket "$tmp/k" --state-dir "$tmp/state" --purposes "$tmp/key-purposes.json" &
 key_pid=$!
 pids+=("$key_pid")
 wait_for "key/software" "$tmp/k" "$key_pid"

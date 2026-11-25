@@ -33,7 +33,7 @@ wait_for() { # description socket pid
 }
 
 "$tmp/seal-conformance" --print-declaration >"$tmp/purposes.json"
-"$tmp/key-software" serve --socket "$tmp/k" --state-dir "$tmp/state" --purposes "$tmp/purposes.json" --environment development &
+"$tmp/key-software" serve --socket "$tmp/k" --state-dir "$tmp/state" --purposes "$tmp/purposes.json" &
 key_pid=$!
 pids+=("$key_pid")
 wait_for "key/software" "$tmp/k" "$key_pid"

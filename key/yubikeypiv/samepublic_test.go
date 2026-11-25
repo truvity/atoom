@@ -67,7 +67,7 @@ func TestSamePublicAcceptsOnlyTheAttestedKey(t *testing.T) {
 // anything (a locked driver would answer locked to the same request, so the answer shows which check came first).
 func TestAnRSASignatureOfACallerThatHasGoneIsRefusedBeforeTheCard(t *testing.T) {
 	c := cardtest.New()
-	s, err := New(Options{Purposes: refPurposes(), Environment: Development, Open: c.Opener()})
+	s, err := New(Options{Purposes: refPurposes(), AllowFactoryDefaults: true, Open: c.Opener()})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -118,7 +118,7 @@ func TestTheBusyRefusalsOfAFloodWriteOneJournalLine(t *testing.T) {
 // caller's check, which reads RSAQueueDefault.
 func TestTheDriversRSAPlacesDefaultToTheExportedConstant(t *testing.T) {
 	c := cardtest.New()
-	s, err := New(Options{Purposes: refPurposes(), Environment: Development, Open: c.Opener()})
+	s, err := New(Options{Purposes: refPurposes(), AllowFactoryDefaults: true, Open: c.Opener()})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -126,7 +126,7 @@ func TestTheDriversRSAPlacesDefaultToTheExportedConstant(t *testing.T) {
 	if cap(s.rsaTickets) != RSAQueueDefault {
 		t.Fatalf("the driver admits %d RSA signatures by default, RSAQueueDefault is %d", cap(s.rsaTickets), RSAQueueDefault)
 	}
-	s2, err := New(Options{Purposes: refPurposes(), Environment: Development, Open: cardtest.New().Opener(), RSAQueue: 2})
+	s2, err := New(Options{Purposes: refPurposes(), AllowFactoryDefaults: true, Open: cardtest.New().Opener(), RSAQueue: 2})
 	if err != nil {
 		t.Fatal(err)
 	}

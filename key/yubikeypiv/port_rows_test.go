@@ -12,7 +12,6 @@ import (
 	"google.golang.org/protobuf/reflect/protoreflect"
 
 	keyv1alpha1 "github.com/truvity/atoom/key/gen/atoom/key/v1alpha1"
-	"github.com/truvity/atoom/key/yubikeypiv"
 	"github.com/truvity/atoom/key/yubikeypiv/internal/card"
 	"github.com/truvity/atoom/key/yubikeypiv/internal/card/cardtest"
 )
@@ -81,7 +80,7 @@ func TestNoAnswerOfTheCardDriverHoldsAPrivateKey(t *testing.T) {
 	}
 
 	// The scan of what the driver answers.
-	r := start(t, yubikeypiv.Development)
+	r := start(t, factoryDefaults)
 	r.unlock(t, "123456")
 	var answers [][]byte
 	for _, p := range []struct{ purpose, alg string }{
@@ -137,7 +136,7 @@ func TestTheDriverRefusesAnAlgorithmItDoesNotDeclare(t *testing.T) {
 		t.Run(fw.String(), func(t *testing.T) {
 			c := cardtest.New()
 			c.Firmware = fw
-			r := startWith(t, c, yubikeypiv.Development, self())
+			r := startWith(t, c, factoryDefaults, self())
 			r.unlock(t, "123456")
 			caps, err := r.key.Capabilities(context.Background(), connect.NewRequest(&keyv1alpha1.CapabilitiesRequest{}))
 			if err != nil {
@@ -174,7 +173,7 @@ func TestTheDriverRefusesAnAlgorithmItDoesNotDeclare(t *testing.T) {
 // body would give (the handler reads at most 4096 bytes). Nothing reaches the card. The administrator's own call, with
 // the same sizes, is not refused as a caller, so the check is the uid and nothing else.
 func TestAPINFromAnotherUIDIsRefusedBeforeItIsRead(t *testing.T) {
-	r := startWith(t, cardtest.New(), yubikeypiv.Development, func(uint32) bool { return false })
+	r := startWith(t, cardtest.New(), factoryDefaults, func(uint32) bool { return false })
 	for _, size := range []int{6, 4096, 1 << 20} {
 		_, err := r.admin.Unlock(context.Background(), connect.NewRequest(&keyv1alpha1.UnlockRequest{Pin: bytes.Repeat([]byte("1"), size)}))
 		if connect.CodeOf(err) != connect.CodePermissionDenied {
@@ -184,7 +183,7 @@ func TestAPINFromAnotherUIDIsRefusedBeforeItIsRead(t *testing.T) {
 	if r.card.Attempts() != 0 {
 		t.Fatal("a PIN of a non-administrator reached the card")
 	}
-	adm := start(t, yubikeypiv.Development)
+	adm := start(t, factoryDefaults)
 	_, err := adm.admin.Unlock(context.Background(), connect.NewRequest(&keyv1alpha1.UnlockRequest{Pin: bytes.Repeat([]byte("1"), 1<<20)}))
 	if connect.CodeOf(err) == connect.CodePermissionDenied {
 		t.Fatalf("the administrator was refused as a caller: %v", err)

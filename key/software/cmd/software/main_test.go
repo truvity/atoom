@@ -32,24 +32,19 @@ func TestVersion(t *testing.T) {
 	}
 }
 
-func TestAnUnknownEnvironmentIsAUsageError(t *testing.T) {
+// The driver knows no installation (record 0021): the flags that named one are gone, and a host that still passes them gets a usage
+// error rather than a driver that silently ignores what it asked for.
+func TestTheInstallationFlagsAreGone(t *testing.T) {
 	base := t.TempDir()
-	var errb bytes.Buffer
-	code := run([]string{"serve", "--socket", filepath.Join(base, "s"), "--state-dir", filepath.Join(base, "st"), "--purposes", purposesFile(t), "--environment", "prod"}, &bytes.Buffer{}, &errb)
-	if code != 2 {
-		t.Fatalf("exit %d (%s)", code, errb.String())
-	}
-}
-
-func TestProductionIsRefusedOnlyWhenAsked(t *testing.T) {
-	base := t.TempDir()
-	var errb bytes.Buffer
-	code := run([]string{"serve", "--socket", filepath.Join(base, "s"), "--state-dir", filepath.Join(base, "st"), "--purposes", purposesFile(t), "--environment", "production", "--refuse-production"}, &bytes.Buffer{}, &errb)
-	if code != 1 || !strings.Contains(errb.String(), "refused in production") {
-		t.Fatalf("exit %d (%s)", code, errb.String())
-	}
-	if _, err := os.Lstat(filepath.Join(base, "st")); err == nil {
-		t.Fatal("the state directory was made")
+	for _, gone := range [][]string{{"--environment", "development"}, {"--refuse-production"}} {
+		var errb bytes.Buffer
+		args := append([]string{"serve", "--socket", filepath.Join(base, "s"), "--state-dir", filepath.Join(base, "st"), "--purposes", purposesFile(t)}, gone...)
+		if code := run(args, &bytes.Buffer{}, &errb); code != 2 {
+			t.Fatalf("%v: exit %d (%s)", gone, code, errb.String())
+		}
+		if _, err := os.Lstat(filepath.Join(base, "st")); err == nil {
+			t.Fatalf("%v: the state directory was made", gone)
+		}
 	}
 }
 
@@ -81,7 +76,7 @@ func TestTheKitPassesAgainstTheSocket(t *testing.T) {
 	socket := filepath.Join(dir, "s")
 	done := make(chan int, 1)
 	go func() {
-		done <- run([]string{"serve", "--socket", socket, "--state-dir", filepath.Join(dir, "st"), "--purposes", purposesFile(t), "--environment", "development"}, &bytes.Buffer{}, &bytes.Buffer{})
+		done <- run([]string{"serve", "--socket", socket, "--state-dir", filepath.Join(dir, "st"), "--purposes", purposesFile(t)}, &bytes.Buffer{}, &bytes.Buffer{})
 	}()
 	deadline := time.Now().Add(5 * time.Second)
 	for {
