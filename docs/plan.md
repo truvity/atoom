@@ -15,7 +15,9 @@ Built since: B1 (the in-process helper of `socket`, [in process](../socket/docs/
 
 Built since: B4, the [`seal` block](../blocks/seal/docs/seal-block.md), with its kit and the Go in-process helper `socket.InProcess`, in 0.4.0; B5, the Cedar loader [`policy`](../policy/README.md) in Go and Rust with the signed bundle, the loading rules and the decision test set ([record 0019](decisions/0019-the-policy-bundle-and-its-loader.md)), in the next release.
 
-Not built: the blocks `state`, `token` and `export`, Lambda extension zips, the drivers marked planned, and the changes of steps B12 and B14 below.
+Built since: B8a, the [`token` block](../blocks/token/docs/token-block.md) ([record 0020](decisions/0020-the-token-block-is-stateless.md), proposed): compact JWS signed by purpose through `seal`, the key set with a kid rule per purpose and the host's keys, verification, Rust stubs and a thin main, its kit, and `key/route`, a key-port client that routes by purpose; in the next release.
+
+Not built: the blocks `state` and `export`, the rotation ring of step B8b, Lambda extension zips, the drivers marked planned, and the changes of steps B12 and B14 below.
 
 ## After 0.2.0: the blocks phase
 
@@ -31,7 +33,8 @@ In order. Each step is one pull request or a few. The sluis and session pull req
 | B5 | The Cedar loading rules, the signed bundle format, loaders in Go and Rust, and the decision test set ([0011](decisions/0011-cedar-as-a-library.md); built: [policy](../policy/README.md), [record 0019](decisions/0019-the-policy-bundle-and-its-loader.md): sluis's signed-config format with the kind `PolicyBundle`, cedar-go and cedar-policy, the known gaps of cedar-go listed in the test set) | session, sluis and audit load policies the same way |
 | B6 | `store/postgres` | sluis on Kubernetes |
 | B7 | `state` block in Rust, moved from sluis store@ (sluis 0005), with the registry of kinds that any product extends ([0008](decisions/0008-blocks.md)) | sluis store@ becomes its host; audit declares its kinds |
-| B8 | `token` block in Go | session's signed client assertions and identity header; sluis signer |
+| B8a | `token` block in Go, stateless ([0020](decisions/0020-the-token-block-is-stateless.md); built: [blocks/token](../blocks/token/README.md)): signs through `seal` (owner's answer Q1 B, with `key/route` for a driver per purpose), a key set of the current keys and the keys the host hands in with their `x5c` (Q2 C), a kid rule per purpose, `key_id` or the RFC 7638 thumbprint (Q3 A), Rust stubs and a thin main for sluis's Rust `signer` (Q4 A) | session's signed client assertions and identity header; sluis signer |
+| B8b | The rotation ring of the `token` block: which keys a key set holds besides the current ones, a key published before it signs and kept after it stops, revocations, keys per node; designed against sluis's `SigningRing` ([0020](decisions/0020-the-token-block-is-stateless.md)) | before session's first site that rotates a signing key (session record 0019); sluis's ring moves out of `signer` |
 | B9 | Lambda extension zips per driver, the column of [packages](packages.md), and the drivers `source/appconfig`, `source/ssm`, `blob/s3`, `transport/sqs` ([0010](decisions/0010-distribution-per-driver-and-lambda.md)) | sluis, session and audit on Lambda |
 | B10 | `store/valkey` | Valkey-backed sessions |
 | B11 | `export` block | sluis exporter@ |

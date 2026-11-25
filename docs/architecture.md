@@ -18,7 +18,7 @@ flowchart TB
     C1["sluis, session, audit, ritueel"]
   end
   subgraph atoom["truvity/atoom (one version)"]
-    B["Blocks: seal (built); state, token, export (planned)"]
+    B["Blocks: seal, token (built); state, export (planned)"]
     E["policy: the Cedar loader (a library around an engine)"]
     P["Ports: contract + stubs + docs + kit"]
     D["Drivers: library + thin main"]
@@ -56,6 +56,7 @@ atoom/
   policy/                the Cedar loader: Go module and Rust crate side by side, and the decision test set in testdata/ (record 0019)
   blocks/                blocks, one directory each
     seal/                the seal block: proto, stubs, the Go implementation, README, docs/, the kit (package conformance)
+    token/               the token block: the same, with Rust stubs (a crate beside the Go module) and a thin main, cmd/token
   deploy/release/        the Dockerfile templates of the images
   tools/                 release scripts, isolation check, conformance scripts
   docs/                  this page, the call context, the socket guard, packages, release, provenance, plan, decisions, archive
@@ -70,11 +71,12 @@ atoom/
   | Part | Where (for a block `<name>`) |
   | --- | --- |
   | the contract | `blocks/<name>/proto/atoom/<name>/v1alpha1/*.proto`, a module of `buf.yaml`, package `atoom.<name>.v1alpha1` |
-  | the stubs | `blocks/<name>/gen/`, made by `blocks/<name>/buf.gen.yaml` (`just gen`); Rust stubs only when a Rust consumer calls the block |
+  | the stubs | `blocks/<name>/gen/`, made by `blocks/<name>/buf.gen.yaml` (`just gen`); Rust stubs only when a Rust consumer calls the block: the crate `atoom-blocks-<name>` in the same directory, made by its `build.rs` (`blocks/token`) |
   | the implementation | the library at the root of the directory: Go module `github.com/truvity/atoom/blocks/<name>`, or the crate `atoom-blocks-<name>`; `New(ctx, Options)` takes the clients of its dependencies, and `Handler()` (Go) or `router()` (Rust) is the ConnectRPC handler |
   | the host's hooks | in its options: the declaration of its purposes or kinds, the rules (a hook asked before every call), and where its facts go |
   | the kit | the package or module `conformance` of the block, speaking the contract only, with its own declaration and rules, and the command `<name>-conformance` under `conformance/cmd/` |
   | the kit's run | `tools/scripts/conformance-<name>.sh`, a recipe `conformance-<name>` of `just conformance`: the kit over the memory drivers of the block's dependencies, each behind the socket of its thin main |
+  | the thin main | `blocks/<name>/cmd/<name>`, when a host in another language reaches the block over a socket: a row of the release table, released as a driver is ([packages](packages.md)); `blocks/token` has one |
   | the page | `blocks/<name>/docs/<name>-block.md`: what it is built from, the calls, the contract, the hooks, the refusals, the kit and how to host it |
 
 ## Dependency rules

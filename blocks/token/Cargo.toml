@@ -1,0 +1,26 @@
+[package]
+name = "atoom-blocks-token"
+description = "The token block's contract (atoom.token.v1alpha1.TokenService): compact JWS of a host's claims signed by purpose through the seal block, the key set and verification, as buffa messages and a generated client and service. The implementation is the Go module in the same directory."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+[lib]
+# The generated code carries examples from the proto comments; they are not tests of ours.
+doctest = false
+
+[dependencies]
+buffa = { version = "=0.9.2", features = ["json"] }
+buffa-types = { version = "=0.9.2", features = ["json"] }
+connectrpc = { version = "=0.9.1", default-features = false, features = ["json", "gzip", "client", "server"] }
+# The generated messages derive serde for the JSON form (the buffa `json` feature).
+serde = { version = "1", features = ["derive"] }
+
+[build-dependencies]
+connectrpc-build = "=0.9.0"

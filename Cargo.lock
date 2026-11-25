@@ -195,6 +195,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "atoom-blocks-token"
+version = "0.5.0"
+dependencies = [
+ "buffa",
+ "buffa-types",
+ "connectrpc",
+ "connectrpc-build",
+ "serde",
+]
+
+[[package]]
 name = "atoom-common"
 version = "0.5.0"
 dependencies = [

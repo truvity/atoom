@@ -4,7 +4,7 @@ The key port of atoom: a service that holds private keys and signs, agrees and a
 
 | | |
 | --- | --- |
-| Go module | `github.com/truvity/atoom/key` (the contract, its stubs and three small packages: `purpose`, the host's declaration of purposes, `signature`, the DER to raw conversion of a JWS, and `keyid`, the `key_id` of a key; it requires the ConnectRPC and Protobuf runtimes and nothing else) |
+| Go module | `github.com/truvity/atoom/key` (the contract, its stubs and three small packages: `purpose`, the host's declaration of purposes, `signature`, the DER to raw conversion of a JWS, `keyid`, the `key_id` of a key, and `route`, a client that sends each call to the driver of its purpose; it requires the ConnectRPC and Protobuf runtimes and nothing else) |
 | Contract | [proto/atoom/key/v1alpha1/keystore.proto](proto/atoom/key/v1alpha1/keystore.proto), [unlock.proto](proto/atoom/key/v1alpha1/unlock.proto) |
 | Purposes | any purpose a host declares: a name, an algorithm (`ES256`, `ES384`, `RS256`, `ECDH-P384`) and the operations allowed, as `purpose.Declaration` or the JSON file of a thin main's `--purposes`; the contract holds no list ([the declaration](docs/key-port.md#the-declaration-of-purposes)) |
 | Signatures | `Sign` takes a digest only (a wrong length is refused) and returns the plain signature, ASN.1 DER for ECDSA, with the `key_id` of the key that signed ([record 0016](../docs/decisions/0016-the-key-port-signs-digests.md)); `signature.DERToRaw` makes the raw `r||s` of a JWS ([DER and raw](docs/algorithms.md#der-and-raw-signatures)) |
