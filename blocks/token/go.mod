@@ -6,11 +6,11 @@ toolchain go1.27.4
 
 require (
 	connectrpc.com/connect v1.21.1
-	github.com/truvity/atoom/blocks/seal v0.8.0
-	github.com/truvity/atoom/common v0.8.0
-	github.com/truvity/atoom/key v0.8.0
-	github.com/truvity/atoom/socket v0.8.0
-	github.com/truvity/atoom/store v0.8.0
+	github.com/truvity/atoom/blocks/seal v0.9.0
+	github.com/truvity/atoom/common v0.9.0
+	github.com/truvity/atoom/key v0.9.0
+	github.com/truvity/atoom/socket v0.9.0
+	github.com/truvity/atoom/store v0.9.0
 	google.golang.org/protobuf v1.36.12
 )
 

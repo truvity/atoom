@@ -5,14 +5,31 @@ libraries changed. `just release-prepare X.Y.Z` writes the section.
 
 <!-- release-prepare: new sections go below this line -->
 
-## Unreleased
+## 0.9.0 - 2026-11-26
+
+One version for the whole repository: every library is tagged 0.9.0, changed or not.
+
+Libraries that changed since v0.8.0:
+- `blob`
+- `blob/conformance`
+- `blob/fs`
+- `blob/fsdir`
+- `blob/fsreadonly`
+- `blob/s3`
+- `index`
+- `index/conformance`
+- `index/sqlite`
+- `transport`
+- `transport/conformance`
+- `transport/nats`
+- `transport/spool`
+- `transport/sqs`
 
 **Breaking** in the contracts of the blob, transport and index ports (step B12, [record 0025](docs/decisions/0025-generic-blob-transport-and-index.md)): the three ports lose audit's vocabulary, and the host declares what was fixed.
 
 - **`transport`, `transport/spool`, `transport/nats`, `transport/sqs`, `transport/conformance`: a message is an id and an opaque payload.** `AuditMessage{uid, record, usage}` is `Message{id, payload}`. The field numbers 1 and 2 are kept and 3 (`usage`) is reserved, so the bytes a spool's segments, a JetStream stream or an SQS queue hold read the same: no drain at the upgrade. The refusals of an empty id or payload name `message.id` and `message.payload`. The deduplication of `nats` (`Nats-Msg-Id`) and of `sqs` (SHA-256) is of the id. `Delivery.emitter` keeps its name. The kit's case is `a_redelivered_or_repeated_message_is_one_message`. A consumer that carried a usage part packs it into its payload (truvity/audit decides the form). In Go: `transportv1alpha1.Message`, `GetId`, `GetPayload`; in Rust: `Message { id, payload }`.
 - **`blob/fsdir`, `blob/fs`, `blob/fsreadonly`, `blob/conformance`: the host declares its pointers.** `POINTERS` (the fixed `checkpoint` and `writer-state`) is gone. `Fs::with_pointers(names)` declares the last segments that `put` may overwrite (at most `MAX_POINTERS`, each one path segment); with none declared every object is written once and every `put` is `permission_denied` / `rule`. `blob-fs serve` and `check` take `--pointer NAME` (repeatable). The wire does not change. The kit declares its own pointer names, `kit-head` and `kit-state` (`POINTERS` in `atoom-blob-conformance`, `blob-conformance --print-pointers`), and the driver under its write suite is started with them. **A host passes the names it used** (sluis and audit: `--pointer checkpoint --pointer writer-state`).
 - **`index`, `index/sqlite`, `index/conformance`: the index is generic, in a new package `atoom.index.v1alpha2`; `v1alpha1` is removed** (D96 A), so an old indexer or reader fails at the route rather than being misread. A log is a scope, a declared kind and an id (`LogRef.scope` was `project`). A row has the fixed columns any log has (`tenant`, `hash`, `seq`, `time_ms`, `entry_id`, `entry`) and `columns`, a map of declared columns to a text or int `Value`; `recorded_ms`, the boundary, the action, the class, the status, the actor, the trace and the product are no longer fields. A search keeps its grant (partitions and tenants), `entry_id`, the time range and `q`, and its exact filters are `matches` over declared filter columns. **The host declares** the kinds that have an index and each column (name, `COLUMN_TYPE_TEXT` or `COLUMN_TYPE_INT`, `words`, `filter`, `required`) when it starts the driver (D97 A, D98 A): `atoom.index.v1alpha2.Declaration`, as JSON to `index-sqlite serve --declaration FILE` (and `check`), checked by `atoom_index::declaration::Schema` in Rust and `index.ParseDeclaration` / `CheckDeclaration` in Go over the same vectors. New refusals: `rows.columns`, `rows.entry`, `matches.column`, `matches.value`. **The sqlite file is rebuilt**: one of 0.8.0 (schema version 1) or of another declaration is refused at the start. The kit declares its own kinds and columns (`DECLARATION`, `index-conformance --print-declaration`) and has a twelfth case, `the_declared_columns_are_held`. `buf.yaml` lists the removed `v1alpha1` file under `breaking.ignore` until 0.9.0 is released.
-
 - **`just check-vocabulary`** (in `just check` and CI): the proto files of the blob, transport and index ports name no product, so that the principle of record 0021 stays tested; no source names `AuditMessage`.
 
 ### Added
