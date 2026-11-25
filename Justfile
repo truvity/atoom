@@ -140,10 +140,10 @@ gen-check: gen
 # The conformance kits (a directory <port>/conformance each; a Go module or, for the Rust ports, a crate with the binary
 # <port>-conformance). Each kit is built once and run against every driver built on this architecture, through the driver's socket:
 # `conformance-store` for the item port, `conformance-source` for the source port, `conformance-blob`, `conformance-transport`,
-# `conformance-index` and `conformance-destination` for the audit ports, `conformance-seal` for the seal block. The Go kits (key) run through the loop below: a driver directory
+# `conformance-index` and `conformance-destination` for the audit ports, `conformance-seal` for the seal block, `conformance-token` for the token block. The Go kits (key) run through the loop below: a driver directory
 # that has a conformance.sh gets the path of the kit binary, serves its own thin main and runs the kit against it. A driver that needs hardware
 # (key/yubikeypiv, a real card) runs the same kit in-process over a fake card in its own tests instead.
-conformance: conformance-store conformance-source conformance-blob conformance-transport conformance-index conformance-destination conformance-seal
+conformance: conformance-store conformance-source conformance-blob conformance-transport conformance-index conformance-destination conformance-seal conformance-token
     #!/usr/bin/env bash
     set -euo pipefail
     kits=$(git ls-files -- '*/conformance/go.mod' | sed 's#/go.mod$##')
@@ -193,6 +193,12 @@ conformance-blob: rust-toolchain
 [private]
 conformance-seal: rust-toolchain
     tools/scripts/conformance-seal.sh
+
+# The kit of the token block over a seal block on the memory drivers of its ports, key/software and store/memory, each through the socket
+# of its thin main: once with both blocks in the process of the kit, once behind the thin main of the token block (tools/scripts/conformance-token.sh).
+[private]
+conformance-token: rust-toolchain
+    tools/scripts/conformance-token.sh
 
 # The transport-port kit against the spool driver, through the sockets of its thin main (tools/scripts/conformance-transport.sh).
 [private]

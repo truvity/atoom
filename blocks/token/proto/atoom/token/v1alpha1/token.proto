@@ -1,0 +1,108 @@
+// The contract of the token block (docs/token-block.md, record 0020): compact JWS (RFC 7515) of a host's claims, signed by purpose through
+// the seal block, the published key set (RFC 7517) with a kid rule per purpose, and the verification of a token against it. The block is
+// stateless: its key set holds the current key of each purpose and the public keys its host hands in (a previous key, a next key). The
+// rotation ring that decides those keys is step B8b, and the claims rules stay each host's.
+syntax = "proto3";
+
+package atoom.token.v1alpha1;
+
+// TokenService is served by the token block. It holds no key: every signature is the seal block's, and so the key port's.
+service TokenService {
+  rpc Capabilities(CapabilitiesRequest) returns (CapabilitiesResponse);  // the purposes the host declared
+  rpc Sign(SignRequest) returns (SignResponse);                          // a compact JWS of the host's claims, by the key of a purpose
+  rpc KeySet(KeySetRequest) returns (KeySetResponse);                    // the JWK Set: the current keys of purposes and the host's keys
+  rpc Verify(VerifyRequest) returns (VerifyResponse);                    // the signature of a compact JWS, against the same keys
+}
+
+// Kid is how the kid of a purpose's key is made.
+enum Kid {
+  KID_UNSPECIFIED = 0;  // not set
+  KID_KEY_ID = 1;       // the key port's key_id, as it is (record 0016; session's rule)
+  KID_THUMBPRINT = 2;   // the RFC 7638 thumbprint of the key, base64url without padding (sluis's rule)
+}
+
+// CapabilitiesRequest asks what the block serves.
+message CapabilitiesRequest {}
+
+// CapabilitiesResponse says what the block serves.
+message CapabilitiesResponse {
+  repeated PurposeInfo purposes = 1;  // the purposes the host declared: the only names the other calls accept
+}
+
+// PurposeInfo is one purpose of the host's declaration, as the block serves it.
+message PurposeInfo {
+  string name = 1;            // the purpose: a USE_SIGN purpose of the seal block
+  string algorithm = 2;       // its algorithm, from the seal block: "ES384", "ES256" or "RS256"
+  repeated string types = 3;  // the values of the JWS typ header that the purpose signs
+  Kid kid = 4;                // how its kid is made
+}
+
+// SignRequest asks for a compact JWS of the claims.
+message SignRequest {
+  string purpose = 1;       // a purpose of the host's declaration
+  string typ = 2;           // the typ header: one of the purpose's types
+  bytes claims_json = 3;    // the payload: one strict JSON object, signed as these bytes; at most 64 KiB
+  bytes authorization = 4;  // opaque to the block: handed to the host's rules, and to the seal block's
+}
+
+// SignResponse carries the token.
+message SignResponse {
+  string token = 1;      // the compact JWS: base64url(header) "." base64url(claims_json) "." base64url(signature)
+  string kid = 2;        // the kid of its header
+  string algorithm = 3;  // the alg of its header
+  string key_id = 4;     // the key port's key_id of the key that signed
+}
+
+// HostKey is a public key that the host hands in: a key of its own lifecycle (the previous key of a purpose after a rotation, a next key
+// published before it signs). The block publishes it and verifies with it; it never signs with it.
+message HostKey {
+  string kid = 1;            // its kid: 1 to 512 printable ASCII characters, unique in the key set
+  string algorithm = 2;      // "ES384" (P-384), "ES256" (P-256) or "RS256" (RSA, 2048 bits or more)
+  bytes spki_der = 3;        // the public key, SubjectPublicKeyInfo in DER
+  repeated bytes x5c = 4;    // its certificate chain, DER, leaf first; none for no chain
+}
+
+// CertificateChain is the certificate chain of a purpose's current key, which the host holds (sluis: the certificate of its CA).
+message CertificateChain {
+  repeated bytes x5c = 1;  // DER, leaf first
+}
+
+// KeySetRequest asks for the key set.
+message KeySetRequest {
+  repeated string purposes = 1;                   // the purposes whose current key is published, in this order; none: every purpose of the declaration
+  repeated HostKey keys = 2;                      // the host's keys, published after the current keys, in this order
+  map<string, CertificateChain> chains = 3;       // the x5c of a purpose's current key, by purpose; a purpose not named here has none
+}
+
+// KeySetResponse carries the key set.
+message KeySetResponse {
+  bytes jwks_json = 1;           // the JWK Set (RFC 7517, section 5) as JSON: kty, the key's members, kid, alg, use "sig", and x5c when given
+  repeated PublishedKey keys = 2; // the same keys, in the same order
+}
+
+// PublishedKey is one key of the set.
+message PublishedKey {
+  string kid = 1;        // its kid
+  string algorithm = 2;  // its algorithm
+  bytes spki_der = 3;    // the public key, SubjectPublicKeyInfo in DER
+  string purpose = 4;    // the purpose whose current key it is; empty for a host's key
+  string key_id = 5;     // the key port's key_id of a current key; empty for a host's key
+}
+
+// VerifyRequest asks whether a token is signed by a key of the set.
+message VerifyRequest {
+  string token = 1;              // a compact JWS, at most 96 KiB
+  repeated string purposes = 2;  // the purposes whose current key may have signed it; none: every purpose of the declaration
+  repeated HostKey keys = 3;     // the host's keys that may have signed it as well
+  repeated string types = 4;     // the typ values the caller accepts; none: any type of the purpose that signed (a host's key: any)
+}
+
+// VerifyResponse names the key that signed and gives the claims. The block checks the signature and the header, never the claims: exp,
+// iss, aud and the rest are the host's.
+message VerifyResponse {
+  string kid = 1;           // the kid of the key that signed
+  string algorithm = 2;     // its algorithm
+  string typ = 3;           // the typ header
+  string purpose = 4;       // the purpose whose current key signed; empty for a host's key
+  bytes claims_json = 5;    // the payload as it was signed
+}

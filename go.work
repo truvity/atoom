@@ -7,6 +7,7 @@ toolchain go1.27.4
 use (
 	./blob
 	./blocks/seal
+	./blocks/token
 	./common
 	./destination
 	./index
@@ -30,6 +31,8 @@ use (
 replace github.com/truvity/atoom/blob v0.5.0 => ./blob
 
 replace github.com/truvity/atoom/blocks/seal v0.5.0 => ./blocks/seal
+
+replace github.com/truvity/atoom/blocks/token v0.5.0 => ./blocks/token
 
 replace github.com/truvity/atoom/common v0.5.0 => ./common
 

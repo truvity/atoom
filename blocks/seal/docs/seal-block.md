@@ -122,7 +122,7 @@ When sluis key@ becomes the host of the block, its existing `DataKeyWrap` items 
 
 ## Signing
 
-`Sign` asks the rules first (sluis checks what it signs: a TBSCertificate, an SSH certificate body, a JWS signing input), hashes the content for the algorithm (SHA-384 for `ES384`, SHA-256 for `ES256` and `RS256`) and has the key port sign the digest ([record 0016](../../../docs/decisions/0016-the-key-port-signs-digests.md)). The answer carries the DER signature, the raw `r||s` of a JWS for ECDSA (the same octets as the DER field for RS256), the `key_id` of the key port and the algorithm. Envelopes of a signature (a JWS, a certificate) are the host's, or the `token` block's (step B8 of the [plan](../../../docs/plan.md)).
+`Sign` asks the rules first (sluis checks what it signs: a TBSCertificate, an SSH certificate body, a JWS signing input), hashes the content for the algorithm (SHA-384 for `ES384`, SHA-256 for `ES256` and `RS256`) and has the key port sign the digest ([record 0016](../../../docs/decisions/0016-the-key-port-signs-digests.md)). The answer carries the DER signature, the raw `r||s` of a JWS for ECDSA (the same octets as the DER field for RS256), the `key_id` of the key port and the algorithm. Envelopes of a signature (a JWS, a certificate) are the host's, or the [`token` block's](../../token/docs/token-block.md), which signs its JWS through this call. A host whose signing purposes sit on different key drivers gives the block one client of them all, [`key/route`](../../../key/route/route.go).
 
 ## Refusals
 

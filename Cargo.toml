@@ -8,6 +8,7 @@ members = [
   "blob/fs",
   "blob/fsdir",
   "blob/fsreadonly",
+  "blocks/token",
   "common",
   "destination",
   "destination/conformance",

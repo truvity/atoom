@@ -4,6 +4,7 @@ version: v2
 modules:
   - path: blob/proto
   - path: blocks/seal/proto
+  - path: blocks/token/proto
   - path: common/proto
   - path: destination/proto
   - path: index/proto

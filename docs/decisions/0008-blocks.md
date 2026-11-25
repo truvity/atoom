@@ -1,6 +1,6 @@
 # 0008. Blocks: contracts built from other ports
 
-Status: accepted, 2026-11-20
+Status: accepted, 2026-11-20; partly superseded by [0020](0020-the-token-block-is-stateless.md) (proposed)
 
 ## Context
 

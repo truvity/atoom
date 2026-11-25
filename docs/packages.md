@@ -19,6 +19,9 @@ The table of what is released is [`tools/release/drivers.tsv`](../tools/release/
 | `transport/spool` | `atoom-transport-spool` | `atoom-driver-transport-spool` | `atoom-transport-spool` | linux | no: Lambda has no lasting local disk |
 | `index/sqlite` | `atoom-index-sqlite` | `atoom-driver-index-sqlite` | `atoom-index-sqlite` | linux | no: Lambda has no lasting local disk |
 | `destination/dir` | `atoom-destination-dir` | `atoom-driver-destination-dir` | `atoom-destination-dir` | linux | no: Lambda has no lasting local disk |
+| `blocks/token` (the thin main of a block) | `atoom-blocks-token` | `atoom-driver-blocks-token` | `atoom-blocks-token` | linux, darwin | no: a Go function links the block instead |
+
+The thin main of the `token` block ([record 0020](decisions/0020-the-token-block-is-stateless.md)) is released as a driver is: it is how a host in another language reaches the block (sluis's Rust `signer`). Its id is its directory, `blocks-token`, by the rule below, and its package keeps the prefix `atoom-driver-` so that every executable of atoom installs the same way.
 
 The **Lambda** column is the form of [record 0010](decisions/0010-distribution-per-driver-and-lambda.md): an extension zip for amd64 and arm64, merged with the other extensions a function needs into one layer. **No Lambda zip is built yet**: the column says which drivers will have one (step B9 of the [plan](plan.md)) and why the others cannot. A Go driver used by a Go function needs no extension: the function links the library and mounts its handler in-process.
 
@@ -53,7 +56,7 @@ The packages come out as `atoom-driver-<id>_<version>-1_<amd64|arm64>.deb` and `
 
 ## What runs where
 
-- **Architectures.** linux/amd64 and linux/arm64 for every driver, packages and images alike (the images are multi-architecture manifests). **darwin/amd64 and darwin/arm64 tarballs** only for the Go drivers that are pure Go: `key/software`, `key/awskms`, `store/dynamodb`. The Rust drivers are Linux only or have no consumer on macOS; the card driver is not built for macOS (its PC/SC build there is unverified, [record 0004](decisions/0004-multi-architecture.md)).
+- **Architectures.** linux/amd64 and linux/arm64 for every driver, packages and images alike (the images are multi-architecture manifests). **darwin/amd64 and darwin/arm64 tarballs** only for the Go drivers that are pure Go: `key/software`, `key/awskms`, `store/dynamodb`, and the thin main of `blocks/token`. The Rust drivers are Linux only or have no consumer on macOS; the card driver is not built for macOS (its PC/SC build there is unverified, [record 0004](decisions/0004-multi-architecture.md)).
 - **Static executables.** Go with CGO off, Rust through cargo-zigbuild to static musl: no C library is needed at run time, and one executable runs on any Linux. The one exception is the card driver.
 - **The card driver, `key/yubikeypiv`,** links libpcsclite with cgo. It is never cross-compiled: it is built on a runner of each architecture, in an Ubuntu 22.04 userland whose glibc (2.35) is older than every system the packages support, and the build fails if the executable asks for a symbol newer than `GLIBC_2.34`, the glibc of Amazon Linux 2023. Its package depends on **`pcscd`** and **`libpcsclite1`** (`pcsc-lite` and `pcsc-lite-libs` on Rocky and Amazon Linux) and recommends the CCID driver (`libccid`, `pcsc-lite-ccid`). No other package has a dependency.
 
