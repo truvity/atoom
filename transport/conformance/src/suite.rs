@@ -7,12 +7,12 @@ use anyhow::{Context, bail, ensure};
 use atoom_common::refusal;
 use atoom_socket::{Client, Transport};
 use atoom_transport::atoom::transport::v1alpha1::{
-    AckRequest, AuditMessage, Delivery, EmitRequest, ReceiveRequest, ReceiveResponseView,
-    TransportServiceClient,
+    AckRequest, AuditMessage, Delivery, EmitRequest, ReceiveRequest, ReceiveResponse,
+    ReceiveResponseView, TransportServiceClient,
 };
-use connectrpc::ConnectError;
 use connectrpc::client::{ClientTransport, ServerStream};
 use connectrpc::error::ErrorCode;
+use connectrpc::{ConnectError, StreamMessage};
 
 use crate::{Case, run_case};
 
@@ -46,9 +46,27 @@ struct Suite {
     run: String,
 }
 
-/// An open stream of deliveries, with what was read from it.
+type Inner =
+    ServerStream<<Transport as ClientTransport>::ResponseBody, ReceiveResponseView<'static>>;
+
+/// An open stream of deliveries.
 struct Stream {
-    inner: ServerStream<<Transport as ClientTransport>::ResponseBody, ReceiveResponseView<'static>>,
+    inner: Inner,
+    /// When the stream was opened (again).
+    opened: Instant,
+    /// Until when a refusal with `already_exists` that comes before any message is the driver still letting go of an earlier
+    /// consumer, so that the stream is opened again (see [`Suite::open`]); `None` once a message came.
+    release: Option<Instant>,
+}
+
+/// What [`Suite::next`] read.
+enum Next {
+    /// A batch of deliveries.
+    Batch(StreamMessage<ReceiveResponse>),
+    /// The stream ended without an error.
+    End,
+    /// Nothing came in the time given.
+    Quiet,
 }
 
 impl Suite {
@@ -110,14 +128,24 @@ impl Suite {
         Ok(())
     }
 
-    /// Opens a `Receive` stream. A driver that has not yet let go of an earlier consumer refuses with `already_exists`; that is tried
-    /// again for [`RELEASE`], so that a case may drop its stream and open another.
+    /// Opens a `Receive` stream. A driver lets go of a consumer that went away only once it has seen that stream end, which it learns
+    /// after the consumer dropped it; until then it refuses the next `Receive` with `already_exists`. The refusal is the answer to the
+    /// call or, as a Connect stream answers before the handler's first message, the first message of the stream. Both are tried again
+    /// for [`RELEASE`] (the second by [`Self::next`]), so that a case may drop its stream and open another at once.
     async fn open(&self) -> anyhow::Result<Stream> {
         let until = Instant::now() + RELEASE;
+        Ok(Stream {
+            inner: self.receive_until(until).await?,
+            opened: Instant::now(),
+            release: Some(until),
+        })
+    }
+
+    /// A `Receive` call, made again while it is refused with `already_exists` and `until` has not passed.
+    async fn receive_until(&self, until: Instant) -> anyhow::Result<Inner> {
         loop {
-            let opened = self.consumer().receive(ReceiveRequest::default()).await;
-            let err = match opened {
-                Ok(inner) => return Ok(Stream { inner }),
+            let err = match self.consumer().receive(ReceiveRequest::default()).await {
+                Ok(inner) => return Ok(inner),
                 Err(e) => e,
             };
             if err.code != ErrorCode::AlreadyExists || Instant::now() > until {
@@ -127,26 +155,46 @@ impl Suite {
         }
     }
 
+    /// The next message of `st`, waited for until `deadline(st)`. A refusal with `already_exists` before any message came is the
+    /// driver still letting go of an earlier consumer: the stream delivered nothing, so it is opened again (while its [`RELEASE`] has
+    /// not passed) and the deadline is asked again of the new stream.
+    async fn next(
+        &self,
+        st: &mut Stream,
+        deadline: impl Fn(&Stream) -> Instant,
+    ) -> anyhow::Result<Next> {
+        loop {
+            let Some(left) = deadline(st).checked_duration_since(Instant::now()) else {
+                return Ok(Next::Quiet);
+            };
+            let err = match tokio::time::timeout(left, st.inner.message()).await {
+                Err(_) => return Ok(Next::Quiet),
+                Ok(Ok(m)) => {
+                    st.release = None;
+                    return Ok(m.map_or(Next::End, Next::Batch));
+                }
+                Ok(Err(e)) => e,
+            };
+            match st.release {
+                Some(until) if err.code == ErrorCode::AlreadyExists && Instant::now() <= until => {
+                    tokio::time::sleep(Duration::from_millis(100)).await;
+                    st.inner = self.receive_until(until).await?;
+                    st.opened = Instant::now();
+                }
+                _ => return Err(anyhow::Error::new(err).context("the stream failed")),
+            }
+        }
+    }
+
     /// The deliveries of this run's messages, until `want` of them have come. Messages of other emitters are skipped.
     async fn take(&self, st: &mut Stream, want: usize) -> anyhow::Result<Vec<Delivery>> {
         let until = Instant::now() + ANSWERS;
         let mut got: Vec<Delivery> = Vec::new();
         while got.len() < want {
-            let left = until
-                .checked_duration_since(Instant::now())
-                .context(format!(
-                    "only {} of {want} deliveries came in time",
-                    got.len()
-                ))?;
-            let next = tokio::time::timeout(left, st.inner.message())
-                .await
-                .context(format!(
-                    "only {} of {want} deliveries came in time",
-                    got.len()
-                ))?
-                .context("the stream failed")?;
-            let Some(batch) = next else {
-                bail!("the stream ended after {} of {want} deliveries", got.len());
+            let batch = match self.next(st, |_| until).await? {
+                Next::Batch(b) => b,
+                Next::End => bail!("the stream ended after {} of {want} deliveries", got.len()),
+                Next::Quiet => bail!("only {} of {want} deliveries came in time", got.len()),
             };
             for d in batch.to_owned_message().deliveries {
                 if d.message.uid.starts_with(&self.run) {
@@ -157,18 +205,12 @@ impl Suite {
         Ok(got)
     }
 
-    /// Ensures that no delivery of this run's messages comes on `st` for [`SILENT`].
+    /// Ensures that no delivery of this run's messages comes on `st` for [`SILENT`] from when the stream was opened (again).
     async fn silent(&self, st: &mut Stream) -> anyhow::Result<()> {
-        let until = Instant::now() + SILENT;
         loop {
-            let Some(left) = until.checked_duration_since(Instant::now()) else {
-                return Ok(());
-            };
-            match tokio::time::timeout(left, st.inner.message()).await {
-                Err(_) => return Ok(()),
-                Ok(Err(e)) => bail!("the stream failed: {e}"),
-                Ok(Ok(None)) => return Ok(()),
-                Ok(Ok(Some(batch))) => {
+            match self.next(st, |s| s.opened + SILENT).await? {
+                Next::Quiet | Next::End => return Ok(()),
+                Next::Batch(batch) => {
                     for d in batch.to_owned_message().deliveries {
                         ensure!(
                             !d.message.uid.starts_with(&self.run),
@@ -213,7 +255,10 @@ impl Suite {
     }
 
     async fn one_consumer(&self) -> anyhow::Result<()> {
-        let first = self.open().await?;
+        // The first stream is served (a message comes on it) before the second is asked for, so that the refusal is for this one.
+        let mut first = self.open().await?;
+        self.emit(self.message(5), true).await.context("Emit")?;
+        let held = self.take(&mut first, 1).await?;
         let second = self.consumer().receive(ReceiveRequest::default()).await;
         let refused = match second {
             Err(e) => e,
@@ -232,7 +277,7 @@ impl Suite {
             refused.code
         );
         drop(first);
-        Ok(())
+        self.ack(held.iter().map(|d| d.delivery_id).collect()).await
     }
 
     async fn at_least_once(&self) -> anyhow::Result<()> {
