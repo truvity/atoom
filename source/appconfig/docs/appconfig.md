@@ -31,7 +31,7 @@ After a refusal the name's session and what it brought are dropped: the next rea
 
 ## Why AppConfig first, and SSM after
 
-session reads its site file and its signed policy bundle through the source port on Lambda (its step 5); SSM Parameter Store and AppConfig were both planned ([record 0010](../../../docs/decisions/0010-distribution-per-driver-and-lambda.md)). AppConfig is built first, because:
+session reads its site file and its signed policy bundle through the source port on Lambda (its step 5); SSM Parameter Store and AppConfig were both planned ([record 0010](../../../docs/decisions/0010-distribution-per-driver-and-lambda.md)). AppConfig is built first (the owner's decision D71 A, 2026-11-25, which these reasons had pointed to), because:
 
 - **Size.** A signed document is a JWS of up to 3 MiB ([record 0019](../../../docs/decisions/0019-the-policy-bundle-and-its-loader.md)), and base64 makes a payload a third larger. An SSM parameter holds 4 KB (standard) or 8 KB (advanced): a site file of a dozen routes with its pinned key, or a bundle with a schema, does not fit. AppConfig's own store holds 2 MB.
 - **Refresh.** The port already names AppConfig as its `POLL` driver (`source.proto`, [the source port](../../docs/source-port.md#drivers)): AppConfig says how long to wait, and a function sees a new deployment within one interval, with no new version of the function. SSM has no change notification that reaches a running process; a reader would poll `GetParameter` on its own clock.
