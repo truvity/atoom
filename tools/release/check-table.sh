@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 # Holds tools/release/drivers.tsv to the tree (`just release-check-table`, part of `just check`): every row names a real thin main with a
-# README, the id is the directory with its slashes turned into dashes, and every thin main of the tree is either a row or one of the
-# exceptions below, so that a new driver cannot be left out of the release by forgetting the table.
+# README; the id of a driver is its directory with its slashes turned into dashes, and the id of a block (blocks/<name>) is block-<name>,
+# so that a block's names are atoom-block-<name> (docs/packages.md); and every thin main of the tree is either a row or one of the
+# exceptions below, so that a new driver or block cannot be left out of the release by forgetting the table. ATOOM_RELEASE_TABLE checks
+# another table against the tree, for the tests (tools/release/test-candidate.sh).
 #
 #   tools/release/check-table.sh
 #
@@ -20,7 +22,15 @@ for id in $(ATOOM_DRIVERS='' driver_ids); do
     read_driver "$id"
     case " $seen " in *" $id "*) bad "$id: twice in the table" ;; esac
     seen="$seen $id"
-    [ "$id" = "${dir//\//-}" ] || bad "$id: the id is not the directory ($dir) with its slashes turned into dashes"
+    want=$(id_for "$dir")
+    if [ -z "$want" ]; then
+        bad "$id: a block is a directory blocks/<name>, not $dir"
+    elif [ "$id" != "$want" ]; then
+        case "$dir" in
+            blocks/*) bad "$id: the id of the block $dir is $want (block-<name>)" ;;
+            *) bad "$id: the id is not the directory ($dir) with its slashes turned into dashes" ;;
+        esac
+    fi
     [ -f "$dir/README.md" ] || bad "$id: $dir/README.md does not exist (the package and the tarball carry it)"
     case "$lang" in
         go)
@@ -61,4 +71,8 @@ while IFS= read -r c; do
 done < <(git ls-files -- '*/Cargo.toml' | sort)
 
 [ "$fail" -eq 0 ] || exit 1
-echo "check-table: $(wc -w <<<"$seen") drivers, every thin main of the tree is accounted for"
+blocks=0
+for i in $seen; do [ "$(kind_of "$i")" != block ] || blocks=$((blocks + 1)); done
+noun=blocks
+[ "$blocks" -ne 1 ] || noun=block
+echo "check-table: $(($(wc -w <<<"$seen") - blocks)) drivers and $blocks $noun, every thin main of the tree is accounted for"

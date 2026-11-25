@@ -28,7 +28,7 @@ A tag is never moved. A wrong set is repaired with the next patch version.
 
 ## What the release holds
 
-The notes (the changelog section), and for every driver the tarballs (`atoom-<port>-<driver>_X.Y.Z_<os>_<arch>.tar.gz`, with its SBOM and `.sha256`), the packages (`atoom-driver-<port>-<driver>_X.Y.Z-1_<arch>.deb` and `atoom-driver-<port>-<driver>-X.Y.Z-1.<x86_64|aarch64>.rpm`, with `.sha256`), `SHA256SUMS`, `metadata.json`, `release-images.txt` (the digest of every image), the SBOM of every image and `SHA256SUMS.images`. Only the version of a release that has a candidate has them; [packages](packages.md) says what is in each and how it is named.
+The notes (the changelog section), and for every driver the tarballs (`atoom-<port>-<driver>_X.Y.Z_<os>_<arch>.tar.gz`, with its SBOM and `.sha256`), the packages (`atoom-driver-<port>-<driver>_X.Y.Z-1_<arch>.deb` and `atoom-driver-<port>-<driver>-X.Y.Z-1.<x86_64|aarch64>.rpm`, with `.sha256`), and the same for every block under `atoom-block-<name>` (tarballs, `.deb` and `.rpm`), `SHA256SUMS`, `metadata.json`, `release-images.txt` (the digest of every image), the SBOM of every image and `SHA256SUMS.images`. Only the version of a release that has a candidate has them; [packages](packages.md) says what is in each and how it is named.
 
 ## The rehearsals
 

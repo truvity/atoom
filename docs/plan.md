@@ -15,7 +15,7 @@ Built since: B1 (the in-process helper of `socket`, [in process](../socket/docs/
 
 Built since: B4, the [`seal` block](../blocks/seal/docs/seal-block.md), with its kit and the Go in-process helper `socket.InProcess`, in 0.4.0; B5, the Cedar loader [`policy`](../policy/README.md) in Go and Rust with the signed bundle, the loading rules and the decision test set ([record 0019](decisions/0019-the-policy-bundle-and-its-loader.md)), in the next release.
 
-Built since: B8a, the [`token` block](../blocks/token/docs/token-block.md) ([record 0020](decisions/0020-the-token-block-is-stateless.md), proposed): compact JWS signed by purpose through `seal`, the key set with a kid rule per purpose and the host's keys, verification, Rust stubs and a thin main, its kit, and `key/route`, a key-port client that routes by purpose; in the next release.
+Built since: B8a, the [`token` block](../blocks/token/docs/token-block.md) ([record 0020](decisions/0020-the-token-block-is-stateless.md)): compact JWS signed by purpose through `seal`, the key set with a kid rule per purpose and the host's keys, verification, Rust stubs and a thin main released as `atoom-block-token`, its kit, and `key/route`, a key-port client that routes by purpose; in the next release.
 
 Not built: the blocks `state` and `export`, the rotation ring of step B8b, Lambda extension zips, the drivers marked planned, and the changes of steps B12 and B14 below.
 

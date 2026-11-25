@@ -1,9 +1,10 @@
-# The drivers that atoom releases: one row for each, and the one place that says which executables are built, archived, packaged and
+# The drivers and blocks that atoom releases as executables: one row for each, and the one place that says which executables are built, archived, packaged and
 # put in an image (docs/packages.md). Columns, separated by a tab:
-#   id          <port>-<driver>: the name of the tarball (atoom-<id>_<version>_<os>_<arch>.tar.gz), of the executable in the package and the
-#               image (/usr/bin/atoom-<id>), of the image (ghcr.io/truvity/atoom-<id>); the package is atoom-driver-<id>
+#   id          <port>-<driver> for a driver, block-<name> for the thin main of a block (blocks/<name>): the name of the tarball
+#               (atoom-<id>_<version>_<os>_<arch>.tar.gz), of the executable in the package and the image (/usr/bin/atoom-<id>), of the image
+#               (ghcr.io/truvity/atoom-<id>); the package is atoom-driver-<id> for a driver and atoom-<id> (atoom-block-<name>) for a block
 #   lang        go or rust
-#   dir         the directory of the driver in the repository
+#   dir         the directory of the driver or the block in the repository
 #   target      go: the main package, below dir (the Go module); rust: <cargo package>:<bin name>
 #   build       portable: Go with CGO off, Rust through cargo-zigbuild to static musl, cross-compiled for both architectures;
 #               native:<go build tag>: Go with cgo, built on a host of each architecture in an Ubuntu 22.04 userland (tools/release/native-build.sh)
@@ -26,4 +27,4 @@ blob-fsreadonly	rust	blob/fsreadonly	atoom-blob-fsreadonly:blob-fsreadonly	porta
 transport-spool	rust	transport/spool	atoom-transport-spool:transport-spool	portable	linux	-	-	-	-	The spool driver of the transport port: a durable local queue served on a UNIX socket
 index-sqlite	rust	index/sqlite	atoom-index-sqlite:index-sqlite	portable	linux	-	-	-	-	The sqlite driver of the index port: one SQLite file served on a UNIX socket
 destination-dir	rust	destination/dir	atoom-destination-dir:destination-dir	portable	linux	-	-	-	-	The dir driver of the destination port: a local directory served on a UNIX socket
-blocks-token	go	blocks/token	./cmd/token	portable	linux,darwin	-	-	-	-	The token block: compact JWS signed by purpose through the seal block, its key set and verification, served on a UNIX socket
+block-token	go	blocks/token	./cmd/token	portable	linux,darwin	-	-	-	-	The token block: compact JWS signed by purpose through the seal block, its key set and verification, served on a UNIX socket

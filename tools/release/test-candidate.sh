@@ -74,6 +74,38 @@ if out=$(pub env FAKE_DROP=b 2>&1); then no "publish: a draft that lacks an asse
 if out=$(PATH="$bin:$PATH" GITHUB_REPOSITORY=o/r FAKE_LOG="$tmp/gh.log" FAKE_STATE="$tmp/gh.state" "$here/publish.sh" v0.2.0 "$tmp/notes.md" "$tmp/assets/a" "$tmp/dup/a" 2>&1); then no "publish: two assets of one name passed"; else ok "publish: two assets of one name are refused"; fi
 if out=$(PATH="$bin:$PATH" GITHUB_REPOSITORY=o/r FAKE_LOG="$tmp/gh.log" FAKE_STATE="$tmp/gh.state" "$here/publish.sh" 0.2.0 "$tmp/notes.md" "$tmp/assets/a" 2>&1); then no "publish: a tag without v passed"; else ok "publish: a tag that is not vX.Y.Z is refused"; fi
 
+# the two kinds of row, drivers and blocks: their names (docs/packages.md) and the check of the table against the tree
+(
+    # shellcheck source=tools/release/drivers.sh
+    . "$here/drivers.sh"
+    expect "a driver's kind" "driver" "$(kind_of key-software)"
+    expect "a block's kind" "block" "$(kind_of block-token)"
+    expect "a driver's package" "atoom-driver-key-software" "$(package_name key-software)"
+    expect "a block's package" "atoom-block-token" "$(package_name block-token)"
+    expect "a block's executable and image" "atoom-block-token atoom-block-token" "$(binary_name block-token) $(image_name block-token)"
+    expect "a block's tarball" "atoom-block-token_0.2.0_linux_amd64.tar.gz" "$(tarball_name block-token 0.2.0 linux amd64)"
+    expect "the id of a driver's directory" "store-rqlite" "$(id_for store/rqlite)"
+    expect "the id of a block's directory" "block-token" "$(id_for blocks/token)"
+    expect "a directory below a block is no row" "" "$(id_for blocks/token/cmd)"
+    expect "the kinds of the table" "$(driver_ids | wc -l)" "$(( $(ids_of_kind driver | wc -l) + $(ids_of_kind block | wc -l) ))"
+    if [ "$(ids_of_kind block | wc -l)" -ge 1 ]; then ok "the table has a block"; else no "the table has no block"; fi
+    [ "$fails" -eq 0 ]
+) || fails=$((fails + 1))
+table=$here/drivers.tsv
+grep -q $'^block-token\t' "$table" || no "the fixtures below expect the row block-token"
+check_table() { ATOOM_RELEASE_TABLE=$1 "$here/check-table.sh" >"$tmp/check-table.out" 2>&1; }
+if check_table "$table"; then ok "check-table: the table of the tree passes"; else no "check-table: the table of the tree fails"; cat "$tmp/check-table.out" >&2; fi
+if grep -q 'drivers and [1-9][0-9]* block' "$tmp/check-table.out"; then ok "check-table counts the blocks apart"; else no "check-table does not count the blocks"; fi
+sed $'s/^block-token\t/blocks-token\t/' "$table" >"$tmp/t-dashes.tsv"
+if check_table "$tmp/t-dashes.tsv"; then no "check-table: a block named by its dashed directory passed"; else ok "check-table: a block must be block-<name>"; fi
+if grep -q 'the id of the block blocks/token is block-token' "$tmp/check-table.out"; then ok "check-table names the id a block must have"; else no "check-table: no reason for the block's id"; fi
+sed $'s/^key-software\t/block-software\t/' "$table" >"$tmp/t-driver-as-block.tsv"
+if check_table "$tmp/t-driver-as-block.tsv"; then no "check-table: a driver named as a block passed"; else ok "check-table: a driver cannot take the name of a block"; fi
+grep -v $'^block-token\t' "$table" >"$tmp/t-no-block.tsv"
+if check_table "$tmp/t-no-block.tsv"; then no "check-table: a block's thin main left out of the table passed"; else ok "check-table: a block's thin main must be a row"; fi
+sed $'s#^block-token\tgo\tblocks/token\t#block-cmd\tgo\tblocks/token/cmd\t#' "$table" >"$tmp/t-deep.tsv"
+if check_table "$tmp/t-deep.tsv"; then no "check-table: a block row below blocks/<name> passed"; else ok "check-table: a block row is a directory blocks/<name>"; fi
+
 # the evidence gate, on a directory of made-up files
 files=$tmp/files
 mkdir "$files"

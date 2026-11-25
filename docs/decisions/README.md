@@ -29,7 +29,7 @@ The records were rewritten once, in a clean state, on 2026-11-21, so that each s
 | [0017](0017-the-memory-store-is-lossy.md) | The memory store declares `lossy` (partly supersedes 0012) | 2026-11-22 |
 | [0018](0018-a-hosts-rule-on-the-socket-guard.md) | The socket guard runs a host's rule and tells it of refusals; the restart back-off is socket plumbing | 2026-11-22 |
 | [0019](0019-the-policy-bundle-and-its-loader.md) | The signed policy bundle, its loading rules and the loader in Go and Rust | 2026-11-24 |
-| [0020](0020-the-token-block-is-stateless.md) | The token block signs through seal and is stateless; the rotation ring is a step of its own (proposed; partly supersedes 0008) | 2026-11-25 |
+| [0020](0020-the-token-block-is-stateless.md) | The token block signs through seal and is stateless; the rotation ring is a step of its own (partly supersedes 0008) | 2026-11-25 |
 
 ## Renumbered in the clean rewrite of 2026-11-21
 
@@ -43,4 +43,4 @@ No record was renumbered, merged, split or dropped: 0001 to 0013 keep their numb
 
 ## Archive
 
-[archive/](archive/) is empty: no record is superseded as a whole yet. 0012 is partly superseded by 0017, and 0008 by 0020 (proposed); both stay in place with a note in their status.
+[archive/](archive/) is empty: no record is superseded as a whole yet. 0012 is partly superseded by 0017, and 0008 by 0020; both stay in place with a note in their status.

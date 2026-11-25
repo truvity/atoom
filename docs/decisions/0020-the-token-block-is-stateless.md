@@ -1,6 +1,6 @@
 # 0020. The token block signs through seal and is stateless; the rotation ring is a step of its own
 
-Status: proposed, 2026-11-25 (step B8a of the [plan](../plan.md); the owner's answers Q1 B, Q2 C, Q3 A and Q4 A). Partly supersedes [0008](0008-blocks.md): the row of `token` in its table of the first blocks, "JWT signing under a signing policy, JWKS, rotation", now reads "JWS signing by purpose, the key set, verification", and rotation is step B8b.
+Status: accepted, 2026-11-25 (owner decision on the pull request of step B8a; the owner's answers Q1 B, Q2 C, Q3 A and Q4 A, and D32 B on the release names). Partly supersedes [0008](0008-blocks.md): the row of `token` in its table of the first blocks, "JWT signing under a signing policy, JWKS, rotation", now reads "JWS signing by purpose, the key set, verification", and rotation is step B8b.
 
 ## Context
 
@@ -46,7 +46,7 @@ What both need is the same envelope and the same key set: a compact JWS over a p
   - The crate `atoom-blocks-token` carries the generated client and service.
   - The thin main `cmd/token` serves the block on a UNIX socket, over a seal block on another socket or over one it hosts on two drivers. Its access rule is the socket guard.
   - sluis's `signer` checks its claims in Rust before it calls.
-  - The main is released like a driver (row `blocks-token` of the release table).
+  - The main is released in the forms of a driver under names of its own, `atoom-block-token` (row `block-token` of the release table): executable, `.deb` and `.rpm` package, tarball and image (D32 B). Blocks are a kind of release row beside drivers, and the release checks know both.
 - **What stays with each host:** the HTTP endpoint of the key set and its cache, the reuse of signed tokens, the claims rules, and, until B8b, the keys of a rotation.
 
 ## Consequences
@@ -55,7 +55,7 @@ What both need is the same envelope and the same key set: a compact JWS over a p
 - sluis's `signer` can drop its key set and signature code and call the thin main. It keeps its ring and hands the ring's published keys in until B8b. Its kids do not change (`thumbprint`), and its `x5c` chains pass through.
 - A key that changes behind the block, a restart-only rotation, costs one extra signature at the next `Sign`. The key set shows the new key at its next call.
 - Each consumer adopts the block in a pull request of its own, after the release that carries it.
-- The thin main is a released executable that is not a driver. The release table and the packages list it next to the drivers.
+- The thin main is a released executable that is not a driver: the release table, its checks, the packages, the smoke and the candidate's evidence know a second kind, the block, named `atoom-block-<name>`.
 
 ## Roads not taken
 
@@ -67,4 +67,5 @@ What both need is the same envelope and the same key set: a compact JWS over a p
 | The block re-encodes the claims | Two encoders would make two byte strings of one set of claims; signing the bytes the host checked keeps one |
 | The general and flattened JWS serialisations | Neither consumer issues them as tokens; sluis's signed config is read by `policy` |
 | A key set cache with a time to live in the block | A stale key set after a restart-only rotation; the key is read again for every `KeySet`, and the host's HTTP cache is the cache of the published document |
+| The thin main as a driver package, `atoom-driver-blocks-token` | It is not a driver; a name of its own tells a consumer what it installs |
 | sluis's `signer` rewritten in Go | sluis's choice (its record 0012 leaves it open); the thin main serves either way (Q4 B) |

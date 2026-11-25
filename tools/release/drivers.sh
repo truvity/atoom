@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# The table of the drivers (tools/release/drivers.tsv) for the scripts that build, package and check the release. Sourced, never run.
+# The table of the drivers and blocks (tools/release/drivers.tsv) for the scripts that build, package and check the release. Sourced, never
+# run. A row is of one of two kinds: a driver (the thin main of a driver of a port) or a block (the thin main of a block, record 0020).
 # shellcheck shell=bash
 
 # The root of the repository, whatever the directory the script runs in.
@@ -8,7 +9,24 @@ atoom_root() { cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd; }
 # The rows of the table, one per line: the comment lines and the empty lines are dropped. The fields are separated by a tab, and an empty
 # field is written `-` (read's IFS would fold two tabs into one).
 driver_rows() {
-    grep -v -e '^#' -e '^$' "$(atoom_root)/tools/release/drivers.tsv"
+    grep -v -e '^#' -e '^$' "$(release_table)"
+}
+
+# release_table: the path of the table. ATOOM_RELEASE_TABLE replaces it, for the tests of the scripts on a fixture table
+# (tools/release/test-candidate.sh); a release never sets it.
+release_table() { echo "${ATOOM_RELEASE_TABLE:-$(atoom_root)/tools/release/drivers.tsv}"; }
+
+# kind_of ID: block for the thin main of a block (the id block-<name>), driver for every other row.
+kind_of() { case "$1" in block-*) echo block ;; *) echo driver ;; esac; }
+
+# id_for DIR: the id a row of the directory DIR must have: block-<name> for a block (blocks/<name>), and for a driver the directory with its
+# slashes turned into dashes (store/rqlite is store-rqlite).
+id_for() { case "$1" in blocks/*/*) echo "" ;; blocks/*) echo "block-${1#blocks/}" ;; *) echo "${1//\//-}" ;; esac; }
+
+# ids_of_kind KIND: the ids of driver_ids of that kind, one per line.
+ids_of_kind() {
+    local id
+    for id in $(driver_ids); do [ "$(kind_of "$id")" != "$1" ] || echo "$id"; done
 }
 
 # driver_ids: the id of every driver, one per line. ATOOM_DRIVERS (ids, separated by spaces) narrows it to those, for a trial of the scripts
@@ -38,7 +56,9 @@ read_driver() {
 
 # The names of one driver, as docs/packages.md has them.
 binary_name() { echo "atoom-$1"; }          # the executable in the tarball, the package and the image: /usr/bin/atoom-<id>
-package_name() { echo "atoom-driver-$1"; } # the .deb and the .rpm
+package_name() {                            # the .deb and the .rpm: atoom-driver-<id> for a driver, atoom-<id> (atoom-block-<name>) for a block
+    case "$(kind_of "$1")" in block) echo "atoom-$1" ;; *) echo "atoom-driver-$1" ;; esac
+}
 image_name() { echo "atoom-$1"; }           # ghcr.io/truvity/atoom-<id>
 tarball_name() { echo "atoom-$1_$2_$3_$4.tar.gz"; } # id version os arch
 

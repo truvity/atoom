@@ -7,7 +7,7 @@ libraries changed. `just release-prepare X.Y.Z` writes the section.
 
 ## Unreleased
 
-New library, and an addition to `key`, with no change to a contract ([record 0020](docs/decisions/0020-the-token-block-is-stateless.md), proposed):
+New library, and an addition to `key`, with no change to a contract ([record 0020](docs/decisions/0020-the-token-block-is-stateless.md)):
 
 - **The `token` block** (B8a), the Go module `github.com/truvity/atoom/blocks/token` and its contract `atoom.token.v1alpha1.TokenService`:
   - `Sign` makes a compact JWS of a host's claims by a purpose's key, through the `seal` block's `Sign`. The header is exactly `alg`, `kid` and `typ`; the payload is the claims' own bytes, after a check that they are one strict JSON object. The block verifies the signature before it answers.
@@ -16,7 +16,8 @@ New library, and an addition to `key`, with no change to a contract ([record 002
   - A purpose declares its types and its kid rule: the key port's `key_id` (the default) or the RFC 7638 thumbprint.
   - The block is stateless: the rotation ring is step B8b.
 - **Rust stubs** in the crate `atoom-blocks-token`, beside the Go module.
-- **The thin main `cmd/token`** serves the block on a UNIX socket, over a seal block on another socket or one it hosts over a key driver and a store driver. It is released as a driver is: row `blocks-token`, executable `atoom-blocks-token`, package `atoom-driver-blocks-token`, image `ghcr.io/truvity/atoom-blocks-token`.
+- **The thin main `cmd/token`** serves the block on a UNIX socket, over a seal block on another socket or one it hosts over a key driver and a store driver. It is released as a block, a second kind of release row beside the drivers: row `block-token`, executable, package, tarball and image all `atoom-block-token` (`ghcr.io/truvity/atoom-block-token`).
+- **The release tooling knows blocks** (`atoom-block-<name>`): the release table, `release-check-table` (a block's id is `block-<name>`), the packages, the smoke, the evidence of the candidate (its `blocks` beside its `drivers`) and its mutants, with tests in `release-candidate-test`.
 - **The kit** (package `conformance`, command `token-conformance`, `just conformance-token`) runs over `key/software` and `store/memory`, in the kit's process and behind the thin main.
 - **`key/route`**, in the module `key`: a client of the key port that sends each call to the driver of its purpose, so that a host with a driver per purpose (a file and AWS KMS) gives the seal block one client.
 

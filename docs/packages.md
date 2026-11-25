@@ -2,7 +2,7 @@
 
 Every driver of atoom is released three ways, under the one version of the repository ([decision 0005](decisions/0005-one-version-for-the-repository.md), [0007](decisions/0007-release-management.md)): as a **tarball**, as a **`.deb` and an `.rpm` package**, and as an **OCI image**. The libraries (Go modules and Rust crates) are released as before and are what a consumer links in-process, on a Lambda function for one. The packages and the images are for a consumer that cannot embed a driver, or runs it as a process of its own: a systemd host, or a sidecar. Helm charts are not part of atoom (decision 0007): a chart references the images by digest.
 
-The table of what is released is [`tools/release/drivers.tsv`](../tools/release/drivers.tsv), one row for each driver; every script reads it, and `just release-check-table` fails when a thin main of the tree is neither a row nor one of the programs that are not drivers (the conformance kits, the bench of the card driver).
+The table of what is released is [`tools/release/drivers.tsv`](../tools/release/drivers.tsv), one row for each driver; every script reads it, and `just release-check-table` fails when a thin main of the tree is neither a row nor one of the programs that are not released (the conformance kits, the bench of the card driver).
 
 | Driver | Executable (`/usr/bin`) | Package | Image `ghcr.io/truvity/…` | Tarballs | Lambda extension zip |
 | --- | --- | --- | --- | --- | --- |
@@ -19,9 +19,9 @@ The table of what is released is [`tools/release/drivers.tsv`](../tools/release/
 | `transport/spool` | `atoom-transport-spool` | `atoom-driver-transport-spool` | `atoom-transport-spool` | linux | no: Lambda has no lasting local disk |
 | `index/sqlite` | `atoom-index-sqlite` | `atoom-driver-index-sqlite` | `atoom-index-sqlite` | linux | no: Lambda has no lasting local disk |
 | `destination/dir` | `atoom-destination-dir` | `atoom-driver-destination-dir` | `atoom-destination-dir` | linux | no: Lambda has no lasting local disk |
-| `blocks/token` (the thin main of a block) | `atoom-blocks-token` | `atoom-driver-blocks-token` | `atoom-blocks-token` | linux, darwin | no: a Go function links the block instead |
+| `blocks/token` (a block) | `atoom-block-token` | `atoom-block-token` | `atoom-block-token` | linux, darwin | no: a Go function links the block instead |
 
-The thin main of the `token` block ([record 0020](decisions/0020-the-token-block-is-stateless.md)) is released as a driver is: it is how a host in another language reaches the block (sluis's Rust `signer`). Its id is its directory, `blocks-token`, by the rule below, and its package keeps the prefix `atoom-driver-` so that every executable of atoom installs the same way.
+**Blocks** are the second kind of row. The thin main of a block is how a host in another language reaches it (sluis's Rust `signer` reaches the `token` block, [record 0020](decisions/0020-the-token-block-is-stateless.md)), and it is released in the same forms as a driver, under names of its own: `atoom-block-<name>` for the executable, the package, the tarball and the image (owner decision D32 B). The release scripts treat the two kinds alike, and the checks hold each to its names: `release-check-table`, the packages, the smoke, and the evidence of the candidate, which lists the blocks it smoked beside the drivers.
 
 The **Lambda** column is the form of [record 0010](decisions/0010-distribution-per-driver-and-lambda.md): an extension zip for amd64 and arm64, merged with the other extensions a function needs into one layer. **No Lambda zip is built yet**: the column says which drivers will have one (step B9 of the [plan](plan.md)) and why the others cannot. A Go driver used by a Go function needs no extension: the function links the library and mounts its handler in-process.
 
@@ -43,16 +43,16 @@ Planned drivers, each released in every form it can run in once it is built:
 
 ## The naming rules
 
-One name for each driver, the **id**, `<port>-<driver>`: the directory of the driver with its slash turned into a dash (`store/rqlite` is `store-rqlite`). Everything else is the id with a fixed prefix:
+One name for each driver, the **id**, `<port>-<driver>`: the directory of the driver with its slash turned into a dash (`store/rqlite` is `store-rqlite`). A block's id is `block-<name>` for its directory `blocks/<name>` (`blocks/token` is `block-token`). Everything else is the id with a fixed prefix:
 
 | Thing | Name | Why |
 | --- | --- | --- |
 | The executable, in the tarball, the package and the image | `atoom-<id>`, at `/usr/bin/atoom-<id>` | The thin mains are called `software`, `awskms`, `dynamodb`, `yubikeypiv` in Go and `store-rqlite`, `source-file` in Rust: two rules in one directory. The `atoom-` prefix keeps a driver off the name of anything else in `/usr/bin`, and the port is in the name because a driver name alone (`memory`, `file`, `dir`) says nothing. The program's own help and `--version` still print the name of the thin main. |
-| The package | `atoom-driver-<id>` | A package of a driver, as sluis names its own (`sluis-driver-<owner>-<name>`), so that a sluis package can depend on it. |
+| The package | `atoom-driver-<id>` for a driver; `atoom-<id>`, so `atoom-block-<name>`, for a block | A package of a driver, as sluis names its own (`sluis-driver-<owner>-<name>`), so that a sluis package can depend on it. A block is not a driver, and its package says so; its id already starts with `block-`. |
 | The image | `ghcr.io/truvity/atoom-<id>:<version>` | One image for each driver. The tag is the version, `0.2.0`: there is no `latest` and no floating tag, and a tag is never moved. A consumer pins the digest, which `release-images.txt` lists. |
 | The tarball | `atoom-<id>_<version>_<os>_<arch>.tar.gz` | Holds `atoom-<id>`, `LICENSE` and `README.md`, at the top. |
 
-The packages come out as `atoom-driver-<id>_<version>-1_<amd64|arm64>.deb` and `atoom-driver-<id>-<version>-1.<x86_64|aarch64>.rpm`.
+The packages come out as `atoom-driver-<id>_<version>-1_<amd64|arm64>.deb` and `atoom-driver-<id>-<version>-1.<x86_64|aarch64>.rpm`, and a block's as `atoom-block-<name>_<version>-1_<arch>.deb` and `atoom-block-<name>-<version>-1.<arch>.rpm`.
 
 ## What runs where
 

@@ -46,4 +46,13 @@ jq --arg a "$arch" 'del(.smoke[$a])' "$work/real.json" >"$work/nosmoke.json"
 must_refuse "no smoke of $arch" "$dir" "$work/nosmoke.json" "$commit"
 jq --arg a "$arch" '.smoke[$a].drivers |= .[1:]' "$work/real.json" >"$work/fewer.json"
 must_refuse "a driver left out of the smoke of $arch" "$dir" "$work/fewer.json" "$commit"
+if [ "$(jq --arg a "$arch" '.smoke[$a].blocks | length' "$work/real.json")" -gt 0 ]; then
+    jq --arg a "$arch" '.smoke[$a].blocks |= .[1:]' "$work/real.json" >"$work/fewerblocks.json"
+    must_refuse "a block left out of the smoke of $arch" "$dir" "$work/fewerblocks.json" "$commit"
+    jq --arg a "$arch" '.smoke[$a] |= (.drivers += .blocks | .blocks = [])' "$work/real.json" >"$work/blockasdriver.json"
+    must_refuse "a block counted as a driver in the smoke of $arch" "$dir" "$work/blockasdriver.json" "$commit"
+else
+    echo "candidate-mutants: the table has no block, so no block can be left out" >&2
+    exit 1
+fi
 echo "candidate-mutants: every change was refused"

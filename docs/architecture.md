@@ -76,7 +76,7 @@ atoom/
   | the host's hooks | in its options: the declaration of its purposes or kinds, the rules (a hook asked before every call), and where its facts go |
   | the kit | the package or module `conformance` of the block, speaking the contract only, with its own declaration and rules, and the command `<name>-conformance` under `conformance/cmd/` |
   | the kit's run | `tools/scripts/conformance-<name>.sh`, a recipe `conformance-<name>` of `just conformance`: the kit over the memory drivers of the block's dependencies, each behind the socket of its thin main |
-  | the thin main | `blocks/<name>/cmd/<name>`, when a host in another language reaches the block over a socket: a row of the release table, released as a driver is ([packages](packages.md)); `blocks/token` has one |
+  | the thin main | `blocks/<name>/cmd/<name>`, when a host in another language reaches the block over a socket: a row `block-<name>` of the release table, released in the forms of a driver as `atoom-block-<name>` ([packages](packages.md)); `blocks/token` has one |
   | the page | `blocks/<name>/docs/<name>-block.md`: what it is built from, the calls, the contract, the hooks, the refusals, the kit and how to host it |
 
 ## Dependency rules
