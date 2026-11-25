@@ -1,6 +1,6 @@
 # 0025. Generic blob, transport and index contracts: the host declares its pointers, its payload and its columns
 
-Status: proposed, 2026-11-25 (step B12 of the [plan](../plan.md); the owner's D89 A puts B12 before B6). The choices Q1 to Q6 below wait for the owner; no code is written before they are answered.
+Status: accepted, 2026-11-25 (owner decision on the pull request: D96 to D101, each choice A; step B12 of the [plan](../plan.md); the owner's D89 A puts B12 before B6)
 
 ## Context
 
@@ -135,46 +135,48 @@ atoom is released first, and each consumer moves at its next pin, never the reve
 - A change of an index declaration is a rebuild of the index, as a change of the tokenizer is.
 - The order of [0023](0023-session-to-done-first.md) changes only in that B12 comes before B6 (D89 A): B12, B6, B7, then B10, B11 and B15, with the rest of B9 (`source/ssm`, `blob/s3`, the extension zips) where 0023 puts it.
 
-## Choices for the owner
+## The owner's choices
+
+The owner took the pick of each choice on the pull request (2026-11-25): Q1 A (D96), Q2 A (D97), Q3 A (D98), Q4 A (D99), Q5 A (D100), Q6 A (D101). The options are kept as they were put.
 
 **Q1. Versioning.**
 
 - **A. A clean break in 0.9.0: blob and transport in place in `v1alpha1` (same wire bytes), index in a new package `v1alpha2` with `v1alpha1` removed in the same release.** Pros: one contract per port in every release; the transport's in-flight bytes need no drain; an old index client fails at the route instead of being misread; follows 0015, which rejected compatibility windows for alpha contracts. Cons: every consumer moves at once for the index; two package versions in the repository's names (index at `v1alpha2`, the others at `v1alpha1`).
 - **B. `v1alpha2` beside `v1alpha1` for all three, both served through 0.9.x, `v1alpha1` removed in 0.10.0.** Pros: a rolling upgrade of mixed installations. Cons: six drivers and three kits serve and test two contracts for a release; the spool and the brokers hold bytes of one or the other; 0015 rejected the cost of such a window; the consumers pin exact versions and do not need one.
 - **C. A clean break in place in `v1alpha1` for all three, with the retired index field numbers reserved.** Pros: the fewest names. Cons: an old reader's filters (action, actor, ...) become unknown fields and are ignored, so it gets more rows than it asked for (still within its grant), silently.
-- **Pick: A.**
+- **Pick: A. Taken.**
 
 **Q2. When the host declares the index's kinds and columns.**
 
 - **A. At the start of the driver** (`--declaration FILE`, an option in the library), kept with the index; another declaration is a rebuild. Pros: as the key port's purposes (B13); one schema per file, known before the first write; a reader cannot change it. Cons: the declaration lives in the installation's configuration next to the driver, so audit must ship it as a file and the installation must pass it.
 - **B. With each write** (every `Apply` carries the columns it uses; the driver adds what it has not seen). Pros: no file to pass. Cons: the schema grows from whatever an indexer sends; a full-text table and database indexes rebuilt during writes; the reader does not know which columns are searchable until rows exist.
 - **C. A `Declare` call on `IndexService`**, made by the indexer at its start, kept by the driver; another declaration is refused until a rebuild. Pros: the product that owns the columns declares them, with no file in the installation. Cons: a new call on the contract; the write side can reshape what the read side serves; two indexers during a deploy race to declare.
-- **Pick: A.**
+- **Pick: A. Taken.**
 
 **Q3. The types of a declared column.**
 
 - **A. `text` and `int` only.** Pros: every column of today is one of the two; every backend has both; small kit. Cons: a time, a boolean or bytes column is an `int` or `text` by convention.
 - **B. Also `bool`, `bytes` and a time.** Pros: more exact types. Cons: more cases in every driver and in the kit, for no consumer yet.
-- **Pick: A.** A new type is additive later.
+- **Pick: A. Taken.** A new type is additive later.
 
 **Q4. How a host declares its blob pointers.**
 
 - **A. By the last segment of the path**, a list of names. Pros: the rule of today, with the names moved to the host; one string compare. Cons: a name is a pointer under every prefix.
 - **B. By path patterns** (a prefix and a name, or a glob). Pros: a pointer only where the host means it. Cons: a pattern language in every driver and in the kit; no consumer needs it.
 - **C. No declaration: an object is a pointer when its first write is a `Put`.** Pros: nothing to declare. Cons: whoever can `Put` can claim a path before its write-once `Create` and later overwrite it, which breaks the fence the port exists for.
-- **Pick: A.**
+- **Pick: A. Taken.**
 
 **Q5. The names on the transport.**
 
 - **A. `Message`, `id`, `payload`; `Delivery.emitter` stays.** Pros: neutral words; the field numbers are kept, so the bytes are the same. Cons: every consumer's code renames `uid` and `record`.
 - **B. Keep `uid` and rename only `record` to `payload`.** Pros: less churn; `uid` is not audit's word. Cons: `uid` reads as audit's `metadata.uid`; two half-renamed names.
-- **Pick: A.** (`emitter` names a role, not a product, and every driver and the kit already use it.)
+- **Pick: A. Taken.** (`emitter` names a role, not a product, and every driver and the kit already use it.)
 
 **Q6. The releases.**
 
 - **A. One release, 0.9.0, after the three pull requests.** Pros: one move for each consumer; the sweep and its check land with them. Cons: audit's emitters wait for the index pull request before they can adopt the transport rename.
 - **B. A release per port** (0.9.0 transport, 0.10.0 blob, 0.11.0 index). Pros: audit's emitters move sooner. Cons: three breaking moves for sluis, which takes all three ports; three changelogs to read.
-- **Pick: A.** The emitters gain nothing from the rename alone until the usage step, which needs the writer, which needs blob and index too.
+- **Pick: A. Taken.** The emitters gain nothing from the rename alone until the usage step, which needs the writer, which needs blob and index too.
 
 ## Roads not taken
 
