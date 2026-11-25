@@ -25,7 +25,7 @@ There is no delete and no way to rewrite a sealed object. That is the point of t
 
 ## Capabilities
 
-The port has no `Capabilities` call. Every driver offers all four calls, and a read-only driver ([blob/fsreadonly](../fsreadonly/README.md)) answers `permission_denied` / `rule` to a write. Open: whether the port needs a `Capabilities` call (for a store that cannot list, or that declares its page limit) is decided when the first such driver (`blob/s3`, planned) is built.
+The port has no `Capabilities` call. Every driver offers all four calls, and a read-only driver ([blob/fsreadonly](../fsreadonly/README.md)) answers `permission_denied` / `rule` to a write. Open: whether the port needs a `Capabilities` call (for a store that cannot list, or that declares its page limit) is decided with the first driver that needs one; `blob/s3` lists and pages as the `fs` drivers do, and needs none.
 
 ## Refusals
 
@@ -46,7 +46,7 @@ Every refusal is a Connect error with the `Refusal` detail of [common](../../com
 | --- | --- | --- |
 | [blob/fs](../fs/README.md) | a local directory | a host with its log on a disk |
 | [blob/fsreadonly](../fsreadonly/README.md) | the same directory, read only | a second process under another user that reads the log and can change nothing |
-| `blob/s3` | an S3 bucket, with a conditional create | Lambda and Kubernetes (planned, step B9) |
+| [blob/s3](../s3/README.md) (Go) | an S3 bucket under a key prefix, with S3's conditional writes | Lambda and Kubernetes: a Go driver a host mounts in process, so that audit's writer keeps its log in S3 with no sidecar (step B12, the owner's D112 A, [record 0025](../../docs/decisions/0025-generic-blob-transport-and-index.md)) |
 
 Both built drivers are Linux only (they open every path with `openat2`), and say so in their manifests; the macOS jobs of CI leave them out.
 

@@ -17,6 +17,7 @@ The table of what is released is [`tools/release/drivers.tsv`](../tools/release/
 | `source/credential` | `atoom-source-credential` | `atoom-driver-source-credential` | `atoom-source-credential` | linux | no: Lambda has no systemd credentials |
 | `blob/fs` | `atoom-blob-fs` | `atoom-driver-blob-fs` | `atoom-blob-fs` | linux | no: Lambda has no lasting local disk |
 | `blob/fsreadonly` | `atoom-blob-fsreadonly` | `atoom-driver-blob-fsreadonly` | `atoom-blob-fsreadonly` | linux | no: Lambda has no lasting local disk |
+| `blob/s3` | `atoom-blob-s3` | `atoom-driver-blob-s3` | `atoom-blob-s3` | linux, darwin | extension zip, for a function in another language; a Go function links the library instead (audit's writer, [record 0025](decisions/0025-generic-blob-transport-and-index.md)) |
 | `transport/spool` | `atoom-transport-spool` | `atoom-driver-transport-spool` | `atoom-transport-spool` | linux | no: Lambda has no lasting local disk |
 | `transport/nats` | `atoom-transport-nats` | `atoom-driver-transport-nats` | `atoom-transport-nats` | linux, darwin | extension zip, for a function in another language; a Go host links the library instead ([record 0023](decisions/0023-session-to-done-first.md)) |
 | `transport/sqs` | `atoom-transport-sqs` | `atoom-driver-transport-sqs` | `atoom-transport-sqs` | linux, darwin | none for audit: a Go function links the library, with no spool sidecar as an extension ([record 0022](decisions/0022-the-blocks-order-after-0-7-0.md)) |
@@ -35,7 +36,6 @@ Planned drivers, each released in every form it can run in once it is built:
 | `store/postgres` | PostgreSQL | extension zip | B6 |
 | `store/valkey` | Valkey | extension zip | B10 |
 | `source/ssm` | SSM Parameter Store | extension zip | B9 |
-| `blob/s3` | an S3 bucket | extension zip | B9 |
 | `index/rqlite`, `index/postgres` | rqlite; PostgreSQL with row-level security | `index/postgres`: extension zip | B15 |
 
 ## The Go file driver
@@ -57,7 +57,7 @@ The packages come out as `atoom-driver-<id>_<version>-1_<amd64|arm64>.deb` and `
 
 ## What runs where
 
-- **Architectures.** linux/amd64 and linux/arm64 for every driver, packages and images alike (the images are multi-architecture manifests). **darwin/amd64 and darwin/arm64 tarballs** only for the Go drivers that are pure Go: `key/software`, `key/awskms`, `store/dynamodb`, `source/appconfig`, `transport/nats`, `transport/sqs`, and the thin main of `blocks/token`. The Rust drivers are Linux only or have no consumer on macOS; the card driver is not built for macOS (its PC/SC build there is unverified, [record 0004](decisions/0004-multi-architecture.md)).
+- **Architectures.** linux/amd64 and linux/arm64 for every driver, packages and images alike (the images are multi-architecture manifests). **darwin/amd64 and darwin/arm64 tarballs** only for the Go drivers that are pure Go: `key/software`, `key/awskms`, `store/dynamodb`, `source/appconfig`, `blob/s3`, `transport/nats`, `transport/sqs`, and the thin main of `blocks/token`. The Rust drivers are Linux only or have no consumer on macOS; the card driver is not built for macOS (its PC/SC build there is unverified, [record 0004](decisions/0004-multi-architecture.md)).
 - **Static executables.** Go with CGO off, Rust through cargo-zigbuild to static musl: no C library is needed at run time, and one executable runs on any Linux. The one exception is the card driver.
 - **The card driver, `key/yubikeypiv`,** links libpcsclite with cgo. It is never cross-compiled: it is built on a runner of each architecture, in an Ubuntu 22.04 userland whose glibc (2.35) is older than every system the packages support, and the build fails if the executable asks for a symbol newer than `GLIBC_2.34`, the glibc of Amazon Linux 2023. Its package depends on **`pcscd`** and **`libpcsclite1`** (`pcsc-lite` and `pcsc-lite-libs` on Rocky and Amazon Linux) and recommends the CCID driver (`libccid`, `pcsc-lite-ccid`). No other package has a dependency.
 
