@@ -5,7 +5,22 @@ libraries changed. `just release-prepare X.Y.Z` writes the section.
 
 <!-- release-prepare: new sections go below this line -->
 
-## Unreleased
+## 0.7.0 - 2026-11-25
+
+One version for the whole repository: every library is tagged 0.7.0, changed or not.
+
+Libraries that changed since v0.6.0:
+- `blocks/seal`
+- `common`
+- `key`
+- `key/conformance`
+- `key/pinrelease`
+- `key/slotplan`
+- `key/software`
+- `key/yubikeypiv`
+- `socket`
+- `store/rqlite`
+- `transport`
 
 **Breaking** in the Go API of `key/software` and `key/yubikeypiv` and in the command lines of their thin mains ([record 0021](docs/decisions/0021-drivers-know-no-deployment-shapes.md), proposed): drivers know nothing of the installation they run in, and hosts decide. The wire and the contracts do not change.
 

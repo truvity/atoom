@@ -28,42 +28,42 @@ use (
 	./transport
 )
 
-replace github.com/truvity/atoom/blob v0.6.0 => ./blob
+replace github.com/truvity/atoom/blob v0.7.0 => ./blob
 
-replace github.com/truvity/atoom/blocks/seal v0.6.0 => ./blocks/seal
+replace github.com/truvity/atoom/blocks/seal v0.7.0 => ./blocks/seal
 
-replace github.com/truvity/atoom/blocks/token v0.6.0 => ./blocks/token
+replace github.com/truvity/atoom/blocks/token v0.7.0 => ./blocks/token
 
-replace github.com/truvity/atoom/common v0.6.0 => ./common
+replace github.com/truvity/atoom/common v0.7.0 => ./common
 
-replace github.com/truvity/atoom/destination v0.6.0 => ./destination
+replace github.com/truvity/atoom/destination v0.7.0 => ./destination
 
-replace github.com/truvity/atoom/index v0.6.0 => ./index
+replace github.com/truvity/atoom/index v0.7.0 => ./index
 
-replace github.com/truvity/atoom/key v0.6.0 => ./key
+replace github.com/truvity/atoom/key v0.7.0 => ./key
 
-replace github.com/truvity/atoom/key/awskms v0.6.0 => ./key/awskms
+replace github.com/truvity/atoom/key/awskms v0.7.0 => ./key/awskms
 
-replace github.com/truvity/atoom/key/conformance v0.6.0 => ./key/conformance
+replace github.com/truvity/atoom/key/conformance v0.7.0 => ./key/conformance
 
-replace github.com/truvity/atoom/key/pinrelease v0.6.0 => ./key/pinrelease
+replace github.com/truvity/atoom/key/pinrelease v0.7.0 => ./key/pinrelease
 
-replace github.com/truvity/atoom/key/slotplan v0.6.0 => ./key/slotplan
+replace github.com/truvity/atoom/key/slotplan v0.7.0 => ./key/slotplan
 
-replace github.com/truvity/atoom/key/software v0.6.0 => ./key/software
+replace github.com/truvity/atoom/key/software v0.7.0 => ./key/software
 
-replace github.com/truvity/atoom/key/yubikeypiv v0.6.0 => ./key/yubikeypiv
+replace github.com/truvity/atoom/key/yubikeypiv v0.7.0 => ./key/yubikeypiv
 
-replace github.com/truvity/atoom/policy v0.6.0 => ./policy
+replace github.com/truvity/atoom/policy v0.7.0 => ./policy
 
-replace github.com/truvity/atoom/socket v0.6.0 => ./socket
+replace github.com/truvity/atoom/socket v0.7.0 => ./socket
 
-replace github.com/truvity/atoom/source v0.6.0 => ./source
+replace github.com/truvity/atoom/source v0.7.0 => ./source
 
-replace github.com/truvity/atoom/source/file v0.6.0 => ./source/file
+replace github.com/truvity/atoom/source/file v0.7.0 => ./source/file
 
-replace github.com/truvity/atoom/store v0.6.0 => ./store
+replace github.com/truvity/atoom/store v0.7.0 => ./store
 
-replace github.com/truvity/atoom/store/dynamodb v0.6.0 => ./store/dynamodb
+replace github.com/truvity/atoom/store/dynamodb v0.7.0 => ./store/dynamodb
 
-replace github.com/truvity/atoom/transport v0.6.0 => ./transport
+replace github.com/truvity/atoom/transport v0.7.0 => ./transport
