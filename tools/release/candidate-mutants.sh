@@ -23,7 +23,9 @@ jq '.rehearsal = false' "$ev" >"$work/real.json"
 verify "$dir" "$work/real.json" "$version" "$commit" || { echo "candidate-mutants: the positive control failed: the unchanged candidate is refused" >&2; "$here/evidence.sh" verify "$dir" "$work/real.json" "$version" "$commit" >&2; exit 1; }
 echo "candidate-mutants: the unchanged candidate passes"
 
-first=$(find "$dir" -mindepth 1 -maxdepth 1 -printf '%f\n' | LC_ALL=C sort | head -n 1)
+# sed reads the whole listing: `head` would close the pipe early, and with pipefail sort's broken pipe fails the step once the release
+# holds enough files (it did once the release had about 300).
+first=$(find "$dir" -mindepth 1 -maxdepth 1 -printf '%f\n' | LC_ALL=C sort | sed -n 1p)
 mkdir "$work/flip"; cp -r "$dir"/. "$work/flip/"
 printf 'x' >>"$work/flip/$first"
 must_refuse "a byte added to $first" "$work/flip" "$work/real.json" "$commit"
