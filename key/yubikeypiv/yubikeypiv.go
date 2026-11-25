@@ -38,6 +38,7 @@ import (
 	keyv1alpha1 "github.com/truvity/atoom/key/gen/atoom/key/v1alpha1"
 	"github.com/truvity/atoom/key/gen/atoom/key/v1alpha1/keyv1alpha1connect"
 	"github.com/truvity/atoom/key/keyid"
+	"github.com/truvity/atoom/key/pinrelease"
 	"github.com/truvity/atoom/key/purpose"
 	"github.com/truvity/atoom/key/slotplan"
 	"github.com/truvity/atoom/key/yubikeypiv/internal/card"
@@ -98,6 +99,11 @@ type Options struct {
 	Boundary string
 	// PeerKeys checks the other side of a PIN release (see PeerKeys). None refuses every PIN release.
 	PeerKeys PeerKeys
+	// PinReleaseDomains are the first fields of the PIN release texts (key/pinrelease): every node that releases a PIN to another
+	// uses the same pair. The zero value is atoom's neutral pair. A host whose cards already release PINs keeps the pair they were
+	// made with: sluis passes "sluis-pin-release-v1" and "sluis-pin-release-answer-v1". A pair that cannot keep the two texts apart
+	// refuses the start (pinrelease.ErrDomains).
+	PinReleaseDomains pinrelease.Domains
 	// StateDir is the driver's own durable state: the stop that a refused released PIN leaves (pin-release.refused), so that a restart
 	// does not try another released PIN. Empty keeps it in memory only (the check command).
 	StateDir string
@@ -149,6 +155,7 @@ type Service struct {
 
 	// The check of the other side of a PIN release (PeerKeys).
 	boundary string
+	domains  pinrelease.Domains
 	peers    PeerKeys
 	caller   func(context.Context) string
 	// refused is set when the card refused a released PIN: the driver then tries no released PIN until a person
@@ -188,6 +195,9 @@ func New(opts Options) (*Service, error) {
 	if !opts.AllowFactoryDefaults && opts.Serial == 0 {
 		return nil, ErrSerial
 	}
+	if err := opts.PinReleaseDomains.Check(); err != nil {
+		return nil, err
+	}
 	set, err := purpose.New(opts.Purposes)
 	if err != nil {
 		return nil, err
@@ -211,7 +221,7 @@ func New(opts Options) (*Service, error) {
 	s := &Service{factory: opts.AllowFactoryDefaults, node: opts.Node, mgmtKey: opts.ManagementKey, plan: plan, infos: planInfos(plan), card: c,
 		keys: map[string]*slotKey{}, dead: make(chan struct{}),
 		rsaTickets: make(chan struct{}, queue),
-		boundary:   opts.Boundary, peers: opts.PeerKeys, caller: opts.Caller, refused: refusedMark{dir: opts.StateDir}}
+		boundary:   opts.Boundary, domains: opts.PinReleaseDomains, peers: opts.PeerKeys, caller: opts.Caller, refused: refusedMark{dir: opts.StateDir}}
 	if err := s.refused.restore(); err != nil {
 		_ = c.Close()
 		return nil, err

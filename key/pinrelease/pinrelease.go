@@ -3,12 +3,16 @@
 //
 // A locked board's key service writes a PinReleaseRequest whose text is
 //
-//	"sluis-pin-release-v1" || boundary || node || request id || ephemeral public key
+//	request domain || boundary || node || request id || ephemeral public key
 //
 // and an unlocked peer answers with a PinRelease whose text is
 //
-//	"sluis-pin-release-answer-v1" || boundary || releasing node || requesting node || request id ||
+//	answer domain || boundary || releasing node || requesting node || request id ||
 //	SHA-384(request text) || releaser's ephemeral public key || sealed PIN
+//
+// The two domains are the host's (Domains): atoom's neutral ones when the host names none. A host whose cards already
+// release PINs to each other keeps the domains they were made with; sluis passes "sluis-pin-release-v1" and
+// "sluis-pin-release-answer-v1", the strings of its ADR 0006, and its texts are then the same bytes as before 0.7.0.
 //
 // Every field is a 4-octet big-endian length followed by its octets, so no field can run into the next. Each text is
 // signed with ES384 by the pin-release key (card slot 87) of the node that wrote it. The PIN is sealed with ECDH P-384
@@ -39,11 +43,42 @@ const (
 	SlotPinRelease    = "87"
 )
 
-// The domains of the two texts. A request text can never be read as an answer, nor the other way round.
+// The neutral domains of the two texts, for a host that names none (record 0021).
 const (
-	RequestDomain = "sluis-pin-release-v1"
-	AnswerDomain  = "sluis-pin-release-answer-v1"
+	DefaultRequestDomain = "atoom-pin-release-v1"
+	DefaultAnswerDomain  = "atoom-pin-release-answer-v1"
 )
+
+// Domains are the first fields of the two texts, which a host chooses: every node that releases a PIN to another must use the same
+// two. A request text can never be read as an answer, nor the other way round, so the two must differ. An empty field takes its
+// default (DefaultRequestDomain, DefaultAnswerDomain), so the zero value is atoom's neutral pair.
+type Domains struct {
+	Request string
+	Answer  string
+}
+
+// ErrDomains is a pair of domains that cannot keep the two texts apart: the same string twice, or a field longer than a field may be.
+var ErrDomains = errors.New("pinrelease: the request and answer domains must differ")
+
+// resolved returns the domains with their defaults, or ErrDomains.
+func (d Domains) resolved() (Domains, error) {
+	if d.Request == "" {
+		d.Request = DefaultRequestDomain
+	}
+	if d.Answer == "" {
+		d.Answer = DefaultAnswerDomain
+	}
+	if d.Request == d.Answer || len(d.Request) > maxField || len(d.Answer) > maxField {
+		return Domains{}, ErrDomains
+	}
+	return d, nil
+}
+
+// Check reports whether the domains can be used: ErrDomains when they cannot. A host checks them at its start.
+func (d Domains) Check() error {
+	_, err := d.resolved()
+	return err
+}
 
 // The sizes of the fields.
 const (
@@ -115,20 +150,28 @@ func decode(b []byte, n int) ([][]byte, error) {
 }
 
 // RequestText is the signed text of a request. It checks what it is given, so that a text it makes always parses.
-func RequestText(r Request) ([]byte, error) {
+func (d Domains) RequestText(r Request) ([]byte, error) {
+	d, err := d.resolved()
+	if err != nil {
+		return nil, err
+	}
 	if err := r.check(); err != nil {
 		return nil, err
 	}
-	return encode([]byte(RequestDomain), []byte(r.Boundary), []byte(r.Node), []byte(r.ID), r.Ephemeral), nil
+	return encode([]byte(d.Request), []byte(r.Boundary), []byte(r.Node), []byte(r.ID), r.Ephemeral), nil
 }
 
 // ParseRequest reads a request text strictly.
-func ParseRequest(text []byte) (Request, error) {
+func (d Domains) ParseRequest(text []byte) (Request, error) {
+	d, err := d.resolved()
+	if err != nil {
+		return Request{}, err
+	}
 	f, err := decode(text, 5)
 	if err != nil {
 		return Request{}, err
 	}
-	if string(f[0]) != RequestDomain {
+	if string(f[0]) != d.Request {
 		return Request{}, ErrFormat
 	}
 	r := Request{Boundary: string(f[1]), Node: string(f[2]), ID: string(f[3]), Ephemeral: bytes.Clone(f[4])}
@@ -152,21 +195,29 @@ func (r Request) check() error {
 }
 
 // AnswerText is the signed text of an answer.
-func AnswerText(a Answer) ([]byte, error) {
+func (d Domains) AnswerText(a Answer) ([]byte, error) {
+	d, err := d.resolved()
+	if err != nil {
+		return nil, err
+	}
 	if err := a.check(); err != nil {
 		return nil, err
 	}
-	return encode([]byte(AnswerDomain), []byte(a.Boundary), []byte(a.Releaser), []byte(a.Requester), []byte(a.ID),
+	return encode([]byte(d.Answer), []byte(a.Boundary), []byte(a.Releaser), []byte(a.Requester), []byte(a.ID),
 		a.RequestSHA384, a.Ephemeral, a.Sealed), nil
 }
 
 // ParseAnswer reads an answer text strictly.
-func ParseAnswer(text []byte) (Answer, error) {
+func (d Domains) ParseAnswer(text []byte) (Answer, error) {
+	d, err := d.resolved()
+	if err != nil {
+		return Answer{}, err
+	}
 	f, err := decode(text, 8)
 	if err != nil {
 		return Answer{}, err
 	}
-	if string(f[0]) != AnswerDomain {
+	if string(f[0]) != d.Answer {
 		return Answer{}, ErrFormat
 	}
 	a := Answer{Boundary: string(f[1]), Releaser: string(f[2]), Requester: string(f[3]), ID: string(f[4]),
@@ -221,11 +272,11 @@ func aead(shared, requestText []byte) (cipher.AEAD, error) {
 // Seal seals a PIN to the ephemeral key of a request: a fresh P-384 key of the releaser, ECDH with the request's key,
 // HKDF-SHA384 and AES-256-GCM, with the request text as info and as additional data. It returns the releaser's
 // public key and the sealed PIN. The caller is a card driver that holds the PIN.
-func Seal(pin, requestText []byte) (releaserPublic, sealed []byte, err error) {
+func (d Domains) Seal(pin, requestText []byte) (releaserPublic, sealed []byte, err error) {
 	if len(pin) < MinPIN || len(pin) > MaxPIN {
 		return nil, nil, errors.New("pinrelease: the PIN has the wrong length")
 	}
-	r, err := ParseRequest(requestText)
+	r, err := d.ParseRequest(requestText)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -251,8 +302,8 @@ func Seal(pin, requestText []byte) (releaserPublic, sealed []byte, err error) {
 
 // Open opens a sealed PIN with the one-time key of the request. It fails for another request's key, another request
 // text, or a changed octet. The caller wipes the PIN.
-func Open(own *ecdh.PrivateKey, requestText, releaserPublic, sealed []byte) ([]byte, error) {
-	r, err := ParseRequest(requestText)
+func (d Domains) Open(own *ecdh.PrivateKey, requestText, releaserPublic, sealed []byte) ([]byte, error) {
+	r, err := d.ParseRequest(requestText)
 	if err != nil {
 		return nil, err
 	}

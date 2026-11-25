@@ -27,6 +27,7 @@ import (
 	"github.com/truvity/atoom/key/conformance"
 	keyv1alpha1 "github.com/truvity/atoom/key/gen/atoom/key/v1alpha1"
 	"github.com/truvity/atoom/key/gen/atoom/key/v1alpha1/keyv1alpha1connect"
+	"github.com/truvity/atoom/key/pinrelease"
 	"github.com/truvity/atoom/key/purpose"
 	"github.com/truvity/atoom/key/signature"
 	"github.com/truvity/atoom/key/yubikeypiv"
@@ -856,5 +857,16 @@ func TestTheKeyIDIsTheSlotAndTheFingerprint(t *testing.T) {
 	res, err := sign(r.key, "token-signing", "ES384", digest384())
 	if err != nil || res.GetKeyId() != want {
 		t.Fatalf("Sign key_id %q, want %q (%v)", res.GetKeyId(), want, err)
+	}
+}
+
+// The PIN release domains are the host's: a pair that cannot keep the request and the answer apart refuses the start, before the
+// card is opened.
+func TestPinReleaseDomainsThatCannotKeepTheTextsApartRefuseTheStart(t *testing.T) {
+	c := cardtest.New()
+	_, err := yubikeypiv.New(yubikeypiv.Options{Purposes: refPurposes(), Serial: c.SerialNo, Open: c.Opener(),
+		PinReleaseDomains: pinrelease.Domains{Request: "example-pin-release", Answer: "example-pin-release"}})
+	if !errors.Is(err, pinrelease.ErrDomains) {
+		t.Fatalf("err = %v, want pinrelease.ErrDomains", err)
 	}
 }

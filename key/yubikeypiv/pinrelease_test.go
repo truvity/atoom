@@ -60,6 +60,9 @@ type planPayload struct {
 	Nodes map[string]string `json:"nodes"` // the node, and its pin-release key, SPKI in base64url
 }
 
+// neutralDomains is the zero pinrelease.Domains, which the drivers of these tests use: atoom's neutral pair.
+var neutralDomains pinrelease.Domains
+
 func (p *planChecker) PeerKey(_ context.Context, doc []byte, node string) (*ecdsa.PublicKey, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -251,7 +254,7 @@ func TestALockedDriverIsUnlockedByAPeersRelease(t *testing.T) {
 	b := newBoundary(t)
 	text, sig := begin(t, b.locked)
 	a := seal(t, b, text, sig)
-	ans, err := pinrelease.ParseAnswer(a.GetAnswerText())
+	ans, err := neutralDomains.ParseAnswer(a.GetAnswerText())
 	if err != nil || ans.Releaser != releaserNode || ans.Requester != lockedNode || ans.Boundary != testBoundary {
 		t.Fatalf("answer %+v, %v", ans, err)
 	}
@@ -310,7 +313,7 @@ func TestThePinReleaseKeySignsOnlyTheDriversOwnTexts(t *testing.T) {
 		wantRefused(t, err, connect.CodeInvalidArgument, "purpose")
 	}
 	text, sig := begin(t, b.locked)
-	r, err := pinrelease.ParseRequest(text)
+	r, err := neutralDomains.ParseRequest(text)
 	if err != nil || r.Boundary != testBoundary || r.Node != lockedNode {
 		t.Fatalf("request %+v, %v", r, err)
 	}
@@ -343,7 +346,7 @@ func TestARequestNoListedPeerCardSignedIsNotSealed(t *testing.T) {
 	wantRefused(t, err, connect.CodeFailedPrecondition, "signature")
 
 	// A request in the releasing node's own name, with key@'s own ephemeral key.
-	own, err := pinrelease.RequestText(pinrelease.Request{Boundary: testBoundary, Node: releaserNode, ID: newID(t), Ephemeral: newEphemeral(t)})
+	own, err := neutralDomains.RequestText(pinrelease.Request{Boundary: testBoundary, Node: releaserNode, ID: newID(t), Ephemeral: newEphemeral(t)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -351,7 +354,7 @@ func TestARequestNoListedPeerCardSignedIsNotSealed(t *testing.T) {
 	wantRefused(t, err, connect.CodeFailedPrecondition, "peer")
 
 	// The text that is verified is the text that is sealed to: a genuine signature over another text does not carry.
-	forged, err := pinrelease.RequestText(pinrelease.Request{Boundary: testBoundary, Node: lockedNode, ID: newID(t), Ephemeral: newEphemeral(t)})
+	forged, err := neutralDomains.RequestText(pinrelease.Request{Boundary: testBoundary, Node: lockedNode, ID: newID(t), Ephemeral: newEphemeral(t)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -384,7 +387,7 @@ func TestARequestOfAnotherBoundaryIsRefused(t *testing.T) {
 	other := startOpts(t, c, factoryDefaults, self(), yubikeypiv.Options{Purposes: refPurposes(), Node: "node-o", Boundary: "other", PeerKeys: b.newPeers()})
 	plan := b.signPlan(t, 2, b.entry(t, releaserNode, b.releaser), b.entry(t, "node-o", other))
 	text, sig := begin(t, other)
-	if r, err := pinrelease.ParseRequest(text); err != nil || r.Boundary != "other" {
+	if r, err := neutralDomains.ParseRequest(text); err != nil || r.Boundary != "other" {
 		t.Fatalf("request %+v, %v", r, err)
 	}
 	_, err := sealPin(b.releaser, text, sig, plan)
@@ -462,20 +465,20 @@ func TestAnAnswerNoListedPeerCardSignedIsNoPINAttempt(t *testing.T) {
 	text, sig := begin(t, b.locked) // a new request replaces the one-time key of the old one
 	a := seal(t, b, text, sig)
 	at, asig := a.GetAnswerText(), a.GetAnswerSignatureDer()
-	ans, err := pinrelease.ParseAnswer(at)
+	ans, err := neutralDomains.ParseAnswer(at)
 	if err != nil {
 		t.Fatal(err)
 	}
 	tamperedAnswer := ans
 	tamperedAnswer.Sealed = append([]byte(nil), ans.Sealed...)
 	tamperedAnswer.Sealed[len(tamperedAnswer.Sealed)-1] ^= 1
-	tampered, err := pinrelease.AnswerText(tamperedAnswer)
+	tampered, err := neutralDomains.AnswerText(tamperedAnswer)
 	if err != nil {
 		t.Fatal(err)
 	}
 	selfAnswer := ans
 	selfAnswer.Releaser = lockedNode
-	inOwnName, err := pinrelease.AnswerText(selfAnswer)
+	inOwnName, err := neutralDomains.AnswerText(selfAnswer)
 	if err != nil {
 		t.Fatal(err)
 	}

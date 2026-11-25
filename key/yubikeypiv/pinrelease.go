@@ -157,7 +157,7 @@ func (s *Service) BeginPinRelease(ctx context.Context, req *connect.Request[keyv
 	if err != nil {
 		return nil, s.internalRefusal(ctx, "BeginPinRelease")
 	}
-	text, err := pinrelease.RequestText(pinrelease.Request{Boundary: s.boundary, Node: s.node, ID: id, Ephemeral: k.PublicKey().Bytes()})
+	text, err := s.domains.RequestText(pinrelease.Request{Boundary: s.boundary, Node: s.node, ID: id, Ephemeral: k.PublicKey().Bytes()})
 	if err != nil {
 		return nil, s.refuse(ctx, "BeginPinRelease", connect.CodeFailedPrecondition, reasonRequest, "")
 	}
@@ -196,7 +196,7 @@ func (s *Service) signPinText(ctx context.Context, method string, text []byte) (
 func (s *Service) SealPin(ctx context.Context, req *connect.Request[keyv1alpha1.SealPinRequest]) (*connect.Response[keyv1alpha1.SealPinResponse], error) {
 	const method = "SealPin"
 	text := req.Msg.GetRequestText()
-	r, err := pinrelease.ParseRequest(text)
+	r, err := s.domains.ParseRequest(text)
 	if err != nil {
 		return nil, s.refuse(ctx, method, connect.CodeInvalidArgument, reasonRequest, "request_text")
 	}
@@ -216,11 +216,11 @@ func (s *Service) SealPin(ctx context.Context, req *connect.Request[keyv1alpha1.
 		return nil, s.refuse(ctx, method, connect.CodeFailedPrecondition, reasonLocked, "")
 	}
 	defer clear(pin)
-	pub, sealed, err := pinrelease.Seal(pin, text)
+	pub, sealed, err := s.domains.Seal(pin, text)
 	if err != nil {
 		return nil, s.internalRefusal(ctx, method)
 	}
-	at, err := pinrelease.AnswerText(pinrelease.Answer{
+	at, err := s.domains.AnswerText(pinrelease.Answer{
 		Boundary: s.boundary, Releaser: s.node, Requester: r.Node, ID: r.ID, RequestSHA384: pinrelease.Digest(text),
 		Ephemeral: pub, Sealed: sealed,
 	})
@@ -243,7 +243,7 @@ func (s *Service) SealPin(ctx context.Context, req *connect.Request[keyv1alpha1.
 func (s *Service) FinishPinRelease(ctx context.Context, req *connect.Request[keyv1alpha1.FinishPinReleaseRequest]) (*connect.Response[keyv1alpha1.FinishPinReleaseResponse], error) {
 	const method = "FinishPinRelease"
 	at := req.Msg.GetAnswerText()
-	a, err := pinrelease.ParseAnswer(at)
+	a, err := s.domains.ParseAnswer(at)
 	if err != nil {
 		return nil, s.refuse(ctx, method, connect.CodeInvalidArgument, reasonAnswer, "answer_text")
 	}
@@ -280,7 +280,7 @@ func (s *Service) FinishPinRelease(ctx context.Context, req *connect.Request[key
 		return nil, s.refuse(ctx, method, connect.CodeFailedPrecondition, reasonOneTimeKey, "")
 	}
 	s.oneTime = nil // used once, whatever follows
-	pin, err := pinrelease.Open(ot.key, ot.text, a.Ephemeral, a.Sealed)
+	pin, err := s.domains.Open(ot.key, ot.text, a.Ephemeral, a.Sealed)
 	if err != nil {
 		if errors.Is(err, pinrelease.ErrFormat) {
 			return nil, s.refuse(ctx, method, connect.CodeInvalidArgument, reasonSealed, "answer_text")
