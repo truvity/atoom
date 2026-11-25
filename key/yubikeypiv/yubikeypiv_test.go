@@ -469,8 +469,7 @@ func TestTheAuditLogKeyIsP256AndSignsSHA256(t *testing.T) {
 	wantRefused(t, err, connect.CodeInvalidArgument, "algorithm")
 }
 
-// A purpose with no slot, named or default, is refused when the driver starts, before it opens a card; issuance-log, which the card driver
-// had no row for, now takes the slot of the reference map (89) like any purpose a host declares.
+// A purpose with no slot is refused when the driver starts, before it opens a card; no slot is taken from the reference map (record 0021).
 func TestAPurposeWithNoSlotIsRefusedAtTheStart(t *testing.T) {
 	c := cardtest.New()
 	opened := 0

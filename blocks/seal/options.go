@@ -47,7 +47,7 @@ type Purpose struct {
 	Code byte
 	// Algorithm is the algorithm of a UseSign purpose's key: purpose.ES384, purpose.ES256 or purpose.RS256.
 	Algorithm string
-	// Slot is the PIV slot of a UseSign purpose on a card (purpose.Declaration.Slot); empty takes the slot of the reference map.
+	// Slot is the PIV slot of a UseSign purpose on a card (purpose.Declaration.Slot); a card driver requires it (record 0021).
 	Slot string
 	// CallerGeneration says that the caller of Mac names the generation of a UseMac purpose's key, at least 1 (sluis's pseudonym key,
 	// whose generation is an epoch). Without it Mac uses the current generation, as Seal does.
@@ -326,7 +326,8 @@ func (o Options) withDefaults() (Options, map[string]Purpose, error) {
 // KeyPurposes is the block's declaration to its key driver (record 0016, the B13 API): the wrapping purpose (ECDH-P384, agree) and each
 // signing purpose of the host's declaration with its algorithm and slot. The data-key purposes are not the key store's: a data key is
 // made by the block and kept only wrapped. The host passes the result, with any purposes of its own, to the driver it starts
-// (Options.Purposes of key/software, key/awskms and key/yubikeypiv, or the --purposes file of a thin main).
+// (Options.Purposes of key/software, key/awskms and key/yubikeypiv, or the --purposes file of a thin main). The wrapping declaration
+// names no slot: a host that gives it to a card driver sets its Slot (out[0]) first, as the card driver takes no slot from a reference map.
 func KeyPurposes(wrappingPurpose string, purposes []Purpose) []purpose.Declaration {
 	if wrappingPurpose == "" {
 		wrappingPurpose = DefaultWrappingPurpose

@@ -86,8 +86,8 @@ type Options struct {
 	// host decides where this is on.
 	AllowFactoryDefaults bool
 	// Purposes are the purposes the host declares: the only names the driver holds a key for, each with its algorithm (ES256, ES384,
-	// RS256 or ECDH-P384), its operations and, when it names one, its PIV slot; a purpose that names none takes the slot of the reference
-	// map (slotplan.Default). Required. The driver refuses a declaration that the card cannot follow (two purposes in one slot, a slot
+	// RS256 or ECDH-P384), its operations and its PIV slot, which every purpose but pin-release must name (purpose.Reference()
+	// names the slots of the reference map, slotplan.Reference). Required. The driver refuses a declaration that the card cannot follow (two purposes in one slot, a slot
 	// that is no slot of a board, a purpose with no slot, an algorithm that a card does not hold) before it opens the card, and a card
 	// whose slot holds a key that is not the declared one (another algorithm, another origin) refuses the start. The PIN release key is
 	// the purpose pin-release: ES384, slot 87, and it signs nothing for a caller.

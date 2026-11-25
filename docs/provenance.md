@@ -136,9 +136,9 @@ From sluis `3f0afea`.
 
 | Here | From sluis | Changed |
 | --- | --- | --- |
-| `slotplan/slotplan.go`, `slotplan_test.go`, `testdata/vectors.json` | `kits/go/slotplan/` | the package comment says that `Default` is the reference map; the test that held `Default` to sluis's `docs/architecture/keys.yaml` stayed in sluis, and the other half (the ten rows of version 1, no slot in the rotation spares, the card serves a subset) is here |
+| `slotplan/slotplan.go`, `slotplan_test.go`, `testdata/vectors.json` | `kits/go/slotplan/` | the package comment says that `Default` is the reference map (since 0.7.0 `Reference`, which `Resolve` no longer takes a slot from; `WithReference` fills them in when a host asks, record 0021); the test that held `Default` to sluis's `docs/architecture/keys.yaml` stayed in sluis, and the other half (the ten rows of version 1, no slot in the rotation spares, the card serves a subset) is here |
 | `slotplan/docs/` | record 0006 ("The slot plan", the default slot map version 2) and `docs/reference/keys.md` | rewritten |
-| `pinrelease/pinrelease.go`, `pinrelease_test.go` | `kits/go/pinrelease/` | `PurposePinRelease` and `SlotPinRelease` are here; the wire domains `sluis-pin-release-v1` and `sluis-pin-release-answer-v1` are unchanged, since they are the wire of every board |
+| `pinrelease/pinrelease.go`, `pinrelease_test.go` | `kits/go/pinrelease/` | `PurposePinRelease` and `SlotPinRelease` are here; the wire domains `sluis-pin-release-v1` and `sluis-pin-release-answer-v1` were kept until 0.7.0; since then the host passes them (`Domains`, record 0021), and sluis passes these two so that its boards keep their wire |
 
 sluis's Rust loader of its signed key plan reads the same `slotplan/testdata/vectors.json`; since step B13 the `card` column of the vectors refuses only an algorithm that a card does not hold (the card driver serves any purpose a host declares), and `CardServed` holds the fourteen rows whose algorithm a card holds. What stayed in sluis: `kits/go/pinrelease/slotmap.go` (it reads the slot map of a signed key plan).
 

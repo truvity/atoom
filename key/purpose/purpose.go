@@ -56,8 +56,8 @@ type Declaration struct {
 	Algorithm string `json:"algorithm"`
 	// Operations are the operations the host allows: sign for ES384, ES256 and RS256, agree for ECDH-P384, or none.
 	Operations []Operation `json:"operations"`
-	// Slot is the PIV slot of the purpose on a card, two lower-case hex digits; empty takes the slot of the reference map
-	// (key/slotplan, Default). Only the card driver reads it; the others ignore it.
+	// Slot is the PIV slot of the purpose on a card, two lower-case hex digits. The card driver requires it (record 0021: no slot is
+	// taken from a reference map), except for pin-release, whose slot is the PIN release's own, 87; the others ignore it.
 	Slot string `json:"slot,omitempty"`
 }
 

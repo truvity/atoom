@@ -2,12 +2,12 @@
 // signed key plan lives in. Every program that takes a slot map asks it the same question, so that they refuse the same maps:
 // sluis's key service when it starts and in its check command, and the commands that read a configuration before it is used.
 //
-// Default is the reference map: the purposes of sluis, the first host (docs/slot-plan.md). A host with other purposes declares them to the
-// card driver (key/purpose), with the slot of each named or taken from here; the mechanism (Resolve, Check, CheckCard) is the part that
-// is not sluis's, and the card driver builds its slot plan with Resolve.
+// Reference is the reference map: the purposes of sluis, the first host (docs/slot-plan.md), as data a host may take. The mechanism
+// (Resolve, Check, CheckCard) knows no purpose name (record 0021): every card-key purpose names its slot, and Resolve refuses one that
+// names none. A host whose plans let a purpose take the reference slot (sluis's KeyPlan, REQ-PKI-042) fills them in first, explicitly,
+// with WithReference; purpose.Reference() carries the reference slots already. The card driver builds its slot plan with Resolve.
 //
-// The map is the default one (version 2) with the installation's overrides: a purpose names its slot in the KeyPlan, or
-// takes the default. A purpose the KeyPlan does not list is not enabled, needs no slot and gets no key (REQ-PKI-042).
+// A purpose a plan does not list is not enabled, needs no slot and gets no key.
 package slotplan
 
 import (
@@ -21,13 +21,13 @@ import (
 // carried by a card, and the card driver says it with the same constant.
 const CardStore = "yubikey-piv"
 
-// Default is the default map, version 2 (decided 2026-11-18, maintainer decision S1 A): the slot of each purpose that has one.
-// Version 2 changed only slots that version 1 left spare, so the first ten rows are version 1's. A purpose that is enabled and
-// is not listed in a KeyPlan with a slot takes its slot from here, so that enabling a purpose later never renumbers the keys
-// of a live card. The slots 90 to 95 have no holder: they are the rotation spares, and a purpose the map does not hold is named
+// Reference is the reference map, version 2 (decided 2026-11-18, maintainer decision S1 A): the slot of each purpose that has one.
+// Version 2 changed only slots that version 1 left spare, so the first ten rows are version 1's. It is not a default of the mechanism:
+// a host that wants a purpose to take its slot from here says so with WithReference, so that enabling a purpose later never renumbers
+// the keys of a live card. The slots 90 to 95 have no holder: they are the rotation spares, and a purpose the map does not hold is named
 // in a KeyPlan with one of them. Slot 9e is not used, and f9, the Yubico attestation slot, is no board slot at all
 // (sluis docs/architecture/keys.yaml, slot_plan). Cloud federation keys and NATS keys are not card keys and have no row.
-var Default = map[string]string{
+var Reference = map[string]string{
 	"x509-intermediate":   "9c",
 	"token-signing":       "9a",
 	"wrapping":            "9d",
@@ -47,7 +47,7 @@ var Default = map[string]string{
 	"audit-log-second":    "8f",
 }
 
-// CardServed is the set of purposes of Default whose key a card holds: every one whose algorithm is ES384, ES256, RS256 or ECDH-P384,
+// CardServed is the set of purposes of Reference whose key a card holds: every one whose algorithm is ES384, ES256, RS256 or ECDH-P384,
 // which is the whole of what a YubiKey 5 with the firmware floor of the driver generates. The card driver serves any purpose that a host
 // declares with such an algorithm and a slot (key/purpose), so this is no limit of the driver: it says which rows of the reference
 // map a card can hold, and the three that it cannot are the ones with PS256 (8b) and EdDSA (8d, 8e), for which CheckCard refuses a plan.
@@ -73,7 +73,8 @@ var CardServed = map[string]bool{
 // the port has no algorithm for it yet; both join onCard and the port together.
 var cardless = map[string]bool{"PS256": true, "EdDSA": true}
 
-// Purpose is one entry of a KeyPlan: a purpose, the algorithm of its key and the slot it names ("" for the default).
+// Purpose is one entry of a plan: a purpose, the algorithm of its key and the slot it names ("" names none, which Resolve refuses
+// for a card-key purpose).
 type Purpose struct {
 	Name, Algorithm, Slot string
 }
@@ -106,9 +107,21 @@ func validSlot(s string) bool {
 	return err == nil && n >= 0x82 && n <= 0x95
 }
 
-// Resolve returns the slot of each card-key purpose of the list: the one it names, else the default. It refuses, with a
-// path and a word and never a value, a slot that is no board slot, a purpose with no slot (not named and no default), two
-// purposes in one slot and a purpose listed twice. Refusals are collected in the order of the list.
+// WithReference returns a copy of the list in which every purpose that names no slot takes its slot from Reference, when Reference
+// has one. A host whose plans let a purpose take the reference slot calls it before Resolve or Check; the mechanism never does.
+func WithReference(purposes []Purpose) []Purpose {
+	out := slices.Clone(purposes)
+	for i, p := range out {
+		if p.Slot == "" {
+			out[i].Slot = Reference[p.Name]
+		}
+	}
+	return out
+}
+
+// Resolve returns the slot of each card-key purpose of the list: the one it names. It refuses, with a path and a word and never a
+// value, a slot that is no board slot, a purpose that names no slot, two purposes in one slot and a purpose listed twice. Refusals
+// are collected in the order of the list. It takes no slot from Reference (WithReference does, for a host that asks).
 func Resolve(purposes []Purpose) (map[string]string, error) {
 	slots := map[string]string{}
 	bySlot := map[string]string{}
@@ -124,12 +137,8 @@ func Resolve(purposes []Purpose) (map[string]string, error) {
 		}
 		slot := p.Slot
 		if slot == "" {
-			def, ok := Default[p.Name]
-			if !ok {
-				problems = append(problems, where+": no slot (name one of the spare slots 90 to 95)")
-				continue
-			}
-			slot = def
+			problems = append(problems, where+": no slot (name one of the spare slots 90 to 95)")
+			continue
 		}
 		if !validSlot(slot) {
 			problems = append(problems, where+".slot: not a slot of a board")

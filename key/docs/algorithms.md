@@ -46,7 +46,7 @@ The port holds no list of purposes: the host declares each purpose with its algo
 - **The software driver** generates the key with Go's `crypto`, and holds it in a file named after the purpose.
 - **PIN release.** The purpose named `pin-release` is the card's PIN release key: `ES384`, slot 87, PIN never, signing only the driver's own texts. It is an ordinary name on the other drivers.
 - **Optional on the card.** An `RS256` purpose is optional on a card: a card whose slot holds a key that is not the declared one still starts, with that purpose absent. Every other key of the plan refuses the start.
-- **The card's slots** are in the [slot plan](../slotplan/docs/slot-plan.md): the reference map gives sluis's purposes their slots, and a host names the slot of any other purpose, usually a rotation spare (`90` to `95`). The software driver holds each key in a file and ignores slots.
+- **The card's slots** are in the [slot plan](../slotplan/docs/slot-plan.md): the reference map lists sluis's purposes with their slots (`purpose.Reference()` carries them), and a host names the slot of every purpose it declares, usually a rotation spare (`90` to `95`). The software driver holds each key in a file and ignores slots.
 
 ## DER and raw signatures
 
