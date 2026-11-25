@@ -48,7 +48,7 @@ Every refusal is a Connect error with the `Refusal` detail of [common](../../com
 | Driver | Backend | Where it fits |
 | --- | --- | --- |
 | [transport/spool](../spool/README.md) | a local directory of fsync'd segment files, bounded | a host with a disk, where a message must survive the consumer being down |
-| `transport/sqs` | an Amazon SQS queue | Lambda (planned, step B9): a Go driver that the function mounts in process, so audit on Lambda needs no spool sidecar as an extension ([record 0022](../../docs/decisions/0022-the-blocks-order-after-0-7-0.md)). SQS delivers at least once: the driver and the kit prove that a usage-class message survives a redelivery as exactly one record, through the writer's dedup by message id (a redelivery and duplicate case in the kit) |
+| [transport/sqs](../sqs/README.md) (Go) | an Amazon SQS FIFO queue | Lambda (step B9): a Go driver that the function mounts in process, so audit on Lambda needs no spool sidecar as an extension ([record 0022](../../docs/decisions/0022-the-blocks-order-after-0-7-0.md)). SQS delivers at least once, and the kit's redelivery and duplicate case holds it to one record by uid; a FIFO group gives it a window of one receive |
 | [transport/nats](../nats/README.md) (Go) | a NATS JetStream stream and a durable consumer | a cluster that runs NATS: a Go driver a host mounts in process, so that its audit records need no sidecar (step B9, [record 0023](../../docs/decisions/0023-session-to-done-first.md)); the delivery id is the stream sequence, a retry is dropped by `Nats-Msg-Id`, the connection and its credentials are the host's |
 
 ## The call context

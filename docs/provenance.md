@@ -265,6 +265,20 @@ New code written for atoom (step B9, [record 0023](decisions/0023-session-to-don
 | `cmd/nats/` | `key/awskms/cmd/awskms/`, `source/file/cmd/file/` | the flags, the exit codes, the socket and the tests of the guard of the other Go mains; the connection's credentials as flags |
 | `docs/nats.md` | new | |
 
+### transport/sqs
+
+<a id="transport-sqs"></a>
+
+New code written for atoom (step B9, records [0022](decisions/0022-the-blocks-order-after-0-7-0.md) and [0023](decisions/0023-session-to-done-first.md)); nothing came from sluis.
+
+| Here | From | Changed |
+| --- | --- | --- |
+| `sqs.go` | new; the held deliveries of `transport/nats` | the transport port over an SQS FIFO queue |
+| `internal/sqsfake/` | new | an in-process fake of a FIFO queue's rules |
+| `local_test.go` | the ElasticMQ-gated shape of `store/dynamodb/local_test.go` | |
+| `cmd/sqs/` | `key/awskms/cmd/awskms/`, `transport/nats/cmd/nats/` | |
+| `docs/sqs.md` | new | |
+
 ## index
 
 <a id="index"></a>
