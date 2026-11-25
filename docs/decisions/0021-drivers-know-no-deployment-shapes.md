@@ -32,7 +32,14 @@ What moved where:
 
 - A breaking change of the Go API of `key/software` and `key/yubikeypiv`, and of the command lines of both thin mains; the release that carries it raises the minor version ([0015](0015-versioning-and-consumption.md)). The wire and the contracts do not change.
 - A host that passed `Environment: development` to the card driver passes `AllowFactoryDefaults: true`; one that passed `staging` or `production` passes nothing. A host that used `RefuseProduction` keeps the rule in its own code, before it starts the driver.
-- The rest of the repository was swept for the same kind of knowledge; what was mechanical was fixed with this record (the rqlite driver's schema refusal named the first host's recipes), and the rest is listed for the owner in the pull request that carries this record.
+- The rest of the repository was swept for the same kind of knowledge, and what it found is fixed in the same release (below).
+
+## The sweep: fixed in the same release
+
+The owner asked for every mistake of this kind to be fixed, in one break:
+
+- **`store/rqlite`:** the refusal of another schema version named the first host's recipes; it now says the driver migrates no data and the host recreates the store's data.
+- **The correlation header (step B14, [0009](0009-connectrpc-in-process.md)):** `Sluis-Correlation-Id` named a product on a shared contract. The header is `Atoom-Correlation-Id`; for the 0.7.x releases a server reads it first and the old name after it (`HeaderCorrelationLegacy`, `HEADER_CORRELATION_LEGACY`, deprecated), and a client sends the new name only. The old name goes in the release after.
 
 ## Roads not taken
 

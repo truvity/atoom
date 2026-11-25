@@ -16,8 +16,13 @@ use connectrpc::interceptor::{
 use connectrpc::{ConnectError, RequestContext};
 use http::{HeaderValue, Request};
 
-/// The header that carries the correlation id: one id for a request and every call it causes.
-pub const HEADER_CORRELATION: &str = "sluis-correlation-id";
+/// The header that carries the correlation id: one id for a request and every call it causes. A client sends this name only.
+pub const HEADER_CORRELATION: &str = "atoom-correlation-id";
+
+/// The name the header had before 0.7.0. A server still reads it, after [`HEADER_CORRELATION`], for one release (step B14,
+/// record 0009); a client never sends it. It is removed in the release after 0.7.0.
+#[deprecated(note = "send HEADER_CORRELATION; a server reads this name for one release only")]
+pub const HEADER_CORRELATION_LEGACY: &str = "sluis-correlation-id";
 
 /// The `Connect-Timeout-Ms` header (Connect protocol, "Timeouts"): what is left of the caller's deadline, in milliseconds.
 const TIMEOUT_MS: &str = "connect-timeout-ms";
@@ -109,12 +114,17 @@ pub fn valid_id(id: &str) -> bool {
             .all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-')
 }
 
-/// The id in the headers of a request, if it is a valid one.
+/// The id in the headers of a request, if it is a valid one: the new name first, then, for one release, the legacy name.
+#[allow(deprecated)] // the dual-read window of B14
 fn from_headers(headers: &http::HeaderMap) -> Option<String> {
-    headers
-        .get(HEADER_CORRELATION)
-        .and_then(|v| v.to_str().ok())
-        .filter(|s| valid_id(s))
+    [HEADER_CORRELATION, HEADER_CORRELATION_LEGACY]
+        .into_iter()
+        .find_map(|name| {
+            headers
+                .get(name)
+                .and_then(|v| v.to_str().ok())
+                .filter(|s| valid_id(s))
+        })
         .map(str::to_owned)
 }
 

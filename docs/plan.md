@@ -17,13 +17,13 @@ Built since 0.2.0, by release:
 - **0.4.0:** B3 (the durability of a store driver, [the store port](../store/docs/store-port.md#capabilities)) and B4, the [`seal` block](../blocks/seal/docs/seal-block.md), with its kit and the Go in-process helper `socket.InProcess`.
 - **0.5.0:** B5, the Cedar loader [`policy`](../policy/README.md) in Go and Rust with the signed bundle, the loading rules and the decision test set ([record 0019](decisions/0019-the-policy-bundle-and-its-loader.md)).
 - **0.6.0:** B8a, the [`token` block](../blocks/token/docs/token-block.md) ([record 0020](decisions/0020-the-token-block-is-stateless.md)): compact JWS signed by purpose through `seal`, the key set with a kid rule per purpose and the host's keys, verification, Rust stubs and a thin main released as `atoom-block-token`, its kit, and `key/route`, a key-port client that routes by purpose.
-- **Unreleased (0.7.0, breaking):** the drivers know no deployment shapes ([record 0021](decisions/0021-drivers-know-no-deployment-shapes.md)): `key/software` loses its environments and production floor, `key/yubikeypiv` takes `AllowFactoryDefaults` in place of its environments.
+- **Unreleased (0.7.0, breaking):** the drivers know no deployment shapes ([record 0021](decisions/0021-drivers-know-no-deployment-shapes.md)): `key/software` loses its environments and production floor, `key/yubikeypiv` takes `AllowFactoryDefaults` in place of its environments; and B14, the header `Atoom-Correlation-Id` with a dual-read window, is folded in.
 
-Not built: the blocks `state` and `export`, the rotation ring of step B8b, Lambda extension zips, the drivers marked planned, and the changes of steps B12 and B14 below.
+Not built: the blocks `state` and `export`, the rotation ring of step B8b, Lambda extension zips, the drivers marked planned, and the changes of step B12 below.
 
 ## The blocks phase
 
-Each step is one pull request or a few. The sluis and session pull requests that adopt a step are theirs, and follow the release of the step. The built steps come first; the rest is in the order of [record 0022](decisions/0022-the-blocks-order-after-0-7-0.md) (owner's decisions D43 A, D44 A and D50 A, 2026-11-25): B6, B9, B12, B8b, B7, then B10, B11, B14 and B15.
+Each step is one pull request or a few. The sluis and session pull requests that adopt a step are theirs, and follow the release of the step. The built steps come first (B14 is built in 0.7.0); the rest is in the order of [record 0022](decisions/0022-the-blocks-order-after-0-7-0.md) (owner's decisions D43 A, D44 A and D50 A, 2026-11-25): B6, B9, B12, B8b, B7, then B10, B11 and B15.
 
 | Step | What | Why first |
 | --- | --- | --- |
@@ -34,6 +34,7 @@ Each step is one pull request or a few. The sluis and session pull requests that
 | B4 | `seal` block in Go, moved from sluis key@ ([0013](decisions/0013-what-moves-from-sluis.md): sluis 0006 and the storage part of 0047), with its kit over the memory drivers; it declares its purposes (built: [blocks/seal](../blocks/seal/README.md), with the seal limit and the compromised generations of the owner's decision B-2 A; sluis's wraps move once into its layout, B-3 B) | session seals with it; sluis key@ becomes its host |
 | B5 | The Cedar loading rules, the signed bundle format, loaders in Go and Rust, and the decision test set ([0011](decisions/0011-cedar-as-a-library.md); built: [policy](../policy/README.md), [record 0019](decisions/0019-the-policy-bundle-and-its-loader.md): sluis's signed-config format with the kind `PolicyBundle`, cedar-go and cedar-policy, the known gaps of cedar-go listed in the test set) | session, sluis and audit load policies the same way |
 | B8a | `token` block in Go, stateless ([0020](decisions/0020-the-token-block-is-stateless.md); built: [blocks/token](../blocks/token/README.md)): signs through `seal` (owner's answer Q1 B, with `key/route` for a driver per purpose), a key set of the current keys and the keys the host hands in with their `x5c` (Q2 C), a kid rule per purpose, `key_id` or the RFC 7638 thumbprint (Q3 A), Rust stubs and a thin main for sluis's Rust `signer` (Q4 A) | session's signed client assertions and identity header; sluis signer |
+| B14 | The header `Atoom-Correlation-Id` (below; built in 0.7.0, [record 0021](decisions/0021-drivers-know-no-deployment-shapes.md)): a server reads it first and `Sluis-Correlation-Id` after it for the 0.7.x releases; a client sends the new name only | a neutral name on a shared contract |
 | B6 | `store/postgres` | sluis core on Kubernetes |
 | B9 | Lambda extension zips per driver, the column of [packages](packages.md), and the drivers `source/appconfig`, `source/ssm`, `blob/s3`, `transport/sqs` ([0010](decisions/0010-distribution-per-driver-and-lambda.md)). `transport/sqs` is a Go driver that a Lambda host mounts in process: audit on Lambda emits through it, with no spool sidecar as a Lambda extension ([0022](decisions/0022-the-blocks-order-after-0-7-0.md), D44 A). SQS delivers at least once, so the driver and the transport kit prove that a usage-class message (truvity/audit record 0006: never dropped, counted once) survives redelivery as exactly one record, through the writer's dedup by message id: the kit gains a redelivery and duplicate case (D50 A) | sluis core on Lambda; session step 5; audit on Lambda |
 | B12 | Generic blob, transport and index contracts (below) | audit's model leaves atoom (owner principle: atoom knows no product, [0021](decisions/0021-drivers-know-no-deployment-shapes.md)); before B15, so that the new backends implement the generic contracts |
@@ -41,7 +42,6 @@ Each step is one pull request or a few. The sluis and session pull requests that
 | B7 | `state` block in Rust, moved from sluis store@ (sluis 0005), with the registry of kinds that any product extends ([0008](decisions/0008-blocks.md)) | sluis store@ becomes its host; audit declares its kinds |
 | B10 | `store/valkey` | Valkey-backed sessions |
 | B11 | `export` block | sluis exporter@ |
-| B14 | The header `Atoom-Correlation-Id` (below) | a neutral name on a shared contract |
 | B15 | The drivers `index/rqlite`, `index/postgres` and `transport/nats` (below) | audit's search and transport on more backends |
 
 Audit is not here: it is the product of `truvity/audit`, built on these ports. The steps B12 and B15 serve it, and B13 and B14 serve every consumer.
@@ -68,7 +68,7 @@ Each breaks a contract that is `v1alpha1`, so each raises the minor version of t
 - `purpose.Reference()` is the declaration of sluis, the purposes that the drivers held in closed lists before; a host that wants them as they were passes it. sluis adopts this at its next pin of atoom (the changes are in the pull request).
 - Done when: a host declares a purpose that no driver knew, and the kit passes. The kit's own purposes are such names.
 
-### B14. `Atoom-Correlation-Id` (record 0009)
+### B14. `Atoom-Correlation-Id` (record 0009; built in 0.7.0)
 
 - The constant `call::HEADER_CORRELATION` (Rust) and `call.HeaderCorrelation` (Go) become `Atoom-Correlation-Id`.
 - A server reads the new name first and accepts `Sluis-Correlation-Id` for one release. A client sends the new name only.

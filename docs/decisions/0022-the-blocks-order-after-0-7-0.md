@@ -10,13 +10,13 @@ Audit on Lambda also needs a way to emit. [0010](0010-distribution-per-driver-an
 
 ## Decision
 
-- **The order after 0.7.0 is B6, B9, B12, B8b, B7, then B10, B11, B14 and B15** (D43 A). The reasons, by step:
+- **The order after 0.7.0 is B6, B9, B12, B8b, B7, then B10, B11, B14 and B15** (D43 A). B14 was then folded into 0.7.0 with record 0021 (the owner's sweep), so it leaves the list. The reasons, by step:
   - **B6** (`store/postgres`) unblocks sluis core on Kubernetes.
   - **B9** (the Lambda drivers and zips) unblocks sluis core on Lambda, session's step 5 and audit on Lambda.
   - **B12** (generic blob, transport and index) takes audit's model out of atoom, as the principle "atoom knows no product" asks, and comes before B15 so that the new backends implement the generic contracts.
   - **B8b** (the rotation ring) is needed before session's first site that rotates a signing key, which comes after the above.
   - **B7** (the `state` block) and the rest follow, as before.
-- **B12 is not folded into 0.7.0.** It changes three contracts, their Go and Rust stubs, four drivers (`blob/fs`, `blob/fsreadonly`, `transport/spool`, `index/sqlite`, whose fixed columns become declared ones) and three kits, and truvity/audit and sluis adapt after it: several pull requests, not a small change. 0.7.0 carries record 0021 alone; B12 only moves up.
+- **B12 is not folded into 0.7.0.** (B14 is: it is two constants and a dual read.) It changes three contracts, their Go and Rust stubs, four drivers (`blob/fs`, `blob/fsreadonly`, `transport/spool`, `index/sqlite`, whose fixed columns become declared ones) and three kits, and truvity/audit and sluis adapt after it: several pull requests, not a small change. 0.7.0 carries record 0021 alone; B12 only moves up.
 - **Audit on Lambda emits through `transport/sqs`, a Go driver that the Lambda host mounts in process** (D44 A), as part of B9. There is no spool sidecar as a Lambda extension. This narrows 0010 for this driver and this consumer: a Go function links the library and needs no extension.
 - **`transport/sqs` proves that a message survives redelivery once** (D50 A). SQS delivers at least once, so the same message can arrive twice. The driver and the transport kit prove that a usage-class message (truvity/audit record 0006: never dropped, counted once) that is delivered again becomes exactly one record, through the writer's dedup by message id. The transport kit gains a redelivery and duplicate case for every driver that can redeliver.
 

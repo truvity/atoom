@@ -330,3 +330,47 @@ async fn outside_a_handler_and_a_scope_nothing_is_current() {
     assert_eq!(inside.as_deref(), Some("x-1"));
     let _ = Path::new("");
 }
+
+/// Step B14: for one release a server also reads the name the header had before 0.7.0, after the new one; a client sends the new
+/// name only.
+#[tokio::test]
+#[allow(deprecated)]
+async fn the_server_reads_the_legacy_header_for_one_release_and_the_new_name_first() {
+    let dir = tempfile::tempdir().unwrap();
+    let s = up(socket(&dir, "a.sock"), Allow::SameUid, None).await;
+    let c = dial(&socket(&dir, "a.sock"));
+    let legacy = |id: &str| {
+        CallOptions::default().with_header(
+            http::HeaderName::from_static(call::HEADER_CORRELATION_LEGACY),
+            http::HeaderValue::from_str(id).unwrap(),
+        )
+    };
+    let r = see(&c, legacy("old-name")).await.unwrap();
+    assert_eq!(
+        seen(&r).id.as_deref(),
+        Some("old-name"),
+        "the legacy name was not read"
+    );
+    let both = legacy("old-name").with_header(
+        http::HeaderName::from_static(HEADER_CORRELATION),
+        http::HeaderValue::from_static("new-name"),
+    );
+    let r = see(&c, both).await.unwrap();
+    assert_eq!(
+        seen(&r).id.as_deref(),
+        Some("new-name"),
+        "the new name is read first"
+    );
+    let bad_new = legacy("old-name").with_header(
+        http::HeaderName::from_static(HEADER_CORRELATION),
+        http::HeaderValue::from_static("not an id"),
+    );
+    let r = see(&c, bad_new).await.unwrap();
+    assert_eq!(
+        seen(&r).id.as_deref(),
+        Some("old-name"),
+        "an invalid new id falls back to the legacy one"
+    );
+    assert_eq!(HEADER_CORRELATION, "atoom-correlation-id");
+    stop(s).await;
+}
