@@ -1,6 +1,6 @@
 # 0022. The order of the blocks phase after 0.7.0; audit on Lambda through an in-process `transport/sqs` that survives redelivery
 
-Status: accepted, 2026-11-25 (owner's decisions D43 A, D44 A and D50 A)
+Status: accepted, 2026-11-25 (owner's decisions D43 A, D44 A and D50 A); its order is superseded by [0023](0023-session-to-done-first.md) (owner direction, 2026-11-25: session to done first), the rest stands
 
 ## Context
 

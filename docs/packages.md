@@ -13,6 +13,7 @@ The table of what is released is [`tools/release/drivers.tsv`](../tools/release/
 | `store/rqlite` | `atoom-store-rqlite` | `atoom-driver-store-rqlite` | `atoom-store-rqlite` | linux | no: Lambda runs no rqlite |
 | `store/memory` | `atoom-store-memory` | `atoom-driver-store-memory` | `atoom-store-memory` | linux | extension zip, for tests |
 | `source/file` | `atoom-source-file` | `atoom-driver-source-file` | `atoom-source-file` | linux | extension zip; a Go function links the Go [`source/file`](#the-go-file-driver) instead |
+| `source/appconfig` | `atoom-source-appconfig` | `atoom-driver-source-appconfig` | `atoom-source-appconfig` | linux, darwin | extension zip, for a function in another language; a Go function links the library instead (session's do, [record 0023](decisions/0023-session-to-done-first.md)) |
 | `source/credential` | `atoom-source-credential` | `atoom-driver-source-credential` | `atoom-source-credential` | linux | no: Lambda has no systemd credentials |
 | `blob/fs` | `atoom-blob-fs` | `atoom-driver-blob-fs` | `atoom-blob-fs` | linux | no: Lambda has no lasting local disk |
 | `blob/fsreadonly` | `atoom-blob-fsreadonly` | `atoom-driver-blob-fsreadonly` | `atoom-blob-fsreadonly` | linux | no: Lambda has no lasting local disk |
@@ -31,7 +32,7 @@ Planned drivers, each released in every form it can run in once it is built:
 | --- | --- | --- | --- |
 | `store/postgres` | PostgreSQL | extension zip | B6 |
 | `store/valkey` | Valkey | extension zip | B10 |
-| `source/appconfig`, `source/ssm` | AWS AppConfig, SSM Parameter Store | extension zip | B9 |
+| `source/ssm` | SSM Parameter Store | extension zip | B9 |
 | `blob/s3` | an S3 bucket | extension zip | B9 |
 | `transport/sqs` | an Amazon SQS queue | none for audit: a Go driver that the Lambda host mounts in process, with no spool sidecar as an extension ([record 0022](decisions/0022-the-blocks-order-after-0-7-0.md)) | B9 |
 | `transport/nats` | NATS JetStream | extension zip | B15 |
@@ -56,7 +57,7 @@ The packages come out as `atoom-driver-<id>_<version>-1_<amd64|arm64>.deb` and `
 
 ## What runs where
 
-- **Architectures.** linux/amd64 and linux/arm64 for every driver, packages and images alike (the images are multi-architecture manifests). **darwin/amd64 and darwin/arm64 tarballs** only for the Go drivers that are pure Go: `key/software`, `key/awskms`, `store/dynamodb`, and the thin main of `blocks/token`. The Rust drivers are Linux only or have no consumer on macOS; the card driver is not built for macOS (its PC/SC build there is unverified, [record 0004](decisions/0004-multi-architecture.md)).
+- **Architectures.** linux/amd64 and linux/arm64 for every driver, packages and images alike (the images are multi-architecture manifests). **darwin/amd64 and darwin/arm64 tarballs** only for the Go drivers that are pure Go: `key/software`, `key/awskms`, `store/dynamodb`, `source/appconfig`, and the thin main of `blocks/token`. The Rust drivers are Linux only or have no consumer on macOS; the card driver is not built for macOS (its PC/SC build there is unverified, [record 0004](decisions/0004-multi-architecture.md)).
 - **Static executables.** Go with CGO off, Rust through cargo-zigbuild to static musl: no C library is needed at run time, and one executable runs on any Linux. The one exception is the card driver.
 - **The card driver, `key/yubikeypiv`,** links libpcsclite with cgo. It is never cross-compiled: it is built on a runner of each architecture, in an Ubuntu 22.04 userland whose glibc (2.35) is older than every system the packages support, and the build fails if the executable asks for a symbol newer than `GLIBC_2.34`, the glibc of Amazon Linux 2023. Its package depends on **`pcscd`** and **`libpcsclite1`** (`pcsc-lite` and `pcsc-lite-libs` on Rocky and Amazon Linux) and recommends the CCID driver (`libccid`, `pcsc-lite-ccid`). No other package has a dependency.
 
@@ -106,4 +107,4 @@ The scripts are in `tools/release/`: `drivers.tsv` (the table), `build.sh`, `nat
 
 ## Why not GoReleaser
 
-sluis generates a GoReleaser configuration from its tree and builds its packages with its own tool. atoom has a table of thirteen drivers and one exception that no single build stage can hold (the card driver is built on two native hosts), so the same table drives plain scripts for the build, the tarballs, the packages (nfpm) and the images, and nothing is generated that could drift. What is the same as in sluis: the build once and promotion by hash, static musl through zig, `cargo auditable`, syft, the sums, the draft-then-publish order, the candidate and its mutants, the native build for the C library.
+sluis generates a GoReleaser configuration from its tree and builds its packages with its own tool. atoom has a table of fourteen drivers and one exception that no single build stage can hold (the card driver is built on two native hosts), so the same table drives plain scripts for the build, the tarballs, the packages (nfpm) and the images, and nothing is generated that could drift. What is the same as in sluis: the build once and promotion by hash, static musl through zig, `cargo auditable`, syft, the sums, the draft-then-publish order, the candidate and its mutants, the native build for the C library.

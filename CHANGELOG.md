@@ -7,6 +7,14 @@ libraries changed. `just release-prepare X.Y.Z` writes the section.
 
 ## Unreleased
 
+### Added
+
+- **`source/appconfig`, the AWS AppConfig driver of the source port** (step B9, session's first part, [record 0023](docs/decisions/0023-session-to-done-first.md)). A Go module that a Lambda function or a Go service links in process, and a thin main `cmd/appconfig` (`serve`, `check`, `version`) released as `atoom-source-appconfig` in every form (tarballs for Linux and macOS, `.deb`, `.rpm`, image). A document is a configuration profile of one application and environment that the host names; `Capabilities` is `POLL`, every read says in `poll_after` when the driver will next ask AppConfig, and no read between two polls calls AppConfig; the label is the SHA-384 of the bytes, as for the file driver. It passes the source kit through its socket over a fake of the AppConfig data plane (`just conformance`), and its tests run through the real AWS SDK client against the same fake. Chosen before `source/ssm` for the size of a signed document (an SSM parameter holds 8 KB at most) and AppConfig's refresh ([its page](source/appconfig/docs/appconfig.md#why-appconfig-first-and-ssm-after)).
+
+### Changed
+
+- **The plan's order: session to done first** ([record 0023](docs/decisions/0023-session-to-done-first.md), owner direction, superseding the order of record 0022): B9 with session's parts first (`source/appconfig`, then `transport/sqs` and the kit's redelivery case), then B8b, B6, B12, B7, B10, B11 and B15. An in-process Go driver needs no Lambda zip, so session's step 5 needs no packaging from atoom.
+
 ### Fixed
 
 - **`transport/conformance`: a driver that lets go of a dropped consumer a moment late no longer fails the kit.** The kit opened the next `Receive` right after dropping a stream and tried again on `already_exists` only when the call itself was refused; a Connect server stream is answered before its handler runs, so the driver's refusal (the spool's `taken`, while it had not yet seen the dropped stream end) came as the first message of the stream and failed `unacknowledged_messages_come_again` and `acknowledged_messages_do_not_come_again` (seen on macOS CI). A refusal with `already_exists` before any delivery now opens the stream again for the same ten seconds, and the silent window of `acknowledged_messages_do_not_come_again` counts from the stream that was served. `a_second_consumer_is_refused` now takes a message on the first stream before it asks for the second, so that the refusal it sees is for that stream. The kit's own test has a driver that lets go late. The transport port says that the release is asynchronous and where the refusal comes; the contract does not change.

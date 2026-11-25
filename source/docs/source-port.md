@@ -28,7 +28,7 @@ The port has three calls:
 - **`watch`** is one of:
   - `NONE`: never. `Watch` is `unimplemented`. A credential cannot change under a running service; a Lambda layer cannot either.
   - `NOTIFY`: the driver pushes. `Watch` is a stream of `(name, version)`: it says nothing while nothing changes, and says the new label (the empty label for a name that went away) when the content changes. The first look sets what the watcher already holds without telling it: a watcher asks for the version it holds with `Read`, and `Watch` says what changed after it began.
-  - `POLL`: the caller asks again. Every `Read` says in `poll_after` when. No driver in this repository polls yet.
+  - `POLL`: the caller asks again. Every `Read` says in `poll_after` when. The AppConfig driver polls: `poll_after` is the time until it next asks AppConfig.
 
 ## Refusals
 
@@ -50,7 +50,8 @@ Every refusal is a Connect error with the `Refusal` detail of [common](../../com
 | [source/file](../file/README.md) (Rust) | a directory of `<name>.jws` documents | `NOTIFY` | a host with its signed configuration in a directory, or a mounted ConfigMap |
 | [source/credential](../credential/README.md) | systemd credentials (`$CREDENTIALS_DIRECTORY`) or a directory of them | `NONE` | a service that gets its secrets from systemd |
 | [source/file](../file/docs/go.md) (Go) | the same directory, linked into a Go process | `NOTIFY` | a Go consumer that reads its documents in-process |
-| `source/appconfig`, `source/ssm` | AWS AppConfig, SSM Parameter Store | `POLL`, `NONE` | Lambda and Kubernetes (planned, step B9) |
+| [source/appconfig](../appconfig/README.md) (Go) | the configurations AWS AppConfig deploys to one application and environment | `POLL` | a Lambda function or a Go service that reads its signed documents from AppConfig in-process (session's site file and policy bundle), or a sidecar |
+| `source/ssm` | SSM Parameter Store | `NONE` | a secret source and small values (planned, step B9) |
 
 The Rust drivers are Linux only (they open files with `openat2`), and say so in their manifests; the macOS jobs of CI leave them out. The Go `source/file` runs on macOS too.
 

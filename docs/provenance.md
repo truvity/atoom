@@ -200,6 +200,20 @@ New code written for atoom, in the directory of the Rust driver. Its contract is
 | `cmd/file/` | `source/file/src/main.rs`; `store/dynamodb/cmd/dynamodb/` | the flags and the exit codes of the Rust main (`check` exits 3); the socket code and the tests of the guard are those of the other Go mains |
 | `docs/go.md` | new | |
 
+### source/appconfig
+
+<a id="source-appconfig"></a>
+
+New code written for atoom (step B9 of the plan, [record 0023](decisions/0023-session-to-done-first.md)); nothing came from sluis.
+
+| Here | From | Changed |
+| --- | --- | --- |
+| `appconfig.go` | new; the name rule and the label of the Go `source/file` | the source port over the AppConfig data plane, `POLL`; `New`, `Handler` and `Run` are the shape of the other Go drivers |
+| `internal/appconfigfake/` | new; the shape of `key/awskms/internal/kmsfake` | a fake of the two operations of the data plane, with a main for the conformance run |
+| `cmd/appconfig/` | `source/file/cmd/file/`, `key/awskms/cmd/awskms/` | the flags, the exit codes (`check` exits 3), the socket and the tests of the guard of the other Go mains |
+| `memnet_test.go` | `source/file/memnet_test.go` | copied |
+| `docs/appconfig.md` | new | |
+
 `buf.yaml` ignores the lint rules that the spellings of the contract break (`NONE`, `NOTIFY`, `POLL` without the enum prefix, `SourceWatchRequest`) rather than rename them. What stayed in sluis: the wrapper mains, store@ (which links the file driver for `store check --validate`), exchange (a client of the port) and the signed configuration.
 
 ## blob

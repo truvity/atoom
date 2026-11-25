@@ -31,7 +31,8 @@ The records were rewritten once, in a clean state, on 2026-11-21, so that each s
 | [0019](0019-the-policy-bundle-and-its-loader.md) | The signed policy bundle, its loading rules and the loader in Go and Rust | 2026-11-24 |
 | [0020](0020-the-token-block-is-stateless.md) | The token block signs through seal and is stateless; the rotation ring is a step of its own (partly supersedes 0008) | 2026-11-25 |
 | [0021](0021-drivers-know-no-deployment-shapes.md) | Drivers and libraries know no deployment shapes; hosts decide | 2026-11-25 |
-| [0022](0022-the-blocks-order-after-0-7-0.md) | The order of the blocks phase after 0.7.0; audit on Lambda through an in-process `transport/sqs` that survives redelivery | 2026-11-25 |
+| [0022](0022-the-blocks-order-after-0-7-0.md) | The order of the blocks phase after 0.7.0; audit on Lambda through an in-process `transport/sqs` that survives redelivery (its order superseded by 0023) | 2026-11-25 |
+| [0023](0023-session-to-done-first.md) | session to done first: B9's session parts lead the order; AppConfig before SSM; no Lambda zip for an in-process Go driver | 2026-11-25 |
 
 ## Renumbered in the clean rewrite of 2026-11-21
 
@@ -45,4 +46,4 @@ No record was renumbered, merged, split or dropped: 0001 to 0013 keep their numb
 
 ## Archive
 
-[archive/](archive/) is empty: no record is superseded as a whole yet. 0012 is partly superseded by 0017, and 0008 by 0020; both stay in place with a note in their status.
+[archive/](archive/) is empty: no record is superseded as a whole yet. 0012 is partly superseded by 0017, 0008 by 0020 and 0022 (its order) by 0023; each stays in place with a note in its status.
