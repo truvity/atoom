@@ -1,6 +1,6 @@
 # 0025. Generic blob, transport and index contracts: the host declares its pointers, its payload and its columns
 
-Status: accepted, 2026-11-25 (owner decision on the pull request: D96 to D101, each choice A; step B12 of the [plan](../plan.md); the owner's D89 A puts B12 before B6)
+Status: accepted, 2026-11-25 (owner decision on the pull request: D96 to D101, each choice A, and D112 A, which adds `blob/s3`; step B12 of the [plan](../plan.md); the owner's D89 A puts B12 before B6)
 
 ## Context
 
@@ -30,7 +30,12 @@ Three facts shape the design:
 - **A pointer is declared by its last segment**, as today, and a name follows the rules of a segment. The host gives the names: `Options.pointers` in `blob/fsdir` (the library under both `fs` drivers), `--pointer NAME` (repeatable) on `blob/fs`'s thin main. A driver started with no pointer keeps every object write-once and refuses every `Put` (`permission_denied` / `rule`), as it refuses a `Put` on any other path today.
 - **`blob/fsreadonly`** refuses every write as before; it loses its mention of the two names and needs no declaration.
 - **The kit declares its own pointer names** and runs the driver with them, as the key kit declares its own purposes (step B13): `blob-conformance --print-pointers` gives them to the harness that starts the driver. No case uses `checkpoint` or `writer-state`.
-- **`blob/s3`** (planned in B9) is built on this contract: a conditional create for every object, a conditional put for the declared names.
+- **`blob/s3`, a Go driver of the blob port, joins B12** (the owner's D112 A, for audit's writer): a Go module a host mounts in process, as `transport/nats` and `transport/sqs` are, and a thin main. It is built on this contract, right after the blob pull request and before 0.9.0:
+  - **the bucket and a key prefix are the host's options** (and its AWS configuration and credentials); the driver knows no region, account or installation ([0021](0021-drivers-know-no-deployment-shapes.md));
+  - **`Create` is `PutObject` with `If-None-Match: *`**: S3's `412 Precondition Failed` is the port's `already_exists` / `taken`, so of any number of racing creators exactly one wins;
+  - **`Put` on a declared pointer is a compare-and-swap.** The port's entity tag is the SHA-384 of the bytes, in hex, as for the `fs` drivers, kept in the object's metadata (S3's own ETag is not a function of the bytes alone under every kind of encryption). An empty `if_match` writes with `If-None-Match: *`; any other value reads the object, compares its tag with `if_match`, and writes with `If-Match` on the S3 ETag it read, so that a write between the read and the replace fails as `412`, the port's `aborted` / `version`. A `Put` on another path is `permission_denied` / `rule` before any call to S3;
+  - **`Get` and `List`** are `GetObject` and `ListObjectsV2` under the prefix, in byte order, with the port's page sizes; the page token is S3's continuation token;
+  - **it passes the blob kit** against a local S3 double that implements both conditional writes (a pinned S3-compatible server in a container where it does, or an in-process fake through the real Go SDK client where it does not; which one is settled in its pull request after checking the double's support for `If-None-Match` and `If-Match`).
 
 ### Transport: a message is an id and an opaque payload
 
@@ -100,6 +105,7 @@ message SearchRequest {
 | `blob/fs` | `--pointer NAME`; its suite runs with the kit's names |
 | `blob/fsreadonly` | its mention of the names goes; behaviour unchanged |
 | `blob/conformance` | its own pointer names, `--print-pointers` |
+| `blob/s3` (new, Go) | the driver above, its thin main, its page, the kit in `just conformance` |
 | `transport` (proto, stubs, page) | `Message`, `id`, `payload`, field 3 reserved; the refusal fields |
 | `transport/spool` | the type and its comments; the frames' bytes unchanged; the limit is on the encoded `Message` |
 | `transport/nats`, `transport/sqs` | the type, the deduplication from `id`, the comments and pages that say "audit records" |
@@ -116,8 +122,9 @@ message SearchRequest {
 1. **This record**, docs only, with the plan's order.
 2. **transport**: the proto, the stubs, `spool`, `nats`, `sqs`, the kit and the page. First, because it is the smallest, it has the most drivers, and audit's emitters use only this port.
 3. **blob**: `fsdir`, `fs`, `fsreadonly`, the kit and the page.
-4. **index**: `v1alpha2`, the declaration in Go and Rust, `sqlite`, the kit and the page. The largest.
-5. **The sweep and the check**: the remaining texts, the `just check` rule, the plan (B12 built), then **the release 0.9.0** with all three.
+4. **`blob/s3`** (D112 A): the Go driver on the generic blob contract, with the kit against a local S3 double.
+5. **index**: `v1alpha2`, the declaration in Go and Rust, `sqlite`, the kit and the page. The largest.
+6. **The sweep and the check**: the remaining texts, the `just check` rule, the plan (B12 built), then **the release 0.9.0** with all three.
 
 ### The migration for audit and sluis
 
@@ -131,7 +138,7 @@ atoom is released first, and each consumer moves at its next pin, never the reve
 
 - One breaking release, 0.9.0, for three ports and thirteen libraries. Consumers that stay on their pin are not affected.
 - The B12 notes of the plan and the three pages become the description of what is built, and "done when" holds: no field, message or constant of these ports names audit.
-- `index/rqlite`, `index/postgres` (B15) and `blob/s3` (B9) are built on the generic contracts and read the same declarations.
+- `index/rqlite` and `index/postgres` (B15) are built on the generic contracts and read the same declarations; `blob/s3` moves from B9 into B12 (D112 A).
 - A change of an index declaration is a rebuild of the index, as a change of the tokenizer is.
 - The order of [0023](0023-session-to-done-first.md) changes only in that B12 comes before B6 (D89 A): B12, B6, B7, then B10, B11 and B15, with the rest of B9 (`source/ssm`, `blob/s3`, the extension zips) where 0023 puts it.
 
