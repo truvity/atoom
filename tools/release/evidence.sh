@@ -7,7 +7,7 @@
 #       the digest of every file of <directory> and the records, one for every architecture of the release
 #   tools/release/evidence.sh verify <directory> <evidence.json> <version> <commit>
 #       refuses unless the evidence is of this version and commit, is not of a rehearsal, names exactly the files of <directory> by digest,
-#       and holds a record for every architecture with every system and every driver and the images
+#       and holds a record for every architecture with every system, every driver, every block and the images
 #
 # The evidence is a defect gate and not a supply-chain control: a job that runs the packages could write a false record if a dependency were
 # malicious, as the build could write a false archive (sluis's candidate has the same limit); what the split bounds is that the bytes that
@@ -31,9 +31,10 @@ shift || true
 case "$cmd" in
     record)
         arch=${1:?}; version=${2:?}; commit=${3:?}; out=${4:?}
-        ids=$(driver_ids | jq -R . | jq -s .)
-        jq -n --arg arch "$arch" --arg version "$version" --arg commit "$commit" --argjson ids "$ids" --argjson systems "$systems" \
-            '{arch: $arch, version: $version, commit: $commit, drivers: $ids, systems: $systems, images: true}' >"$out"
+        ids=$(ids_of_kind driver | jq -R . | jq -s .)
+        blocks=$(ids_of_kind block | jq -R . | jq -s .)
+        jq -n --arg arch "$arch" --arg version "$version" --arg commit "$commit" --argjson ids "$ids" --argjson blocks "$blocks" --argjson systems "$systems" \
+            '{arch: $arch, version: $version, commit: $commit, drivers: $ids, blocks: $blocks, systems: $systems, images: true}' >"$out"
         ;;
     merge)
         dir=${1:?}; version=${2:?}; commit=${3:?}; rehearsal=${4:?}
@@ -53,11 +54,12 @@ case "$cmd" in
         now=$(files_json "$dir")
         diff=$(jq -n --argjson a "$(jq .files "$ev")" --argjson b "$now" '[($a | keys[]) as $k | select($b[$k] != $a[$k]) | $k] + [($b | keys[]) as $k | select($a[$k] == null) | $k] | unique | join(" ")' -r)
         [ -z "$diff" ] || refuse "the files are not the ones that were smoked: $diff"
-        want=$(driver_ids | jq -R . | jq -s -c .)
+        want=$(ids_of_kind driver | jq -R . | jq -s -c .)
+        wantb=$(ids_of_kind block | jq -R . | jq -s -c .)
         for arch in $(release_arches); do
-            ok=$(jq --arg arch "$arch" --argjson want "$want" --argjson systems "$systems" --arg version "$version" --arg commit "$commit" \
-                '.smoke[$arch] as $s | $s != null and $s.version == $version and $s.commit == $commit and $s.drivers == $want and $s.systems == $systems and $s.images == true' "$ev")
-            [ "$ok" = true ] || refuse "there is no complete smoke of $arch (every driver, every system, the images) for this version and commit"
+            ok=$(jq --arg arch "$arch" --argjson want "$want" --argjson wantb "$wantb" --argjson systems "$systems" --arg version "$version" --arg commit "$commit" \
+                '.smoke[$arch] as $s | $s != null and $s.version == $version and $s.commit == $commit and $s.drivers == $want and $s.blocks == $wantb and $s.systems == $systems and $s.images == true' "$ev")
+            [ "$ok" = true ] || refuse "there is no complete smoke of $arch (every driver, every block, every system, the images) for this version and commit"
         done
         echo "evidence: the files of $dir are the bytes that were smoked for $version at $commit ($(jq '.files | length' "$ev") files)"
         ;;

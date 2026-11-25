@@ -5,7 +5,7 @@
 #   tools/release/smoke.sh <version> [ubuntu|rocky|al2023]...
 #
 # For each system (Ubuntu 24.04 with apt, Rocky Linux 10 and Amazon Linux 2023 with dnf; the first two on the architecture of this host,
-# the packages of that architecture) it installs EVERY driver package at once from the files, so that apt or dnf resolve the dependencies
+# the packages of that architecture) it installs EVERY package of a driver or a block at once from the files, so that apt or dnf resolve the dependencies
 # from the system's own repositories (the card driver pulls pcscd and libpcsclite), then for every driver it checks that:
 #   - the package puts its executable at /usr/bin/atoom-<id> and nothing outside /usr/bin and /usr/share/{doc,licenses}:
 #     no unit, no user, no directory of state, no maintainer script;
@@ -39,6 +39,9 @@ esac
 dist=$root/dist/release
 [ -d "$dist" ] || { echo "smoke: no dist/release: run release-build and release-packages first" >&2; exit 1; }
 ids=$(driver_ids | tr '\n' ' ')
+# The package of each id, in the same order: atoom-driver-<id> for a driver, atoom-block-<name> for a block (drivers.sh, package_name).
+pkgs=""
+for id in $ids; do pkgs="$pkgs $(package_name "$id")"; done
 
 # What runs in a container: the packages are in /pkg (read only), the ids and the version in the environment. Both scripts print `ok` lines
 # and exit 1 on the first failure.
@@ -49,7 +52,7 @@ die() { echo "FAIL $*" >&2; exit 1; }
 check_installed() { # the executables work and print the version
     local id out
     for id in $SMOKE_IDS; do
-        [ -x "/usr/bin/atoom-$id" ] || die "atoom-driver-$id: no /usr/bin/atoom-$id"
+        [ -x "/usr/bin/atoom-$id" ] || die "the package of $id: no /usr/bin/atoom-$id"
         out=$("/usr/bin/atoom-$id" --version 2>&1) || die "atoom-$id --version failed: $out"
         case "$out" in *"$SMOKE_VERSION"*) ;; *) die "atoom-$id --version says \"$out\", not $SMOKE_VERSION" ;; esac
         ok "atoom-$id --version: $out"
@@ -65,7 +68,7 @@ deb_script="$common"'
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -qq >/dev/null
 files=""
-for id in $SMOKE_IDS; do files="$files /pkg/atoom-driver-${id}_${SMOKE_VERSION}-1_${SMOKE_ARCH}.deb"; done
+for pkg in $SMOKE_PKGS; do files="$files /pkg/${pkg}_${SMOKE_VERSION}-1_${SMOKE_ARCH}.deb"; done
 for f in $files; do
     paths=$(dpkg-deb -c "$f" | awk "{ print \$NF }" | grep -v "/\$" | grep -v -e "^./usr/bin/atoom-" -e "^./usr/share/doc/" || true)
     [ -z "$paths" ] || die "$f holds files outside /usr/bin and /usr/share/doc: $paths"
@@ -73,14 +76,14 @@ for f in $files; do
 done
 ok "no deb holds a file outside /usr/bin and /usr/share/doc, and none has a maintainer script"
 apt-get install -y -qq --no-install-recommends $files >/dev/null
-ok "apt installed every driver package"
+ok "apt installed every package of the drivers and blocks"
 check_installed
-for id in $SMOKE_IDS; do apt-get remove -y -qq "atoom-driver-$id" >/dev/null; done
+for pkg in $SMOKE_PKGS; do apt-get remove -y -qq "$pkg" >/dev/null; done
 check_gone
 '
 rpm_script="$common"'
 files=""
-for id in $SMOKE_IDS; do files="$files /pkg/atoom-driver-${id}-${SMOKE_VERSION}-1.${SMOKE_RPMARCH}.rpm"; done
+for pkg in $SMOKE_PKGS; do files="$files /pkg/${pkg}-${SMOKE_VERSION}-1.${SMOKE_RPMARCH}.rpm"; done
 for f in $files; do
     paths=$(rpm -qpl "$f" | grep -v -e "^/usr/bin/atoom-" -e "^/usr/share/doc/" -e "^/usr/share/licenses/" || true)
     [ -z "$paths" ] || die "$f holds files outside /usr/bin, /usr/share/doc and /usr/share/licenses: $paths"
@@ -88,9 +91,9 @@ for f in $files; do
 done
 ok "no rpm holds a file outside /usr/bin, /usr/share/doc and /usr/share/licenses, and none has a scriptlet"
 dnf install -y -q --setopt=install_weak_deps=False $files >/dev/null
-ok "dnf installed every driver package"
+ok "dnf installed every package of the drivers and blocks"
 check_installed
-for id in $SMOKE_IDS; do dnf remove -y -q "atoom-driver-$id" >/dev/null; done
+for pkg in $SMOKE_PKGS; do dnf remove -y -q "$pkg" >/dev/null; done
 check_gone
 '
 
@@ -110,7 +113,7 @@ for p in "${platforms[@]}"; do
     echo "smoke: $p ($arch)"
     if docker run --name "$name" --rm \
         --volume "$dist:/pkg:ro" \
-        --env "SMOKE_IDS=$ids" --env "SMOKE_VERSION=$version" --env "SMOKE_ARCH=$arch" --env "SMOKE_RPMARCH=$rpmarch" \
+        --env "SMOKE_IDS=$ids" --env "SMOKE_PKGS=$pkgs" --env "SMOKE_VERSION=$version" --env "SMOKE_ARCH=$arch" --env "SMOKE_RPMARCH=$rpmarch" \
         "${image[$p]}" bash -c "$script"; then
         echo "smoke: $p: passed"
     else

@@ -317,7 +317,7 @@ jobs:
             echo "### Release candidate $VERSION"
             echo
             echo "Commit \`$GITHUB_SHA\`$([ "$REHEARSAL" = true ] && echo ', a rehearsal: it is not published.' || echo '.')"
-            echo "Evidence: $(jq '.files | length' dist/candidate/evidence.json) files by digest, smoke on $(jq -r '.smoke | keys | join(" and ")' dist/candidate/evidence.json): $(jq -r '.smoke.amd64.drivers | length' dist/candidate/evidence.json) drivers on $(jq -r '.smoke.amd64.systems | join(", ")' dist/candidate/evidence.json), and the images."
+            echo "Evidence: $(jq '.files | length' dist/candidate/evidence.json) files by digest, smoke on $(jq -r '.smoke | keys | join(" and ")' dist/candidate/evidence.json): $(jq -r '.smoke.amd64.drivers | length' dist/candidate/evidence.json) drivers and $(jq -r '.smoke.amd64.blocks | length' dist/candidate/evidence.json) blocks on $(jq -r '.smoke.amd64.systems | join(", ")' dist/candidate/evidence.json), and the images."
           } >>"$GITHUB_STEP_SUMMARY"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:

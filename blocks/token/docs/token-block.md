@@ -170,7 +170,7 @@ The block's own tests cover what the kit cannot:
 ## Hosting the block
 
 - **In a Go process** (session): build a seal block with the block's `SealPurposes` among its purposes. Call `token.New` with seal's client and serve `Block.Handler()` through `socket.InProcess`.
-- **Over a socket** (sluis): the thin main `cmd/token`, a released executable (`atoom-blocks-token`, [packages](../../../docs/packages.md)):
+- **Over a socket** (sluis): the thin main `cmd/token`, a released executable (`atoom-block-token`: the executable, the `.deb` and `.rpm` package, the tarball and the image `ghcr.io/truvity/atoom-block-token`, [packages](../../../docs/packages.md)):
 
   ```text
   token serve --socket PATH --purposes FILE --seal-socket PATH [--allow-uid UID]... [--socket-gid GID]

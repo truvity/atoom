@@ -6,7 +6,7 @@
 #
 # For every driver and every operating system and architecture that has an executable:
 #   atoom-<id>_<version>_<os>_<arch>.tar.gz           the executable, LICENSE and README.md (every os of the os column)
-#   atoom-driver-<id>_<version>_<arch>.deb            for linux on amd64 and arm64, with nfpm
+#   atoom-driver-<id>_<version>_<arch>.deb            for linux on amd64 and arm64, with nfpm (atoom-<id>, atoom-block-<name>, for a block)
 #   atoom-driver-<id>-<version>-1.<x86_64|aarch64>.rpm  the same
 # Then a `.sha256` beside every tarball and package, one SHA256SUMS over every file, an SPDX SBOM beside every tarball (syft), and metadata.json (the
 # version, the commit, the files). No package has a maintainer script and none makes a user or a directory, and none ships a systemd
@@ -48,6 +48,8 @@ nfpm_config() { # id arch -> stdout
     pkg=$(package_name "$id")
     bin=$(binary_name "$id")
     doc=/usr/share/doc/$pkg
+    local what="the driver" serves="one port"
+    if [ "$(kind_of "$id")" = block ]; then what="the block" serves="one block"; fi
     cat <<YAML
 name: $pkg
 arch: $arch
@@ -62,7 +64,7 @@ homepage: https://github.com/truvity/atoom
 license: MIT
 description: |
   $summary.
-   The thin main of the driver, $bin. It serves one port of atoom on a
+   The thin main of $what, $bin. It serves $serves of atoom on a
    UNIX socket and does nothing else; how it is run is the business of its
    consumer, so the package ships no unit, makes no user and keeps no state.
    See $doc/README.md.
@@ -135,7 +137,7 @@ for id in $(driver_ids); do
         done
     done
 done
-echo "package: $count files for $(driver_ids | wc -l) drivers"
+echo "package: $count files for $(driver_ids | wc -l) drivers and blocks"
 
 # The SBOM of every tarball: syft reads the Go modules from the build information of the executable and the Rust crates from the list that
 # cargo auditable records in it. Made before the sums, so that the sums cover it.
