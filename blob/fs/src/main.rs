@@ -1,14 +1,17 @@
 //! `blob-fs`: the thin main of the fs driver of the blob port.
 //!
 //! ```text
-//! blob-fs serve --socket PATH --root DIR    # serves the blob contract on the UNIX socket PATH (mode 0600) until SIGINT or SIGTERM
-//! blob-fs check --root DIR                  # opens DIR by the rules of serve; exit 3 when it cannot be served
+//! blob-fs serve --socket PATH --root DIR [--pointer NAME]...   # serves the blob contract on the UNIX socket PATH (mode 0600) until SIGINT or SIGTERM
+//! blob-fs check --root DIR [--pointer NAME]...                 # opens DIR by the rules of serve; exit 3 when it cannot be served
 //! blob-fs version                          # and --version
 //! ```
 //!
 //! The socket is guarded (`docs/socket-guard.md`): its mode is 0600 and it admits the callers of this process's uid, unless `serve` is
 //! given the guard flags `--allow-uid UID` (repeatable), `--allow-any-uid`, `--socket-gid GID` and `--socket-mode MODE`. A caller
 //! outside the set is refused with the reason `caller`. `version` prints the version of the build.
+//!
+//! `--pointer NAME` (repeatable) declares a pointer: an object whose last path segment is NAME may be overwritten by a conditional
+//! `Put`. Without it every object is written once and every `Put` is refused. A name that is not one path segment is refused at the start.
 //!
 //! `serve` opens the directory before the socket exists (no directory, no service) and removes the temporary files an earlier crash
 //! left behind. The root must be a directory owned by this process's uid and closed to others (mode no wider than 0750).
@@ -30,6 +33,13 @@ fn command() -> Command {
             .value_parser(value_parser!(PathBuf))
             .help("The blob directory")
     };
+    let pointer = || {
+        Arg::new("pointer")
+            .long("pointer")
+            .value_name("NAME")
+            .action(clap::ArgAction::Append)
+            .help("Declare a pointer: an object whose last path segment is NAME may be overwritten (repeatable)")
+    };
     Command::new("blob-fs")
         .version(atoom_socket::VERSION)
         .about("The fs driver of the blob port")
@@ -46,12 +56,14 @@ fn command() -> Command {
                         .value_parser(value_parser!(PathBuf))
                         .help("The UNIX socket to serve on (mode 0600 by default)"),
                 )
-                .arg(root()),
+                .arg(root())
+                .arg(pointer()),
         )
         .subcommand(
             Command::new("check")
                 .about("Open the blob directory by the rules of serve")
-                .arg(root()),
+                .arg(root())
+                .arg(pointer()),
         )
 }
 
@@ -72,6 +84,20 @@ async fn shutdown_signal() {
     }
 }
 
+/// Opens the directory and declares the pointers of `--pointer`.
+fn open(root: &std::path::Path, m: &clap::ArgMatches) -> anyhow::Result<Fs> {
+    let names: Vec<String> = m
+        .get_many::<String>("pointer")
+        .map(|v| v.cloned().collect())
+        .unwrap_or_default();
+    Fs::open(root)?.with_pointers(names).map_err(|_| {
+        anyhow::anyhow!(
+            "a --pointer is not one path segment, or there are more than {}",
+            atoom_blob_fs::MAX_POINTERS
+        )
+    })
+}
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt()
@@ -86,7 +112,7 @@ async fn main() -> anyhow::Result<()> {
                 .context("--socket is required")?;
             let root = m.get_one::<PathBuf>("root").context("--root is required")?;
             // The root is checked before the socket exists: no directory, no service.
-            let fs = Fs::open(root)?;
+            let fs = open(root, m)?;
             // A crash can leave temporary files; serve is the one command that may remove them.
             let swept = fs.sweep()?;
             tracing::info!(swept, "temporary files of an earlier run removed");
@@ -100,7 +126,7 @@ async fn main() -> anyhow::Result<()> {
         Some(("check", m)) => {
             // A failed check is a refusal, not a crash: exit 3, so that a script tells it from a bad flag (1) and a usage error (2).
             let root = m.get_one::<PathBuf>("root").context("--root is required")?;
-            match Fs::open(root) {
+            match open(root, m) {
                 Ok(_) => {
                     println!("blob directory ok");
                     Ok(())

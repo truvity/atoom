@@ -29,7 +29,7 @@ macro_rules! refused {
 pub fn run_temp() -> Result<()> {
     let dir = tempfile::tempdir()?;
     std::fs::set_permissions(dir.path(), std::fs::Permissions::from_mode(0o750))?;
-    let fs = Fs::open(dir.path())?;
+    let fs = Fs::open(dir.path())?.with_pointers(["checkpoint"])?;
     let mode =
         |p: &str| std::fs::metadata(dir.path().join(p)).map(|m| m.permissions().mode() & 0o777);
 
@@ -131,7 +131,7 @@ pub fn run_temp() -> Result<()> {
 
     // Two drivers on one directory (two open file descriptions, so two mutexes): of many puts
     // under one tag exactly one wins, because the flock orders them.
-    let other = Fs::open(dir.path())?;
+    let other = Fs::open(dir.path())?.with_pointers(["checkpoint"])?;
     let t0 = fs.put("fence/checkpoint", b"0", "")?;
     let putters: Vec<_> = (0..16u8)
         .map(|i| {

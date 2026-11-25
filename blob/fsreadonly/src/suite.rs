@@ -28,7 +28,7 @@ pub fn run_temp() -> Result<()> {
     let dir = tempfile::tempdir()?;
     std::fs::set_permissions(dir.path(), std::fs::Permissions::from_mode(0o750))?;
     let me = rustix::process::geteuid().as_raw();
-    let writer = Fs::open(dir.path())?;
+    let writer = Fs::open(dir.path())?.with_pointers(["checkpoint"])?;
     let reader = Fs::open_read_only(dir.path(), me)?;
 
     // A root of another owner, a wide mode and a symlink are refused at the start.

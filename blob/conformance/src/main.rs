@@ -1,10 +1,13 @@
-//! `blob-conformance --socket P [--read-only --present PATH --bytes FILE]`: runs the blob suite against the driver that serves on the
+//! `blob-conformance --socket P [--read-only --present PATH --bytes FILE]`, `blob-conformance --print-pointers`: runs the blob suite against the driver that serves on the
 //! UNIX socket P, and fails when a case fails or none ran. The driver may be written in any language: the suite speaks the contract and
 //! nothing else.
 //!
 //! Without `--read-only` the driver is one that can be written to, and the suite writes under a prefix of its own (the contract has no
 //! delete, so it leaves it there: use a scratch root). With `--read-only` the driver only reads: the caller puts one object in its
 //! backend before the run, `--present PATH` is the object's path and `--bytes FILE` holds the exact bytes the driver must return for it.
+//!
+//! `--print-pointers` prints the kit's pointer names, one per line, for the harness that starts the driver: the write suite overwrites
+//! objects with these last segments, so the driver must be started with them declared as its pointers.
 
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -21,8 +24,11 @@ use clap::Parser;
 )]
 struct Args {
     /// The UNIX socket the driver serves the blob contract on.
-    #[arg(long, value_name = "PATH")]
-    socket: PathBuf,
+    #[arg(long, value_name = "PATH", required_unless_present = "print_pointers")]
+    socket: Option<PathBuf>,
+    /// Print the kit's pointer names, one per line, and exit.
+    #[arg(long, conflicts_with_all = ["socket", "read_only"])]
+    print_pointers: bool,
     /// The driver only reads: run the read-only suite.
     #[arg(long, requires_all = ["present", "bytes"])]
     read_only: bool,
@@ -45,7 +51,17 @@ fn fixture(args: &Args) -> anyhow::Result<Fixture> {
 #[tokio::main]
 async fn main() -> ExitCode {
     let args = Args::parse();
-    let client = atoom_socket::dial(&args.socket);
+    if args.print_pointers {
+        for p in atoom_blob_conformance::POINTERS {
+            println!("{p}");
+        }
+        return ExitCode::SUCCESS;
+    }
+    let Some(socket) = args.socket.as_ref() else {
+        eprintln!("blob-conformance: --socket is required");
+        return ExitCode::FAILURE;
+    };
+    let client = atoom_socket::dial(socket);
     let cases = if args.read_only {
         match fixture(&args) {
             Ok(f) => atoom_blob_conformance::blob_read_suite(client, &f).await,

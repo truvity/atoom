@@ -66,7 +66,10 @@ fn the_backend_suite_passes() {
 async fn a_client_reads_what_the_writer_made_and_can_change_nothing() {
     let (r, s) = (root(), tempfile::tempdir().unwrap());
     let me = rustix::process::geteuid().as_raw();
-    let writer = Fs::open(r.path()).unwrap();
+    let writer = Fs::open(r.path())
+        .unwrap()
+        .with_pointers(["checkpoint"])
+        .unwrap();
     writer.create("audit/main/tile/entries/000", b"x").unwrap();
     writer.put("audit/main/checkpoint", b"c", "").unwrap();
 

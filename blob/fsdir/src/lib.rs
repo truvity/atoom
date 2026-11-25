@@ -5,7 +5,9 @@
 //! - `create` is the fence: the bytes go to a temporary file in the target's directory, are
 //!   fsynced, then `link()`ed to the name, which fails if the name exists, and the directory is
 //!   fsynced. Of many racing creators exactly one wins.
-//! - `put` overwrites only a pointer (see [`POINTERS`]), under an entity tag.
+//! - `put` overwrites only a pointer, under an entity tag. Which objects are pointers is the host's: it
+//!   declares their last segments with [`Fs::with_pointers`]; with none declared, every object is
+//!   written once and every `put` is refused.
 //! - Every path is checked textually and then opened with `openat2(RESOLVE_NO_SYMLINKS |
 //!   RESOLVE_BENEATH)` below the root, so no `..`, absolute path or symlink leaves it.
 //! - Where `openat2` answers `ENOSYS` (systemd's `RestrictSUIDSGID=yes` makes its seccomp filter
@@ -27,9 +29,8 @@ use std::sync::{Arc, Mutex};
 use rustix::fs::{AtFlags, Dir, FileType, Mode, OFlags, ResolveFlags};
 use rustix::io::Errno;
 
-/// The last path segment of an object that `put` may overwrite: the `tlog-tiles` checkpoint
-/// pointer and the writer's state. Every other object is written once.
-pub const POINTERS: [&str; 2] = ["checkpoint", "writer-state"];
+/// The most pointer names a host may declare.
+pub const MAX_POINTERS: usize = 64;
 
 const FILE_MODE: u32 = 0o640;
 const DIR_MODE: u32 = 0o750;
@@ -95,6 +96,7 @@ type Result<T> = std::result::Result<T, Error>;
 pub struct Fs {
     root: Arc<OwnedFd>,
     puts: Arc<Mutex<()>>,
+    pointers: Arc<Vec<String>>,
 }
 
 impl Fs {
@@ -149,7 +151,37 @@ impl Fs {
         Ok(Self {
             root: Arc::new(fd),
             puts: Arc::default(),
+            pointers: Arc::default(),
         })
+    }
+
+    /// Declares the pointers: the last path segments of the objects that `put` may overwrite, under
+    /// any prefix. Every other object is written once. A name follows the rules of a path segment
+    /// (not empty, no leading dot, no `/` or NUL, at most 255 bytes); at most [`MAX_POINTERS`] names.
+    /// The set replaces any set declared before; an empty set leaves no pointer.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::Path`] when a name is not a segment or there are too many.
+    pub fn with_pointers<I, S>(mut self, names: I) -> Result<Self>
+    where
+        I: IntoIterator<Item = S>,
+        S: Into<String>,
+    {
+        let mut set: Vec<String> = names.into_iter().map(Into::into).collect();
+        if set.len() > MAX_POINTERS || !set.iter().all(|n| pointer_name(n)) {
+            return Err(Error::Path);
+        }
+        set.sort();
+        set.dedup();
+        self.pointers = Arc::new(set);
+        Ok(self)
+    }
+
+    /// The declared pointer names, sorted.
+    #[must_use]
+    pub fn pointers(&self) -> &[String] {
+        &self.pointers
     }
 
     /// Removes the temporary files a crash left behind: regular files named exactly
@@ -183,7 +215,7 @@ impl Fs {
     pub fn put(&self, path: &str, data: &[u8], if_match: &str) -> Result<String> {
         let parts = segments(path, false)?;
         let (dirs, name) = split(&parts);
-        if !POINTERS.contains(&name) {
+        if !self.pointers.iter().any(|p| p == name) {
             return Err(Error::Rule);
         }
         let d = self.dir(&dirs, true)?;
@@ -411,6 +443,11 @@ fn segments(path: &str, prefix: bool) -> Result<Vec<&str>> {
         return Err(Error::Path);
     }
     Ok(parts)
+}
+
+/// Whether `name` may be declared as a pointer: one path segment.
+fn pointer_name(name: &str) -> bool {
+    !name.is_empty() && !name.contains('/') && segments(name, false).is_ok()
 }
 
 /// The directories and the last segment.
@@ -685,5 +722,38 @@ mod tests {
             });
             assert_eq!(asked, want_asked, "{first:?}");
         }
+    }
+
+    #[test]
+    fn only_a_declared_pointer_is_overwritten() {
+        let t = root();
+        let fs = Fs::open(t.path()).unwrap();
+        // With no pointer declared, every object is written once.
+        assert!(matches!(fs.put("log/head", b"x", ""), Err(Error::Rule)));
+        let fs = fs.with_pointers(["head", "state", "head"]).unwrap();
+        assert_eq!(fs.pointers(), ["head", "state"]);
+        let t1 = fs.put("log/head", b"1", "").unwrap();
+        fs.put("other/prefix/head", b"1", "").unwrap();
+        fs.put("log/head", b"2", &t1).unwrap();
+        assert!(matches!(
+            fs.put("log/checkpoint", b"x", ""),
+            Err(Error::Rule)
+        ));
+        // A name that is not one segment is refused.
+        let long = "x".repeat(256);
+        for bad in ["", ".hidden", "a/b", "nul\0", long.as_str()] {
+            assert!(
+                matches!(
+                    Fs::open(t.path()).unwrap().with_pointers([bad]),
+                    Err(Error::Path)
+                ),
+                "{bad:?}"
+            );
+        }
+        let many: Vec<String> = (0..=MAX_POINTERS).map(|i| format!("p{i}")).collect();
+        assert!(matches!(
+            Fs::open(t.path()).unwrap().with_pointers(many),
+            Err(Error::Path)
+        ));
     }
 }

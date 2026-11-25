@@ -14,8 +14,9 @@
 //!
 //! - **`Create`** never replaces: a path that holds an object is `already_exists` with the reason `taken`, and the object is unchanged.
 //! - **The entity tag** depends on the bytes only: the same bytes give the same tag at any path, other bytes another tag.
-//! - **`Put`** overwrites only a pointer, the object whose last path segment is `checkpoint` or `writer-state`; any other path is
-//!   `permission_denied` / `rule`. An empty `if_match` means the pointer must be absent; a tag that is not the object's is `aborted` /
+//! - **`Put`** overwrites only a pointer, an object whose last path segment is a name the host declared to the driver; any other
+//!   path is `permission_denied` / `rule`. The kit declares its own names, [`POINTERS`] (`blob-conformance --print-pointers`): run
+//!   the driver under test with them. An empty `if_match` means the pointer must be absent; a tag that is not the object's is `aborted` /
 //!   `version`.
 //! - **A path** with an empty segment, a segment that starts with a dot (so `..`), or a leading `/` is `invalid_argument` / `path`.
 //! - **An absent object** is `not_found` / `absent`.
@@ -30,6 +31,10 @@ use std::io::Write;
 use std::time::Duration;
 
 pub use suite::{Fixture, blob_read_suite, blob_suite};
+
+/// The pointer names of the kit: the last segments its cases overwrite with `Put`. A driver under the write suite is started with
+/// these names declared as its pointers, and with no others the kit relies on.
+pub const POINTERS: [&str; 2] = ["kit-head", "kit-state"];
 
 /// The result of one case.
 #[derive(Clone, Debug)]
