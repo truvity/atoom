@@ -82,7 +82,7 @@ func TestLocalARoundTripKeepsTheOrderAndARetryIsOneMessage(t *testing.T) {
 		t.Fatalf("got %v; want the retry of a dropped by the queue", uids(got))
 	}
 	for i, d := range got {
-		if d.GetEmitter() != "test@host" || string(d.GetMessage().GetUsage()[0]) != "usage-"+d.GetMessage().GetUid() {
+		if d.GetEmitter() != "test@host" || string(d.GetMessage().GetPayload()) != "payload-"+d.GetMessage().GetId() {
 			t.Fatalf("delivery %d: %v", i, d)
 		}
 	}
@@ -135,8 +135,7 @@ func TestLocalARestartRedeliversTheSameMessage(t *testing.T) {
 	if again.GetDeliveryId() <= first.GetDeliveryId() {
 		t.Fatalf("the id after the restart %d is not greater than %d", again.GetDeliveryId(), first.GetDeliveryId())
 	}
-	if again.GetMessage().GetUid() != first.GetMessage().GetUid() || string(again.GetMessage().GetRecord()) != string(first.GetMessage().GetRecord()) ||
-		string(again.GetMessage().GetUsage()[0]) != string(first.GetMessage().GetUsage()[0]) {
+	if again.GetMessage().GetId() != first.GetMessage().GetId() || string(again.GetMessage().GetPayload()) != string(first.GetMessage().GetPayload()) {
 		t.Fatalf("the redelivery is another message: %v, first %v", again, first)
 	}
 	ack(t, c2, again)

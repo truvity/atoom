@@ -12,7 +12,7 @@ use std::sync::Arc;
 
 use atoom_common::refusal;
 use atoom_transport::atoom::transport::v1alpha1::{
-    AckRequest, AckResponse, AuditMessage, Delivery, EmitRequest, EmitResponse, ReceiveRequest,
+    AckRequest, AckResponse, Delivery, EmitRequest, EmitResponse, Message, ReceiveRequest,
     ReceiveResponse, TransportService, TransportServiceExt,
 };
 use buffa::Message as _;
@@ -136,18 +136,18 @@ impl TransportService for Emit {
             .message
             .as_option()
             .ok_or_else(|| refusal::new(ErrorCode::InvalidArgument, "schema", "message"))?;
-        if m.uid.is_empty() {
+        if m.id.is_empty() {
             return Err(refusal::new(
                 ErrorCode::InvalidArgument,
                 "schema",
-                "message.uid",
+                "message.id",
             ));
         }
-        if m.record.is_empty() {
+        if m.payload.is_empty() {
             return Err(refusal::new(
                 ErrorCode::InvalidArgument,
                 "schema",
-                "message.record",
+                "message.payload",
             ));
         }
         let bytes = m.encode_to_vec();
@@ -175,7 +175,7 @@ impl TransportService for Emit {
 }
 
 fn delivery(e: Entry) -> Result<Delivery, ConnectError> {
-    let message = AuditMessage::decode_from_slice(&e.message)
+    let message = Message::decode_from_slice(&e.message)
         .map_err(|_| refusal::new(ErrorCode::Internal, "engine", ""))?;
     Ok(Delivery {
         delivery_id: e.seq,

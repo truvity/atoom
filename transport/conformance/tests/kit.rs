@@ -13,7 +13,7 @@ use std::time::Duration;
 use atoom_common::refusal;
 use atoom_socket::{ServerConfig, dial};
 use atoom_transport::atoom::transport::v1alpha1::{
-    AckRequest, AckResponse, AuditMessage, Delivery, EmitRequest, EmitResponse, ReceiveRequest,
+    AckRequest, AckResponse, Delivery, EmitRequest, EmitResponse, Message, ReceiveRequest,
     ReceiveResponse, TransportService, TransportServiceExt,
 };
 use atoom_transport_conformance::{Case, report, transport_suite};
@@ -44,25 +44,25 @@ impl Drop for Held {
 /// A queue in memory, with a way to be wrong about each rule of the suite.
 #[derive(Clone, Default)]
 struct Queue {
-    items: Arc<Mutex<Vec<(u64, AuditMessage)>>>,
+    items: Arc<Mutex<Vec<(u64, Message)>>>,
     seq: Arc<Mutex<u64>>,
     taken: Arc<AtomicBool>,
     /// Drops a message once it is delivered.
     forgets_on_delivery: bool,
     /// Serves any number of consumers.
     two_consumers: bool,
-    /// Takes a message with no uid.
-    accepts_empty_uid: bool,
+    /// Takes a message with no id.
+    accepts_empty_id: bool,
     /// An acknowledgement removes nothing.
     ack_does_nothing: bool,
     /// Lets go of a dropped consumer only this long after the drop.
     late_release: Option<Duration>,
-    /// A message delivered again comes without its usage records.
-    redelivery_drops_usage: bool,
-    /// Refuses an emit of a uid it took before (a producer's retry).
-    refuses_a_repeated_uid: bool,
+    /// A message delivered again comes with only part of its payload.
+    redelivery_cuts_payload: bool,
+    /// Refuses an emit of an id it took before (a producer's retry).
+    refuses_a_repeated_id: bool,
     delivered: Arc<Mutex<HashSet<u64>>>,
-    uids: Arc<Mutex<HashSet<String>>>,
+    ids: Arc<Mutex<HashSet<String>>>,
 }
 
 impl TransportService for Queue {
@@ -76,25 +76,25 @@ impl TransportService for Queue {
             .message
             .as_option()
             .ok_or_else(|| refusal::new(ErrorCode::InvalidArgument, "schema", "message"))?;
-        if m.uid.is_empty() && !self.accepts_empty_uid {
+        if m.id.is_empty() && !self.accepts_empty_id {
             return Err(refusal::new(
                 ErrorCode::InvalidArgument,
                 "schema",
-                "message.uid",
+                "message.id",
             ));
         }
-        if m.record.is_empty() {
+        if m.payload.is_empty() {
             return Err(refusal::new(
                 ErrorCode::InvalidArgument,
                 "schema",
-                "message.record",
+                "message.payload",
             ));
         }
-        if !self.uids.lock().unwrap().insert(m.uid.clone()) && self.refuses_a_repeated_uid {
+        if !self.ids.lock().unwrap().insert(m.id.clone()) && self.refuses_a_repeated_id {
             return Err(refusal::new(
                 ErrorCode::AlreadyExists,
                 "taken",
-                "message.uid",
+                "message.id",
             ));
         }
         let mut seq = self.seq.lock().unwrap();
@@ -115,14 +115,14 @@ impl TransportService for Queue {
         let items = self.items.clone();
         let forget = self.forgets_on_delivery;
         let delivered = self.delivered.clone();
-        let drop_usage = self.redelivery_drops_usage;
+        let cut = self.redelivery_cuts_payload;
         // What is queued now in one batch, then whatever is emitted later, polled; the stream holds the consumer slot until it is dropped.
         let stream = futures::stream::unfold((held, 0u64), move |(held, after)| {
             let items = items.clone();
             let delivered = delivered.clone();
             async move {
                 loop {
-                    let batch: Vec<(u64, AuditMessage)> = items
+                    let batch: Vec<(u64, Message)> = items
                         .lock()
                         .unwrap()
                         .iter()
@@ -137,8 +137,8 @@ impl TransportService for Queue {
                             deliveries: batch
                                 .into_iter()
                                 .map(|(s, mut m)| {
-                                    if !delivered.lock().unwrap().insert(s) && drop_usage {
-                                        m.usage.clear();
+                                    if !delivered.lock().unwrap().insert(s) && cut {
+                                        m.payload.truncate(1);
                                     }
                                     Delivery {
                                         delivery_id: s,
@@ -243,7 +243,7 @@ async fn each_wrong_driver_fails_the_case_that_looks_for_it() {
         ),
         (
             Queue {
-                accepts_empty_uid: true,
+                accepts_empty_id: true,
                 ..Queue::default()
             },
             "malformed_emits",
@@ -257,24 +257,24 @@ async fn each_wrong_driver_fails_the_case_that_looks_for_it() {
         ),
         (
             Queue {
-                redelivery_drops_usage: true,
+                redelivery_cuts_payload: true,
                 ..Queue::default()
             },
-            "a_redelivered_or_repeated_message_is_one_record",
+            "a_redelivered_or_repeated_message_is_one_message",
         ),
         (
             Queue {
-                refuses_a_repeated_uid: true,
+                refuses_a_repeated_id: true,
                 ..Queue::default()
             },
-            "a_redelivered_or_repeated_message_is_one_record",
+            "a_redelivered_or_repeated_message_is_one_message",
         ),
         (
             Queue {
                 forgets_on_delivery: true,
                 ..Queue::default()
             },
-            "a_redelivered_or_repeated_message_is_one_record",
+            "a_redelivered_or_repeated_message_is_one_message",
         ),
     ] {
         let cases = judge(queue).await;

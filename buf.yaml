@@ -37,3 +37,7 @@ lint:
 breaking:
   use:
     - FILE
+  # The breaks of step B12 (record 0025), allowed by record 0015 while the contracts are v1alpha1 and carried by the breaking:<library>
+  # labels. They are compared with the last release, so each stays listed until 0.9.0 is released; the release's pull request removes them.
+  ignore:
+    - transport/proto/atoom/transport/v1alpha1/transport.proto

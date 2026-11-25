@@ -1,6 +1,6 @@
 [package]
 name = "atoom-transport"
-description = "The transport port: the ConnectRPC contract (atoom.transport.v1alpha1.TransportService) for a bounded, ordered, at-least-once queue of audit messages between emitters and one consumer, as buffa messages and a generated client and service."
+description = "The transport port: the ConnectRPC contract (atoom.transport.v1alpha1.TransportService) for a bounded, ordered, at-least-once queue of opaque messages between emitters and one consumer, as buffa messages and a generated client and service."
 version.workspace = true
 edition.workspace = true
 license.workspace = true

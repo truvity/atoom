@@ -1,4 +1,4 @@
-// Package transport is the root of the transport library: the transport port, the contract for a durable queue that carries audit
+// Package transport is the root of the transport library: the transport port, the contract for a durable queue that carries opaque
 // messages from emitters to one consumer, in order and at least once.
 //
 // The contract is the proto package atoom.transport.v1alpha1 (TransportService and its messages), generated into

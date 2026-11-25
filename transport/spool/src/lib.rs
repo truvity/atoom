@@ -1,11 +1,10 @@
-//! The `spool` driver of the transport port: a local, bounded, fsync'd queue between the emitters and the consumer (the audit writer
-//! of sluis).
+//! The `spool` driver of the transport port: a local, bounded, fsync'd queue between the emitters and the one consumer.
 //!
 //! - **Layout.** The directory holds segments `<first seq, 20 digits>.seg`, each a run of frames,
 //!   and for a segment with acknowledgements a file `<same>.ack` of frames that each hold one
 //!   acknowledged sequence number. A frame is `len u32 BE | sum [u8; 16] | payload`; the sum is the
 //!   first 16 bytes of SHA-384 of the payload. A segment frame holds `seq u64 BE | emitter len u16
-//!   BE | emitter | AuditMessage`. The sequence number is the delivery id.
+//!   BE | emitter | Message`. The sequence number is the delivery id.
 //! - **Durable.** [`Spool::append`] writes one frame and `fdatasync`s the segment before it
 //!   returns; a segment is `fsync`ed in its directory when it is created or removed. Blocking and
 //!   non-blocking emits take the same path: the spool has no cheaper way to accept a message.
@@ -36,9 +35,9 @@ use aws_lc_rs::digest;
 use rustix::fs::{FlockOperation, Mode, OFlags};
 use tokio::sync::watch;
 
-/// The most bytes of one encoded `AuditMessage`.
+/// The most bytes of one encoded `Message`.
 pub const MAX_MESSAGE: usize = 1 << 20;
-/// The most bytes of an emitter name (sluis names it `<actor>@<boundary>`).
+/// The most bytes of an emitter name.
 pub const MAX_EMITTER: usize = 255;
 /// The default bound of the directory: boards have small disks, and the consumer is to keep it drained.
 pub const DEFAULT_LIMIT: u64 = 256 << 20;
@@ -118,9 +117,9 @@ type Result<T> = std::result::Result<T, Error>;
 pub struct Entry {
     /// The delivery id.
     pub seq: u64,
-    /// The emitter, as the host named the caller of the `Emit` (sluis: `<actor>@<boundary>`, from the peer uid).
+    /// The emitter, as the host named the caller of the `Emit` (from the peer's credentials, or a fixed name).
     pub emitter: String,
-    /// The encoded `AuditMessage`.
+    /// The encoded `Message`.
     pub message: Vec<u8>,
 }
 
@@ -307,7 +306,7 @@ fn parse_entry(p: &[u8]) -> Option<Entry> {
 }
 
 /// Checks that `root` is a directory (not a symlink), owned by this process's uid and closed to
-/// everybody else. The spool holds audit records in the clear until the writer seals them.
+/// everybody else. The spool holds the payloads as they were emitted, in the clear, until the consumer acknowledges them.
 ///
 /// # Errors
 ///
@@ -453,7 +452,7 @@ impl Spool {
         Ok((out, inner.next_seq - 1))
     }
 
-    /// Records that the writer sealed these messages; unknown ids are ignored, so a repeat is
+    /// Records that the consumer is done with these messages; unknown ids are ignored, so a repeat is
     /// harmless. The record is on disk before this returns.
     ///
     /// # Errors
@@ -883,7 +882,7 @@ mod tests {
         poisoned(&s);
         drop(s);
         // The frame reached the file; the emitter was told it failed, so a repeat is possible
-        // and the consumer removes it by uid (at least once).
+        // and the consumer removes it by id (at least once).
         let s = Spool::open(r.path(), Config::default()).unwrap();
         assert_eq!(ids(&s), [1, 2]);
     }

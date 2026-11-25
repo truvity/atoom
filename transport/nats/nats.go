@@ -1,10 +1,10 @@
 // Package nats is the NATS JetStream driver of the transport port of atoom, atoom.transport.v1alpha1.TransportService, in Go: the transport
 // contract over one JetStream stream and one durable consumer. The Go module is github.com/truvity/atoom/transport/nats. A Go program links
-// it and mounts its handler in its own process, so that its audit records reach the writer with no sidecar; the thin main (cmd/nats) serves
+// it and mounts its handler in its own process, so that its messages reach the consumer with no sidecar; the thin main (cmd/nats) serves
 // both sides on a UNIX socket.
 //
 //   - Emit publishes the message, in its Protobuf encoding, to the subject the host names, with the header Nats-Msg-Id set to the message's
-//     uid, so that JetStream drops a publish made again with the same uid within the stream's duplicate window (a retry). The emitter, as
+//     id, so that JetStream drops a publish made again with the same id within the stream's duplicate window (a retry). The emitter, as
 //     the host names the caller, is the header Atoom-Emitter. The answer waits for JetStream's acknowledgement, so the message is stored
 //     (in the stream's storage) whether the emit is blocking or not.
 //   - Receive pulls from the durable consumer the host names (explicit acknowledgement) and hands each message on as a delivery whose id is
@@ -14,7 +14,7 @@
 //   - Ack acknowledges the messages to JetStream and waits for its answer. An id the driver does not hold is ignored.
 //
 // JetStream delivers at least once: a message that is not acknowledged within the consumer's ack wait is delivered again. It is the
-// consumer that makes one record of it, by the message's uid (the writer's dedup, docs/nats.md).
+// consumer that makes one of it, by the message's id (its dedup, docs/nats.md).
 //
 // The connection is the host's: it dials NATS with the credentials, the token or the certificate its deployment gives it (the thin main
 // takes them as flags) and hands the driver a JetStream context. The driver knows nothing of how they were made.
@@ -239,10 +239,10 @@ func (s *Service) Emit(ctx context.Context, req *connect.Request[transportv1alph
 	switch {
 	case m == nil:
 		return nil, refusal.New(connect.CodeInvalidArgument, "schema", "message")
-	case m.GetUid() == "":
-		return nil, refusal.New(connect.CodeInvalidArgument, "schema", "message.uid")
-	case len(m.GetRecord()) == 0:
-		return nil, refusal.New(connect.CodeInvalidArgument, "schema", "message.record")
+	case m.GetId() == "":
+		return nil, refusal.New(connect.CodeInvalidArgument, "schema", "message.id")
+	case len(m.GetPayload()) == 0:
+		return nil, refusal.New(connect.CodeInvalidArgument, "schema", "message.payload")
 	}
 	emitter, ok := s.identify(ctx)
 	if !ok || emitter == "" {
@@ -264,7 +264,7 @@ func (s *Service) Emit(ctx context.Context, req *connect.Request[transportv1alph
 	msg := natsgo.NewMsg(s.subject)
 	msg.Data = raw
 	msg.Header.Set(EmitterHeader, emitter)
-	if _, err := s.js.PublishMsg(ctx, msg, jetstream.WithMsgID(m.GetUid()), jetstream.WithExpectStream(s.stream)); err != nil {
+	if _, err := s.js.PublishMsg(ctx, msg, jetstream.WithMsgID(m.GetId()), jetstream.WithExpectStream(s.stream)); err != nil {
 		return nil, engine("Publish", err)
 	}
 	return connect.NewResponse(&transportv1alpha1.EmitResponse{}), nil
@@ -276,8 +276,8 @@ func decode(m jetstream.Msg) (*transportv1alpha1.Delivery, uint64, bool) {
 	if err != nil {
 		return nil, 0, false
 	}
-	msg := &transportv1alpha1.AuditMessage{}
-	if err := proto.Unmarshal(m.Data(), msg); err != nil || msg.GetUid() == "" || len(msg.GetRecord()) == 0 {
+	msg := &transportv1alpha1.Message{}
+	if err := proto.Unmarshal(m.Data(), msg); err != nil || msg.GetId() == "" || len(msg.GetPayload()) == 0 {
 		return nil, meta.Sequence.Stream, false
 	}
 	emitter := m.Headers().Get(EmitterHeader)
