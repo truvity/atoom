@@ -1,0 +1,7 @@
+# An example drop-in for pcscd.socket (/etc/systemd/system/pcscd.socket.d/atoom.conf): the card service takes connections from the
+# card driver's group and from root, and from nobody else. The stock socket is mode 0666, and a pcscd built without polkit has no other
+# control. Only the driver's user joins the group; the callers of the key socket join atoom-key-callers, not this one.
+[Socket]
+SocketMode=0660
+SocketUser=root
+SocketGroup=atoom-pcsc
