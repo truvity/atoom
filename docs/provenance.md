@@ -250,6 +250,21 @@ From sluis `df108e5`.
 
 What stayed in sluis: the wrapper, the `Identify` that turns the peer into `<actor>@<boundary>`, and the audit actors and emitters that call the port.
 
+Added after the move, not from sluis: the case `a_redelivered_or_repeated_message_is_one_record` of the kit (D50 A), and the Go drivers below.
+
+### transport/nats
+
+<a id="transport-nats"></a>
+
+New code written for atoom (step B9, [record 0023](decisions/0023-session-to-done-first.md), the owner's D65 A); nothing came from sluis.
+
+| Here | From | Changed |
+| --- | --- | --- |
+| `nats.go` | new; the refusals and the emitter rules of `spool/src/service.rs` | the transport port over a JetStream stream and a durable pull consumer; `New`, `Handler` and `Run` are the shape of the other Go drivers |
+| `internal/natstest/` | new | the NATS server embedded, for the tests and, as `cmd/natsserver`, for the conformance run |
+| `cmd/nats/` | `key/awskms/cmd/awskms/`, `source/file/cmd/file/` | the flags, the exit codes, the socket and the tests of the guard of the other Go mains; the connection's credentials as flags |
+| `docs/nats.md` | new | |
+
 ## index
 
 <a id="index"></a>

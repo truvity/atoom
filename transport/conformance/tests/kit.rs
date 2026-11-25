@@ -4,6 +4,7 @@
 #![allow(refining_impl_trait)]
 #![allow(clippy::unwrap_used, clippy::expect_used)] // a failed unwrap in a test is the failure
 
+use std::collections::HashSet;
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -56,6 +57,12 @@ struct Queue {
     ack_does_nothing: bool,
     /// Lets go of a dropped consumer only this long after the drop.
     late_release: Option<Duration>,
+    /// A message delivered again comes without its usage records.
+    redelivery_drops_usage: bool,
+    /// Refuses an emit of a uid it took before (a producer's retry).
+    refuses_a_repeated_uid: bool,
+    delivered: Arc<Mutex<HashSet<u64>>>,
+    uids: Arc<Mutex<HashSet<String>>>,
 }
 
 impl TransportService for Queue {
@@ -83,6 +90,13 @@ impl TransportService for Queue {
                 "message.record",
             ));
         }
+        if !self.uids.lock().unwrap().insert(m.uid.clone()) && self.refuses_a_repeated_uid {
+            return Err(refusal::new(
+                ErrorCode::AlreadyExists,
+                "taken",
+                "message.uid",
+            ));
+        }
         let mut seq = self.seq.lock().unwrap();
         *seq += 1;
         self.items.lock().unwrap().push((*seq, m.clone()));
@@ -100,9 +114,12 @@ impl TransportService for Queue {
         let held = Held(self.taken.clone(), self.late_release);
         let items = self.items.clone();
         let forget = self.forgets_on_delivery;
+        let delivered = self.delivered.clone();
+        let drop_usage = self.redelivery_drops_usage;
         // What is queued now in one batch, then whatever is emitted later, polled; the stream holds the consumer slot until it is dropped.
         let stream = futures::stream::unfold((held, 0u64), move |(held, after)| {
             let items = items.clone();
+            let delivered = delivered.clone();
             async move {
                 loop {
                     let batch: Vec<(u64, AuditMessage)> = items
@@ -119,11 +136,16 @@ impl TransportService for Queue {
                         let resp = ReceiveResponse {
                             deliveries: batch
                                 .into_iter()
-                                .map(|(s, m)| Delivery {
-                                    delivery_id: s,
-                                    emitter: "test@kit".into(),
-                                    message: m.into(),
-                                    ..Delivery::default()
+                                .map(|(s, mut m)| {
+                                    if !delivered.lock().unwrap().insert(s) && drop_usage {
+                                        m.usage.clear();
+                                    }
+                                    Delivery {
+                                        delivery_id: s,
+                                        emitter: "test@kit".into(),
+                                        message: m.into(),
+                                        ..Delivery::default()
+                                    }
                                 })
                                 .collect(),
                             ..ReceiveResponse::default()
@@ -185,7 +207,7 @@ async fn a_driver_that_does_what_the_contract_asks_passes_every_case() {
     let mut out = Vec::new();
     let verdict = report(&cases, &mut out);
     assert!(verdict.is_ok(), "{}", String::from_utf8_lossy(&out));
-    assert_eq!(cases.len(), 5);
+    assert_eq!(cases.len(), 6);
 }
 
 /// A driver learns that a consumer went away only after it dropped the stream, and refuses the next `Receive` until then: the refusal
@@ -232,6 +254,27 @@ async fn each_wrong_driver_fails_the_case_that_looks_for_it() {
                 ..Queue::default()
             },
             "acknowledged_messages_do_not_come_again",
+        ),
+        (
+            Queue {
+                redelivery_drops_usage: true,
+                ..Queue::default()
+            },
+            "a_redelivered_or_repeated_message_is_one_record",
+        ),
+        (
+            Queue {
+                refuses_a_repeated_uid: true,
+                ..Queue::default()
+            },
+            "a_redelivered_or_repeated_message_is_one_record",
+        ),
+        (
+            Queue {
+                forgets_on_delivery: true,
+                ..Queue::default()
+            },
+            "a_redelivered_or_repeated_message_is_one_record",
         ),
     ] {
         let cases = judge(queue).await;

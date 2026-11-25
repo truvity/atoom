@@ -35,6 +35,11 @@ pub async fn transport_suite(emit: Client, receive: Client) -> Vec<Case> {
         run_case("a_second_consumer_is_refused", s.one_consumer()).await,
         run_case("unacknowledged_messages_come_again", s.at_least_once()).await,
         run_case("acknowledged_messages_do_not_come_again", s.acknowledged()).await,
+        run_case(
+            "a_redelivered_or_repeated_message_is_one_record",
+            s.one_record(),
+        )
+        .await,
         run_case("malformed_emits", s.malformed()).await,
     ]
 }
@@ -205,6 +210,52 @@ impl Suite {
         Ok(got)
     }
 
+    /// Like [`Self::take`], but each batch is acknowledged as it comes, as a consumer does that seals what it has: a driver may hold back
+    /// later messages until earlier ones are acknowledged (an SQS FIFO queue hands out no message of a group while one of it is in flight).
+    async fn take_acking(&self, st: &mut Stream, want: usize) -> anyhow::Result<Vec<Delivery>> {
+        let until = Instant::now() + ANSWERS;
+        let mut got: Vec<Delivery> = Vec::new();
+        while got.len() < want {
+            let batch = match self.next(st, |_| until).await? {
+                Next::Batch(b) => b,
+                Next::End => bail!("the stream ended after {} of {want} deliveries", got.len()),
+                Next::Quiet => bail!("only {} of {want} deliveries came in time", got.len()),
+            };
+            let mine: Vec<Delivery> = batch
+                .to_owned_message()
+                .deliveries
+                .into_iter()
+                .filter(|d| d.message.uid.starts_with(&self.run))
+                .collect();
+            if !mine.is_empty() {
+                self.ack(mine.iter().map(|d| d.delivery_id).collect())
+                    .await?;
+            }
+            got.extend(mine);
+        }
+        Ok(got)
+    }
+
+    /// The deliveries of the message `uid` on `st` until nothing more comes for [`SILENT`] after the last one (or after the stream was
+    /// opened).
+    async fn drain(&self, st: &mut Stream, uid: &str) -> anyhow::Result<Vec<Delivery>> {
+        let mut got: Vec<Delivery> = Vec::new();
+        let mut last = Instant::now();
+        loop {
+            match self.next(st, |s| s.opened.max(last) + SILENT).await? {
+                Next::Quiet | Next::End => return Ok(got),
+                Next::Batch(batch) => {
+                    for d in batch.to_owned_message().deliveries {
+                        if d.message.uid == uid {
+                            got.push(d);
+                            last = Instant::now();
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     /// Ensures that no delivery of this run's messages comes on `st` for [`SILENT`] from when the stream was opened (again).
     async fn silent(&self, st: &mut Stream) -> anyhow::Result<()> {
         loop {
@@ -230,7 +281,8 @@ impl Suite {
                 .await
                 .with_context(|| format!("Emit {n}"))?;
         }
-        let got = self.take(&mut st, 3).await?;
+        // Acknowledged as they come: a driver may deliver no further ahead of the acknowledgements than one batch.
+        let got = self.take_acking(&mut st, 3).await?;
         for (i, d) in got.iter().enumerate() {
             let n = u32::try_from(i + 1)?;
             let want = self.message(n);
@@ -251,7 +303,7 @@ impl Suite {
             got.windows(2).all(|w| w[0].delivery_id < w[1].delivery_id),
             "the delivery ids do not increase with the order of the emits"
         );
-        self.ack(got.iter().map(|d| d.delivery_id).collect()).await
+        Ok(())
     }
 
     async fn one_consumer(&self) -> anyhow::Result<()> {
@@ -281,10 +333,12 @@ impl Suite {
     }
 
     async fn at_least_once(&self) -> anyhow::Result<()> {
-        let mut st = self.open().await?;
+        // Both are in the transport before the stream opens, so that a driver that delivers one batch ahead of the acknowledgements has
+        // both in its first batch.
         for n in [10, 11] {
-            self.emit(self.message(n), false).await.context("Emit")?;
+            self.emit(self.message(n), true).await.context("Emit")?;
         }
+        let mut st = self.open().await?;
         let first = self.take(&mut st, 2).await?;
         // The consumer goes away without acknowledging.
         drop(st);
@@ -319,6 +373,64 @@ impl Suite {
         drop(st);
         let mut st = self.open().await?;
         self.silent(&mut st).await
+    }
+
+    /// A message that is delivered again after its consumer went away, and a message emitted twice under one uid (a producer's retry), end
+    /// as exactly one record when the consumer keeps one record for each uid, as a writer that deduplicates by the message's id does: every
+    /// delivery of the uid carries the bytes emitted, record and usage alike, so that the record kept loses nothing whichever delivery
+    /// made it. The message comes at least twice (the redelivery), and once it is acknowledged under every id it came with, it does not
+    /// come again.
+    async fn one_record(&self) -> anyhow::Result<()> {
+        let m = self.message(40);
+        let uid = m.uid.clone();
+        // The emit and its retry: both are accepted (a driver may keep both, or one).
+        self.emit(m.clone(), true).await.context("Emit")?;
+        self.emit(m.clone(), true)
+            .await
+            .context("the same message emitted again")?;
+        // The first consumer takes it and goes away without acknowledging.
+        let mut st = self.open().await?;
+        let mut all = self.take(&mut st, 1).await?;
+        drop(st);
+        // The next one takes it again, and everything else of that uid that comes.
+        let mut st = self.open().await?;
+        let again = self.take(&mut st, 1).await?;
+        all.extend(again);
+        all.extend(self.drain(&mut st, &uid).await?);
+        ensure!(
+            all.len() >= 2,
+            "the message did not come again after its consumer went away"
+        );
+        // The writer: one record for each uid; a delivery of a uid it has must carry the bytes it has.
+        let mut records: std::collections::BTreeMap<String, (Vec<u8>, Vec<Vec<u8>>)> =
+            std::collections::BTreeMap::new();
+        for d in &all {
+            ensure!(
+                d.message.record == m.record && d.message.usage == m.usage,
+                "a delivery of {uid} does not carry the bytes emitted: the usage of a deduplicated record would be lost"
+            );
+            records
+                .entry(d.message.uid.clone())
+                .or_insert_with(|| (d.message.record.clone(), d.message.usage.clone()));
+        }
+        ensure!(
+            records.len() == 1,
+            "{} records for one message",
+            records.len()
+        );
+        let mut ids: Vec<u64> = all.iter().map(|d| d.delivery_id).collect();
+        ids.sort_unstable();
+        ids.dedup();
+        self.ack(ids).await?;
+        drop(st);
+        // Acknowledged under every id it came with, it does not come again.
+        let mut st = self.open().await?;
+        let late = self.drain(&mut st, &uid).await?;
+        ensure!(
+            late.is_empty(),
+            "the message came again after every delivery of it was acknowledged"
+        );
+        Ok(())
     }
 
     async fn malformed(&self) -> anyhow::Result<()> {

@@ -26,6 +26,7 @@ source-credential	rust	source/credential	atoom-source-credential:source-credenti
 blob-fs	rust	blob/fs	atoom-blob-fs:blob-fs	portable	linux	-	-	-	-	The fs driver of the blob port: a local directory served on a UNIX socket
 blob-fsreadonly	rust	blob/fsreadonly	atoom-blob-fsreadonly:blob-fsreadonly	portable	linux	-	-	-	-	The read-only fs driver of the blob port: the directory of blob-fs, read only, on a UNIX socket
 transport-spool	rust	transport/spool	atoom-transport-spool:transport-spool	portable	linux	-	-	-	-	The spool driver of the transport port: a durable local queue served on a UNIX socket
+transport-nats	go	transport/nats	./cmd/nats	portable	linux,darwin	-	-	-	-	The NATS JetStream driver of the transport port: a JetStream stream and durable consumer served on a UNIX socket
 index-sqlite	rust	index/sqlite	atoom-index-sqlite:index-sqlite	portable	linux	-	-	-	-	The sqlite driver of the index port: one SQLite file served on a UNIX socket
 destination-dir	rust	destination/dir	atoom-destination-dir:destination-dir	portable	linux	-	-	-	-	The dir driver of the destination port: a local directory served on a UNIX socket
 block-token	go	blocks/token	./cmd/token	portable	linux,darwin	-	-	-	-	The token block: compact JWS signed by purpose through the seal block, its key set and verification, served on a UNIX socket

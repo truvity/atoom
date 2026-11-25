@@ -27,6 +27,7 @@ use (
 	./store/dynamodb
 	./tools
 	./transport
+	./transport/nats
 )
 
 replace github.com/truvity/atoom/blob v0.7.0 => ./blob
@@ -70,3 +71,5 @@ replace github.com/truvity/atoom/store v0.7.0 => ./store
 replace github.com/truvity/atoom/store/dynamodb v0.7.0 => ./store/dynamodb
 
 replace github.com/truvity/atoom/transport v0.7.0 => ./transport
+
+replace github.com/truvity/atoom/transport/nats v0.7.0 => ./transport/nats
