@@ -1,11 +1,11 @@
 # The transport suite
 
-The cases of `transport_suite`, in the order they run. Each one speaks the contract and nothing else, over a client of the kit for the emit side and one for the consume side. Each opens the stream it needs and drops it before the next case; a driver that has not yet let go of a dropped consumer is asked again for ten seconds.
+The cases of `transport_suite`, in the order they run. Each one speaks the contract and nothing else, over a client of the kit for the emit side and one for the consume side. Each opens the stream it needs and drops it before the next case; a driver that has not yet let go of a dropped consumer (a refusal with `already_exists` as the answer to `Receive` or as the first message of the stream, before any delivery) is asked again for ten seconds.
 
 | Case | What it holds a driver to |
 | --- | --- |
 | `emit_then_receive_in_order` | three messages emitted (one not blocking, two blocking) come on an open stream in the order emitted, each exactly as emitted (uid, record, both usage records), each with a non-empty emitter and a delivery id other than 0, and the ids increase; the three are acknowledged |
-| `a_second_consumer_is_refused` | while a `Receive` stream is open, a second is `already_exists` (at the call or at the first message) |
+| `a_second_consumer_is_refused` | while a `Receive` stream is open and served (a message came on it), a second is `already_exists` (at the call or at the first message); the message is acknowledged |
 | `unacknowledged_messages_come_again` | two messages are delivered and not acknowledged; the stream is dropped; the next `Receive` delivers the same two under the same ids |
 | `acknowledged_messages_do_not_come_again` | a message that is acknowledged (with an id the driver does not know beside it, and then again) is not delivered to the next stream in 1.5 seconds; an unknown id and a repeated acknowledgement are not errors |
 | `malformed_emits` | an emit with no message, with an empty uid and with an empty record is `invalid_argument`, reason `schema`, field `message`, `message.uid` and `message.record` |

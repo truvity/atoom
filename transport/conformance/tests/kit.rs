@@ -21,12 +21,22 @@ use connectrpc::{
     ConnectError, RequestContext, Response, Router, ServiceRequest, ServiceResult, ServiceStream,
 };
 
-/// Lets go of the consumer slot when the stream that holds it is dropped.
-struct Held(Arc<AtomicBool>);
+/// Lets go of the consumer slot when the stream that holds it is dropped, or `late` after that.
+struct Held(Arc<AtomicBool>, Option<Duration>);
 
 impl Drop for Held {
     fn drop(&mut self) {
-        self.0.store(false, Ordering::SeqCst);
+        let slot = self.0.clone();
+        match self.1 {
+            None => slot.store(false, Ordering::SeqCst),
+            // A driver over a network learns that its consumer went away some time after the consumer dropped the stream.
+            Some(late) => {
+                std::thread::spawn(move || {
+                    std::thread::sleep(late);
+                    slot.store(false, Ordering::SeqCst);
+                });
+            }
+        }
     }
 }
 
@@ -44,6 +54,8 @@ struct Queue {
     accepts_empty_uid: bool,
     /// An acknowledgement removes nothing.
     ack_does_nothing: bool,
+    /// Lets go of a dropped consumer only this long after the drop.
+    late_release: Option<Duration>,
 }
 
 impl TransportService for Queue {
@@ -85,7 +97,7 @@ impl TransportService for Queue {
         if !self.two_consumers && self.taken.swap(true, Ordering::SeqCst) {
             return Err(refusal::new(ErrorCode::AlreadyExists, "taken", ""));
         }
-        let held = Held(self.taken.clone());
+        let held = Held(self.taken.clone(), self.late_release);
         let items = self.items.clone();
         let forget = self.forgets_on_delivery;
         // What is queued now in one batch, then whatever is emitted later, polled; the stream holds the consumer slot until it is dropped.
@@ -174,6 +186,20 @@ async fn a_driver_that_does_what_the_contract_asks_passes_every_case() {
     let verdict = report(&cases, &mut out);
     assert!(verdict.is_ok(), "{}", String::from_utf8_lossy(&out));
     assert_eq!(cases.len(), 5);
+}
+
+/// A driver learns that a consumer went away only after it dropped the stream, and refuses the next `Receive` until then: the refusal
+/// comes as the first message of the stream (the CI flake of 2026-11-24/25 on macOS against the spool). The kit opens again.
+#[tokio::test]
+async fn a_driver_that_lets_go_of_a_consumer_late_passes_every_case() {
+    let cases = judge(Queue {
+        late_release: Some(Duration::from_millis(300)),
+        ..Queue::default()
+    })
+    .await;
+    let mut out = Vec::new();
+    let verdict = report(&cases, &mut out);
+    assert!(verdict.is_ok(), "{}", String::from_utf8_lossy(&out));
 }
 
 #[tokio::test]

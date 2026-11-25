@@ -5,6 +5,12 @@ libraries changed. `just release-prepare X.Y.Z` writes the section.
 
 <!-- release-prepare: new sections go below this line -->
 
+## Unreleased
+
+### Fixed
+
+- **`transport/conformance`: a driver that lets go of a dropped consumer a moment late no longer fails the kit.** The kit opened the next `Receive` right after dropping a stream and tried again on `already_exists` only when the call itself was refused; a Connect server stream is answered before its handler runs, so the driver's refusal (the spool's `taken`, while it had not yet seen the dropped stream end) came as the first message of the stream and failed `unacknowledged_messages_come_again` and `acknowledged_messages_do_not_come_again` (seen on macOS CI). A refusal with `already_exists` before any delivery now opens the stream again for the same ten seconds, and the silent window of `acknowledged_messages_do_not_come_again` counts from the stream that was served. `a_second_consumer_is_refused` now takes a message on the first stream before it asks for the second, so that the refusal it sees is for that stream. The kit's own test has a driver that lets go late. The transport port says that the release is asynchronous and where the refusal comes; the contract does not change.
+
 ## 0.7.0 - 2026-11-25
 
 One version for the whole repository: every library is tagged 0.7.0, changed or not.
