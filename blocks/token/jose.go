@@ -126,13 +126,23 @@ func (k *publicKey) jwk(kid string, x5c [][]byte) jwk {
 // base64url without padding.
 func (k *publicKey) thumbprint() string {
 	j := k.jwk("", nil)
-	var canonical string
+	// The members are base64url and curve names, which JSON spells as they are; the struct fields are in lexicographic order.
+	var canonical []byte
 	if k.rsa != nil {
-		canonical = `{"e":"` + j.E + `","kty":"RSA","n":"` + j.N + `"}`
+		canonical = marshal(struct {
+			E   string `json:"e"`
+			Kty string `json:"kty"`
+			N   string `json:"n"`
+		}{j.E, "RSA", j.N})
 	} else {
-		canonical = `{"crv":"` + j.Crv + `","kty":"EC","x":"` + j.X + `","y":"` + j.Y + `"}`
+		canonical = marshal(struct {
+			Crv string `json:"crv"`
+			Kty string `json:"kty"`
+			X   string `json:"x"`
+			Y   string `json:"y"`
+		}{j.Crv, "EC", j.X, j.Y})
 	}
-	sum := sha256.Sum256([]byte(canonical))
+	sum := sha256.Sum256(canonical)
 	return b64.EncodeToString(sum[:])
 }
 
