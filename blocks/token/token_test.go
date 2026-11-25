@@ -111,7 +111,7 @@ func TestThePublicKeyIsReadOnceAndAgainWhenTheKeyChanges(t *testing.T) {
 // second is another token block over the stack's seal block, as another instance of the host would be.
 func (s *stack) second(t *testing.T) tokenv1alpha1connect.TokenServiceClient {
 	t.Helper()
-	b, err := token.New(context.Background(), token.Options{Seal: s.seal, Purposes: conformance.Purposes(), Rules: token.AllowAll()})
+	b, err := token.New(context.Background(), token.Options{Seal: s.seal, Purposes: conformance.Purposes(), Rules: token.AllowAll(), Items: s.store})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -137,8 +137,8 @@ func TestVerifyReadsTheKeyAgainForAnUnknownKid(t *testing.T) {
 	if got.Msg.GetPurpose() != conformance.PurposeES256 {
 		t.Fatalf("verified as %q", got.Msg.GetPurpose())
 	}
-	if n := s.keys.PublicKeys.Load() - before; n != int64(len(conformance.Purposes())) {
-		t.Fatalf("%d PublicKey calls, want one read again of each purpose", n)
+	if n := s.keys.PublicKeys.Load() - before; n != int64(len(conformance.SealPurposes())) {
+		t.Fatalf("%d PublicKey calls, want one read again of each purpose (of each slot of a ring)", n)
 	}
 	// A kid that no key has costs one read again of each purpose too, and is refused.
 	// {"alg":"ES256","kid":"none","typ":"kit+jwt"}, {} and a signature of three octets.
@@ -178,7 +178,11 @@ func TestASignatureThatDoesNotVerifyIsNotATokenOfTheBlock(t *testing.T) {
 	ctx := context.Background()
 	for _, p := range conformance.Purposes() {
 		s := kitStack(t)
-		s.keys.Lie(p.Name)
+		name := p.Name
+		if p.Ring != nil {
+			name = p.Ring.Current
+		}
+		s.keys.Lie(name)
 		_, err := sign(ctx, s, p.Name, p.Types[0], `{}`)
 		wantRefusal(t, err, connect.CodeInternal, token.ReasonKey)
 	}
@@ -219,6 +223,9 @@ func TestTheFacts(t *testing.T) {
 	var mu sync.Mutex
 	var facts []token.Event
 	s := newStack(t, stackOptions{purposes: conformance.Purposes(), observe: func(_ context.Context, e token.Event) {
+		if e.Op != token.OpSign {
+			return // the ring's first key joined at the start
+		}
 		mu.Lock()
 		facts = append(facts, e)
 		mu.Unlock()

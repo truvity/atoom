@@ -76,6 +76,66 @@ func (Kid) EnumDescriptor() ([]byte, []int) {
 	return file_atoom_token_v1alpha1_token_proto_rawDescGZIP(), []int{0}
 }
 
+// KeyState is the state of a key of a ring (record 0024). A key moves one way, through pre-published, active, retiring and dropped;
+// revoked is reachable from any state and is terminal.
+type KeyState int32
+
+const (
+	KeyState_KEY_STATE_UNSPECIFIED   KeyState = 0 // not a key of a ring
+	KeyState_KEY_STATE_PRE_PUBLISHED KeyState = 1 // in the key set, does not sign yet
+	KeyState_KEY_STATE_ACTIVE        KeyState = 2 // in the key set, signs on its own node
+	KeyState_KEY_STATE_RETIRING      KeyState = 3 // in the key set until every token it signed has expired, signs no more
+	KeyState_KEY_STATE_DROPPED       KeyState = 4 // a tombstone: its kid and times, no key, so that it never joins again
+	KeyState_KEY_STATE_REVOKED       KeyState = 5 // revoked by the host: in no key set, never signs, never joins again
+)
+
+// Enum value maps for KeyState.
+var (
+	KeyState_name = map[int32]string{
+		0: "KEY_STATE_UNSPECIFIED",
+		1: "KEY_STATE_PRE_PUBLISHED",
+		2: "KEY_STATE_ACTIVE",
+		3: "KEY_STATE_RETIRING",
+		4: "KEY_STATE_DROPPED",
+		5: "KEY_STATE_REVOKED",
+	}
+	KeyState_value = map[string]int32{
+		"KEY_STATE_UNSPECIFIED":   0,
+		"KEY_STATE_PRE_PUBLISHED": 1,
+		"KEY_STATE_ACTIVE":        2,
+		"KEY_STATE_RETIRING":      3,
+		"KEY_STATE_DROPPED":       4,
+		"KEY_STATE_REVOKED":       5,
+	}
+)
+
+func (x KeyState) Enum() *KeyState {
+	p := new(KeyState)
+	*p = x
+	return p
+}
+
+func (x KeyState) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (KeyState) Descriptor() protoreflect.EnumDescriptor {
+	return file_atoom_token_v1alpha1_token_proto_enumTypes[1].Descriptor()
+}
+
+func (KeyState) Type() protoreflect.EnumType {
+	return &file_atoom_token_v1alpha1_token_proto_enumTypes[1]
+}
+
+func (x KeyState) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use KeyState.Descriptor instead.
+func (KeyState) EnumDescriptor() ([]byte, []int) {
+	return file_atoom_token_v1alpha1_token_proto_rawDescGZIP(), []int{1}
+}
+
 // CapabilitiesRequest asks what the block serves.
 type CapabilitiesRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
@@ -165,6 +225,7 @@ type PurposeInfo struct {
 	Algorithm     string                 `protobuf:"bytes,2,opt,name=algorithm,proto3" json:"algorithm,omitempty"`                    // its algorithm, from the seal block: "ES384", "ES256" or "RS256"
 	Types         []string               `protobuf:"bytes,3,rep,name=types,proto3" json:"types,omitempty"`                            // the values of the JWS typ header that the purpose signs
 	Kid           Kid                    `protobuf:"varint,4,opt,name=kid,proto3,enum=atoom.token.v1alpha1.Kid" json:"kid,omitempty"` // how its kid is made
+	Ring          *RingInfo              `protobuf:"bytes,5,opt,name=ring,proto3" json:"ring,omitempty"`                              // its ring; absent for a purpose without one
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -227,6 +288,138 @@ func (x *PurposeInfo) GetKid() Kid {
 	return Kid_KID_UNSPECIFIED
 }
 
+func (x *PurposeInfo) GetRing() *RingInfo {
+	if x != nil {
+		return x.Ring
+	}
+	return nil
+}
+
+// RingInfo is the ring of a purpose, as the host declared it (record 0024).
+type RingInfo struct {
+	state                protoimpl.MessageState `protogen:"open.v1"`
+	Slots                []string               `protobuf:"bytes,1,rep,name=slots,proto3" json:"slots,omitempty"`                                                              // the seal block's signing purposes that hold the purpose's keys on this node, in order
+	Current              string                 `protobuf:"bytes,2,opt,name=current,proto3" json:"current,omitempty"`                                                          // the slot whose key is to sign
+	LeadSeconds          int64                  `protobuf:"varint,3,opt,name=lead_seconds,json=leadSeconds,proto3" json:"lead_seconds,omitempty"`                              // a new key is in the key set this long before it signs
+	RetainSeconds        int64                  `protobuf:"varint,4,opt,name=retain_seconds,json=retainSeconds,proto3" json:"retain_seconds,omitempty"`                        // a key that stopped signing stays in the key set this long
+	CacheMaxAgeSeconds   int64                  `protobuf:"varint,5,opt,name=cache_max_age_seconds,json=cacheMaxAgeSeconds,proto3" json:"cache_max_age_seconds,omitempty"`     // the longest cache of the published key set, which the lead is at least
+	TokenLifetimeSeconds int64                  `protobuf:"varint,6,opt,name=token_lifetime_seconds,json=tokenLifetimeSeconds,proto3" json:"token_lifetime_seconds,omitempty"` // the longest life of a token of the purpose with the skew, which the retention is at least
+	BootstrapSeconds     int64                  `protobuf:"varint,7,opt,name=bootstrap_seconds,json=bootstrapSeconds,proto3" json:"bootstrap_seconds,omitempty"`               // a node's first key signs at once while every key joined less than this ago; 0: never
+	OverlapSeconds       int64                  `protobuf:"varint,8,opt,name=overlap_seconds,json=overlapSeconds,proto3" json:"overlap_seconds,omitempty"`                     // a node's earlier active key still signs this long after a newer one became active
+	AtOnce               bool                   `protobuf:"varint,9,opt,name=at_once,json=atOnce,proto3" json:"at_once,omitempty"`                                             // a new key signs at once when this node holds no other active key (a restart rotation)
+	Confirm              bool                   `protobuf:"varint,10,opt,name=confirm,proto3" json:"confirm,omitempty"`                                                        // a key becomes active only after the host confirmed it published
+	Node                 string                 `protobuf:"bytes,11,opt,name=node,proto3" json:"node,omitempty"`                                                               // the node of this instance, as the host named it
+	unknownFields        protoimpl.UnknownFields
+	sizeCache            protoimpl.SizeCache
+}
+
+func (x *RingInfo) Reset() {
+	*x = RingInfo{}
+	mi := &file_atoom_token_v1alpha1_token_proto_msgTypes[3]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RingInfo) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RingInfo) ProtoMessage() {}
+
+func (x *RingInfo) ProtoReflect() protoreflect.Message {
+	mi := &file_atoom_token_v1alpha1_token_proto_msgTypes[3]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RingInfo.ProtoReflect.Descriptor instead.
+func (*RingInfo) Descriptor() ([]byte, []int) {
+	return file_atoom_token_v1alpha1_token_proto_rawDescGZIP(), []int{3}
+}
+
+func (x *RingInfo) GetSlots() []string {
+	if x != nil {
+		return x.Slots
+	}
+	return nil
+}
+
+func (x *RingInfo) GetCurrent() string {
+	if x != nil {
+		return x.Current
+	}
+	return ""
+}
+
+func (x *RingInfo) GetLeadSeconds() int64 {
+	if x != nil {
+		return x.LeadSeconds
+	}
+	return 0
+}
+
+func (x *RingInfo) GetRetainSeconds() int64 {
+	if x != nil {
+		return x.RetainSeconds
+	}
+	return 0
+}
+
+func (x *RingInfo) GetCacheMaxAgeSeconds() int64 {
+	if x != nil {
+		return x.CacheMaxAgeSeconds
+	}
+	return 0
+}
+
+func (x *RingInfo) GetTokenLifetimeSeconds() int64 {
+	if x != nil {
+		return x.TokenLifetimeSeconds
+	}
+	return 0
+}
+
+func (x *RingInfo) GetBootstrapSeconds() int64 {
+	if x != nil {
+		return x.BootstrapSeconds
+	}
+	return 0
+}
+
+func (x *RingInfo) GetOverlapSeconds() int64 {
+	if x != nil {
+		return x.OverlapSeconds
+	}
+	return 0
+}
+
+func (x *RingInfo) GetAtOnce() bool {
+	if x != nil {
+		return x.AtOnce
+	}
+	return false
+}
+
+func (x *RingInfo) GetConfirm() bool {
+	if x != nil {
+		return x.Confirm
+	}
+	return false
+}
+
+func (x *RingInfo) GetNode() string {
+	if x != nil {
+		return x.Node
+	}
+	return ""
+}
+
 // SignRequest asks for a compact JWS of the claims.
 type SignRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
@@ -240,7 +433,7 @@ type SignRequest struct {
 
 func (x *SignRequest) Reset() {
 	*x = SignRequest{}
-	mi := &file_atoom_token_v1alpha1_token_proto_msgTypes[3]
+	mi := &file_atoom_token_v1alpha1_token_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -252,7 +445,7 @@ func (x *SignRequest) String() string {
 func (*SignRequest) ProtoMessage() {}
 
 func (x *SignRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_atoom_token_v1alpha1_token_proto_msgTypes[3]
+	mi := &file_atoom_token_v1alpha1_token_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -265,7 +458,7 @@ func (x *SignRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SignRequest.ProtoReflect.Descriptor instead.
 func (*SignRequest) Descriptor() ([]byte, []int) {
-	return file_atoom_token_v1alpha1_token_proto_rawDescGZIP(), []int{3}
+	return file_atoom_token_v1alpha1_token_proto_rawDescGZIP(), []int{4}
 }
 
 func (x *SignRequest) GetPurpose() string {
@@ -309,7 +502,7 @@ type SignResponse struct {
 
 func (x *SignResponse) Reset() {
 	*x = SignResponse{}
-	mi := &file_atoom_token_v1alpha1_token_proto_msgTypes[4]
+	mi := &file_atoom_token_v1alpha1_token_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -321,7 +514,7 @@ func (x *SignResponse) String() string {
 func (*SignResponse) ProtoMessage() {}
 
 func (x *SignResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_atoom_token_v1alpha1_token_proto_msgTypes[4]
+	mi := &file_atoom_token_v1alpha1_token_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -334,7 +527,7 @@ func (x *SignResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SignResponse.ProtoReflect.Descriptor instead.
 func (*SignResponse) Descriptor() ([]byte, []int) {
-	return file_atoom_token_v1alpha1_token_proto_rawDescGZIP(), []int{4}
+	return file_atoom_token_v1alpha1_token_proto_rawDescGZIP(), []int{5}
 }
 
 func (x *SignResponse) GetToken() string {
@@ -379,7 +572,7 @@ type HostKey struct {
 
 func (x *HostKey) Reset() {
 	*x = HostKey{}
-	mi := &file_atoom_token_v1alpha1_token_proto_msgTypes[5]
+	mi := &file_atoom_token_v1alpha1_token_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -391,7 +584,7 @@ func (x *HostKey) String() string {
 func (*HostKey) ProtoMessage() {}
 
 func (x *HostKey) ProtoReflect() protoreflect.Message {
-	mi := &file_atoom_token_v1alpha1_token_proto_msgTypes[5]
+	mi := &file_atoom_token_v1alpha1_token_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -404,7 +597,7 @@ func (x *HostKey) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HostKey.ProtoReflect.Descriptor instead.
 func (*HostKey) Descriptor() ([]byte, []int) {
-	return file_atoom_token_v1alpha1_token_proto_rawDescGZIP(), []int{5}
+	return file_atoom_token_v1alpha1_token_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *HostKey) GetKid() string {
@@ -445,7 +638,7 @@ type CertificateChain struct {
 
 func (x *CertificateChain) Reset() {
 	*x = CertificateChain{}
-	mi := &file_atoom_token_v1alpha1_token_proto_msgTypes[6]
+	mi := &file_atoom_token_v1alpha1_token_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -457,7 +650,7 @@ func (x *CertificateChain) String() string {
 func (*CertificateChain) ProtoMessage() {}
 
 func (x *CertificateChain) ProtoReflect() protoreflect.Message {
-	mi := &file_atoom_token_v1alpha1_token_proto_msgTypes[6]
+	mi := &file_atoom_token_v1alpha1_token_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -470,7 +663,7 @@ func (x *CertificateChain) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CertificateChain.ProtoReflect.Descriptor instead.
 func (*CertificateChain) Descriptor() ([]byte, []int) {
-	return file_atoom_token_v1alpha1_token_proto_rawDescGZIP(), []int{6}
+	return file_atoom_token_v1alpha1_token_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *CertificateChain) GetX5C() [][]byte {
@@ -483,16 +676,17 @@ func (x *CertificateChain) GetX5C() [][]byte {
 // KeySetRequest asks for the key set.
 type KeySetRequest struct {
 	state         protoimpl.MessageState       `protogen:"open.v1"`
-	Purposes      []string                     `protobuf:"bytes,1,rep,name=purposes,proto3" json:"purposes,omitempty"`                                                                       // the purposes whose current key is published, in this order; none: every purpose of the declaration
-	Keys          []*HostKey                   `protobuf:"bytes,2,rep,name=keys,proto3" json:"keys,omitempty"`                                                                               // the host's keys, published after the current keys, in this order
-	Chains        map[string]*CertificateChain `protobuf:"bytes,3,rep,name=chains,proto3" json:"chains,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"` // the x5c of a purpose's current key, by purpose; a purpose not named here has none
+	Purposes      []string                     `protobuf:"bytes,1,rep,name=purposes,proto3" json:"purposes,omitempty"`                                                                                              // the purposes whose current key is published, in this order; none: every purpose of the declaration
+	Keys          []*HostKey                   `protobuf:"bytes,2,rep,name=keys,proto3" json:"keys,omitempty"`                                                                                                      // the host's keys, published after the current keys, in this order
+	Chains        map[string]*CertificateChain `protobuf:"bytes,3,rep,name=chains,proto3" json:"chains,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`                        // the x5c of a purpose's current key (for a ring, the key this node signs with), by purpose
+	KeyChains     map[string]*CertificateChain `protobuf:"bytes,4,rep,name=key_chains,json=keyChains,proto3" json:"key_chains,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"` // the x5c of a ring key, by kid; a kid that is not in the set is refused
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
 func (x *KeySetRequest) Reset() {
 	*x = KeySetRequest{}
-	mi := &file_atoom_token_v1alpha1_token_proto_msgTypes[7]
+	mi := &file_atoom_token_v1alpha1_token_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -504,7 +698,7 @@ func (x *KeySetRequest) String() string {
 func (*KeySetRequest) ProtoMessage() {}
 
 func (x *KeySetRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_atoom_token_v1alpha1_token_proto_msgTypes[7]
+	mi := &file_atoom_token_v1alpha1_token_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -517,7 +711,7 @@ func (x *KeySetRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use KeySetRequest.ProtoReflect.Descriptor instead.
 func (*KeySetRequest) Descriptor() ([]byte, []int) {
-	return file_atoom_token_v1alpha1_token_proto_rawDescGZIP(), []int{7}
+	return file_atoom_token_v1alpha1_token_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *KeySetRequest) GetPurposes() []string {
@@ -541,6 +735,13 @@ func (x *KeySetRequest) GetChains() map[string]*CertificateChain {
 	return nil
 }
 
+func (x *KeySetRequest) GetKeyChains() map[string]*CertificateChain {
+	if x != nil {
+		return x.KeyChains
+	}
+	return nil
+}
+
 // KeySetResponse carries the key set.
 type KeySetResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
@@ -552,7 +753,7 @@ type KeySetResponse struct {
 
 func (x *KeySetResponse) Reset() {
 	*x = KeySetResponse{}
-	mi := &file_atoom_token_v1alpha1_token_proto_msgTypes[8]
+	mi := &file_atoom_token_v1alpha1_token_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -564,7 +765,7 @@ func (x *KeySetResponse) String() string {
 func (*KeySetResponse) ProtoMessage() {}
 
 func (x *KeySetResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_atoom_token_v1alpha1_token_proto_msgTypes[8]
+	mi := &file_atoom_token_v1alpha1_token_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -577,7 +778,7 @@ func (x *KeySetResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use KeySetResponse.ProtoReflect.Descriptor instead.
 func (*KeySetResponse) Descriptor() ([]byte, []int) {
-	return file_atoom_token_v1alpha1_token_proto_rawDescGZIP(), []int{8}
+	return file_atoom_token_v1alpha1_token_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *KeySetResponse) GetJwksJson() []byte {
@@ -597,18 +798,20 @@ func (x *KeySetResponse) GetKeys() []*PublishedKey {
 // PublishedKey is one key of the set.
 type PublishedKey struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Kid           string                 `protobuf:"bytes,1,opt,name=kid,proto3" json:"kid,omitempty"`                        // its kid
-	Algorithm     string                 `protobuf:"bytes,2,opt,name=algorithm,proto3" json:"algorithm,omitempty"`            // its algorithm
-	SpkiDer       []byte                 `protobuf:"bytes,3,opt,name=spki_der,json=spkiDer,proto3" json:"spki_der,omitempty"` // the public key, SubjectPublicKeyInfo in DER
-	Purpose       string                 `protobuf:"bytes,4,opt,name=purpose,proto3" json:"purpose,omitempty"`                // the purpose whose current key it is; empty for a host's key
-	KeyId         string                 `protobuf:"bytes,5,opt,name=key_id,json=keyId,proto3" json:"key_id,omitempty"`       // the key port's key_id of a current key; empty for a host's key
+	Kid           string                 `protobuf:"bytes,1,opt,name=kid,proto3" json:"kid,omitempty"`                                         // its kid
+	Algorithm     string                 `protobuf:"bytes,2,opt,name=algorithm,proto3" json:"algorithm,omitempty"`                             // its algorithm
+	SpkiDer       []byte                 `protobuf:"bytes,3,opt,name=spki_der,json=spkiDer,proto3" json:"spki_der,omitempty"`                  // the public key, SubjectPublicKeyInfo in DER
+	Purpose       string                 `protobuf:"bytes,4,opt,name=purpose,proto3" json:"purpose,omitempty"`                                 // the purpose whose current key it is; empty for a host's key
+	KeyId         string                 `protobuf:"bytes,5,opt,name=key_id,json=keyId,proto3" json:"key_id,omitempty"`                        // the key port's key_id of a current key; empty for a host's key
+	State         KeyState               `protobuf:"varint,6,opt,name=state,proto3,enum=atoom.token.v1alpha1.KeyState" json:"state,omitempty"` // the state of a ring key; KEY_STATE_UNSPECIFIED for a key of no ring
+	Node          string                 `protobuf:"bytes,7,opt,name=node,proto3" json:"node,omitempty"`                                       // the node of a ring key
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
 func (x *PublishedKey) Reset() {
 	*x = PublishedKey{}
-	mi := &file_atoom_token_v1alpha1_token_proto_msgTypes[9]
+	mi := &file_atoom_token_v1alpha1_token_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -620,7 +823,7 @@ func (x *PublishedKey) String() string {
 func (*PublishedKey) ProtoMessage() {}
 
 func (x *PublishedKey) ProtoReflect() protoreflect.Message {
-	mi := &file_atoom_token_v1alpha1_token_proto_msgTypes[9]
+	mi := &file_atoom_token_v1alpha1_token_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -633,7 +836,7 @@ func (x *PublishedKey) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PublishedKey.ProtoReflect.Descriptor instead.
 func (*PublishedKey) Descriptor() ([]byte, []int) {
-	return file_atoom_token_v1alpha1_token_proto_rawDescGZIP(), []int{9}
+	return file_atoom_token_v1alpha1_token_proto_rawDescGZIP(), []int{10}
 }
 
 func (x *PublishedKey) GetKid() string {
@@ -671,6 +874,712 @@ func (x *PublishedKey) GetKeyId() string {
 	return ""
 }
 
+func (x *PublishedKey) GetState() KeyState {
+	if x != nil {
+		return x.State
+	}
+	return KeyState_KEY_STATE_UNSPECIFIED
+}
+
+func (x *PublishedKey) GetNode() string {
+	if x != nil {
+		return x.Node
+	}
+	return ""
+}
+
+// RingKey is one key of a ring.
+type RingKey struct {
+	state            protoimpl.MessageState `protogen:"open.v1"`
+	Kid              string                 `protobuf:"bytes,1,opt,name=kid,proto3" json:"kid,omitempty"`                                                        // its kid, by the purpose's kid rule
+	KeyId            string                 `protobuf:"bytes,2,opt,name=key_id,json=keyId,proto3" json:"key_id,omitempty"`                                       // the key port's key_id
+	Algorithm        string                 `protobuf:"bytes,3,opt,name=algorithm,proto3" json:"algorithm,omitempty"`                                            // its algorithm
+	SpkiDer          []byte                 `protobuf:"bytes,4,opt,name=spki_der,json=spkiDer,proto3" json:"spki_der,omitempty"`                                 // the public key, SubjectPublicKeyInfo in DER; none for a dropped or revoked key
+	Node             string                 `protobuf:"bytes,5,opt,name=node,proto3" json:"node,omitempty"`                                                      // the node that holds it
+	Slot             string                 `protobuf:"bytes,6,opt,name=slot,proto3" json:"slot,omitempty"`                                                      // the slot it was found in
+	State            KeyState               `protobuf:"varint,7,opt,name=state,proto3,enum=atoom.token.v1alpha1.KeyState" json:"state,omitempty"`                // its state
+	AddedUnixMs      int64                  `protobuf:"varint,8,opt,name=added_unix_ms,json=addedUnixMs,proto3" json:"added_unix_ms,omitempty"`                  // when it joined the ring, milliseconds since the epoch
+	StateSinceUnixMs int64                  `protobuf:"varint,9,opt,name=state_since_unix_ms,json=stateSinceUnixMs,proto3" json:"state_since_unix_ms,omitempty"` // when it entered its state
+	ConfirmedUnixMs  int64                  `protobuf:"varint,10,opt,name=confirmed_unix_ms,json=confirmedUnixMs,proto3" json:"confirmed_unix_ms,omitempty"`     // when the host confirmed it published; 0: not confirmed
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
+}
+
+func (x *RingKey) Reset() {
+	*x = RingKey{}
+	mi := &file_atoom_token_v1alpha1_token_proto_msgTypes[11]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RingKey) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RingKey) ProtoMessage() {}
+
+func (x *RingKey) ProtoReflect() protoreflect.Message {
+	mi := &file_atoom_token_v1alpha1_token_proto_msgTypes[11]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RingKey.ProtoReflect.Descriptor instead.
+func (*RingKey) Descriptor() ([]byte, []int) {
+	return file_atoom_token_v1alpha1_token_proto_rawDescGZIP(), []int{11}
+}
+
+func (x *RingKey) GetKid() string {
+	if x != nil {
+		return x.Kid
+	}
+	return ""
+}
+
+func (x *RingKey) GetKeyId() string {
+	if x != nil {
+		return x.KeyId
+	}
+	return ""
+}
+
+func (x *RingKey) GetAlgorithm() string {
+	if x != nil {
+		return x.Algorithm
+	}
+	return ""
+}
+
+func (x *RingKey) GetSpkiDer() []byte {
+	if x != nil {
+		return x.SpkiDer
+	}
+	return nil
+}
+
+func (x *RingKey) GetNode() string {
+	if x != nil {
+		return x.Node
+	}
+	return ""
+}
+
+func (x *RingKey) GetSlot() string {
+	if x != nil {
+		return x.Slot
+	}
+	return ""
+}
+
+func (x *RingKey) GetState() KeyState {
+	if x != nil {
+		return x.State
+	}
+	return KeyState_KEY_STATE_UNSPECIFIED
+}
+
+func (x *RingKey) GetAddedUnixMs() int64 {
+	if x != nil {
+		return x.AddedUnixMs
+	}
+	return 0
+}
+
+func (x *RingKey) GetStateSinceUnixMs() int64 {
+	if x != nil {
+		return x.StateSinceUnixMs
+	}
+	return 0
+}
+
+func (x *RingKey) GetConfirmedUnixMs() int64 {
+	if x != nil {
+		return x.ConfirmedUnixMs
+	}
+	return 0
+}
+
+// RingState is a ring as the block keeps it in its item of the store port. Its readers call the block; the format is the block's.
+type RingState struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Keys          []*RingKey             `protobuf:"bytes,1,rep,name=keys,proto3" json:"keys,omitempty"` // in the order they joined
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RingState) Reset() {
+	*x = RingState{}
+	mi := &file_atoom_token_v1alpha1_token_proto_msgTypes[12]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RingState) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RingState) ProtoMessage() {}
+
+func (x *RingState) ProtoReflect() protoreflect.Message {
+	mi := &file_atoom_token_v1alpha1_token_proto_msgTypes[12]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RingState.ProtoReflect.Descriptor instead.
+func (*RingState) Descriptor() ([]byte, []int) {
+	return file_atoom_token_v1alpha1_token_proto_rawDescGZIP(), []int{12}
+}
+
+func (x *RingState) GetKeys() []*RingKey {
+	if x != nil {
+		return x.Keys
+	}
+	return nil
+}
+
+// PurposeRing is the ring of one purpose.
+type PurposeRing struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Purpose       string                 `protobuf:"bytes,1,opt,name=purpose,proto3" json:"purpose,omitempty"`                         // the purpose
+	Keys          []*RingKey             `protobuf:"bytes,2,rep,name=keys,proto3" json:"keys,omitempty"`                               // its keys, in the order they joined
+	SigningKid    string                 `protobuf:"bytes,3,opt,name=signing_kid,json=signingKid,proto3" json:"signing_kid,omitempty"` // the kid this instance signs with now; empty when it has none
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *PurposeRing) Reset() {
+	*x = PurposeRing{}
+	mi := &file_atoom_token_v1alpha1_token_proto_msgTypes[13]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *PurposeRing) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*PurposeRing) ProtoMessage() {}
+
+func (x *PurposeRing) ProtoReflect() protoreflect.Message {
+	mi := &file_atoom_token_v1alpha1_token_proto_msgTypes[13]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use PurposeRing.ProtoReflect.Descriptor instead.
+func (*PurposeRing) Descriptor() ([]byte, []int) {
+	return file_atoom_token_v1alpha1_token_proto_rawDescGZIP(), []int{13}
+}
+
+func (x *PurposeRing) GetPurpose() string {
+	if x != nil {
+		return x.Purpose
+	}
+	return ""
+}
+
+func (x *PurposeRing) GetKeys() []*RingKey {
+	if x != nil {
+		return x.Keys
+	}
+	return nil
+}
+
+func (x *PurposeRing) GetSigningKid() string {
+	if x != nil {
+		return x.SigningKid
+	}
+	return ""
+}
+
+// RingRequest asks for rings.
+type RingRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Purposes      []string               `protobuf:"bytes,1,rep,name=purposes,proto3" json:"purposes,omitempty"` // ring purposes; none: every ring purpose of the declaration
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RingRequest) Reset() {
+	*x = RingRequest{}
+	mi := &file_atoom_token_v1alpha1_token_proto_msgTypes[14]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RingRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RingRequest) ProtoMessage() {}
+
+func (x *RingRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_atoom_token_v1alpha1_token_proto_msgTypes[14]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RingRequest.ProtoReflect.Descriptor instead.
+func (*RingRequest) Descriptor() ([]byte, []int) {
+	return file_atoom_token_v1alpha1_token_proto_rawDescGZIP(), []int{14}
+}
+
+func (x *RingRequest) GetPurposes() []string {
+	if x != nil {
+		return x.Purposes
+	}
+	return nil
+}
+
+// RingResponse carries the rings.
+type RingResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Rings         []*PurposeRing         `protobuf:"bytes,1,rep,name=rings,proto3" json:"rings,omitempty"` // in the order of the purposes
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RingResponse) Reset() {
+	*x = RingResponse{}
+	mi := &file_atoom_token_v1alpha1_token_proto_msgTypes[15]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RingResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RingResponse) ProtoMessage() {}
+
+func (x *RingResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_atoom_token_v1alpha1_token_proto_msgTypes[15]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RingResponse.ProtoReflect.Descriptor instead.
+func (*RingResponse) Descriptor() ([]byte, []int) {
+	return file_atoom_token_v1alpha1_token_proto_rawDescGZIP(), []int{15}
+}
+
+func (x *RingResponse) GetRings() []*PurposeRing {
+	if x != nil {
+		return x.Rings
+	}
+	return nil
+}
+
+// ReconcileRequest asks the block to apply the ring's rules now.
+type ReconcileRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Purposes      []string               `protobuf:"bytes,1,rep,name=purposes,proto3" json:"purposes,omitempty"` // ring purposes; none: every ring purpose of the declaration
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ReconcileRequest) Reset() {
+	*x = ReconcileRequest{}
+	mi := &file_atoom_token_v1alpha1_token_proto_msgTypes[16]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ReconcileRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ReconcileRequest) ProtoMessage() {}
+
+func (x *ReconcileRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_atoom_token_v1alpha1_token_proto_msgTypes[16]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ReconcileRequest.ProtoReflect.Descriptor instead.
+func (*ReconcileRequest) Descriptor() ([]byte, []int) {
+	return file_atoom_token_v1alpha1_token_proto_rawDescGZIP(), []int{16}
+}
+
+func (x *ReconcileRequest) GetPurposes() []string {
+	if x != nil {
+		return x.Purposes
+	}
+	return nil
+}
+
+// RingChange is one change that a reconcile made.
+type RingChange struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Purpose       string                 `protobuf:"bytes,1,opt,name=purpose,proto3" json:"purpose,omitempty"`                                 // the purpose
+	Kid           string                 `protobuf:"bytes,2,opt,name=kid,proto3" json:"kid,omitempty"`                                         // the key
+	Change        string                 `protobuf:"bytes,3,opt,name=change,proto3" json:"change,omitempty"`                                   // "joined", "activated", "retired", "dropped", "forgotten", "revoked" or "confirmed"
+	State         KeyState               `protobuf:"varint,4,opt,name=state,proto3,enum=atoom.token.v1alpha1.KeyState" json:"state,omitempty"` // the state the key is in after it
+	Reason        string                 `protobuf:"bytes,5,opt,name=reason,proto3" json:"reason,omitempty"`                                   // "shortcut" when the key skipped its lead; empty otherwise
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RingChange) Reset() {
+	*x = RingChange{}
+	mi := &file_atoom_token_v1alpha1_token_proto_msgTypes[17]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RingChange) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RingChange) ProtoMessage() {}
+
+func (x *RingChange) ProtoReflect() protoreflect.Message {
+	mi := &file_atoom_token_v1alpha1_token_proto_msgTypes[17]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RingChange.ProtoReflect.Descriptor instead.
+func (*RingChange) Descriptor() ([]byte, []int) {
+	return file_atoom_token_v1alpha1_token_proto_rawDescGZIP(), []int{17}
+}
+
+func (x *RingChange) GetPurpose() string {
+	if x != nil {
+		return x.Purpose
+	}
+	return ""
+}
+
+func (x *RingChange) GetKid() string {
+	if x != nil {
+		return x.Kid
+	}
+	return ""
+}
+
+func (x *RingChange) GetChange() string {
+	if x != nil {
+		return x.Change
+	}
+	return ""
+}
+
+func (x *RingChange) GetState() KeyState {
+	if x != nil {
+		return x.State
+	}
+	return KeyState_KEY_STATE_UNSPECIFIED
+}
+
+func (x *RingChange) GetReason() string {
+	if x != nil {
+		return x.Reason
+	}
+	return ""
+}
+
+// ReconcileResponse carries the rings after the reconcile and what changed.
+type ReconcileResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Rings         []*PurposeRing         `protobuf:"bytes,1,rep,name=rings,proto3" json:"rings,omitempty"`     // in the order of the purposes
+	Changes       []*RingChange          `protobuf:"bytes,2,rep,name=changes,proto3" json:"changes,omitempty"` // what this call changed; none when the rings were in line
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ReconcileResponse) Reset() {
+	*x = ReconcileResponse{}
+	mi := &file_atoom_token_v1alpha1_token_proto_msgTypes[18]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ReconcileResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ReconcileResponse) ProtoMessage() {}
+
+func (x *ReconcileResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_atoom_token_v1alpha1_token_proto_msgTypes[18]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ReconcileResponse.ProtoReflect.Descriptor instead.
+func (*ReconcileResponse) Descriptor() ([]byte, []int) {
+	return file_atoom_token_v1alpha1_token_proto_rawDescGZIP(), []int{18}
+}
+
+func (x *ReconcileResponse) GetRings() []*PurposeRing {
+	if x != nil {
+		return x.Rings
+	}
+	return nil
+}
+
+func (x *ReconcileResponse) GetChanges() []*RingChange {
+	if x != nil {
+		return x.Changes
+	}
+	return nil
+}
+
+// RevokeRequest revokes a kid of a ring purpose.
+type RevokeRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Purpose       string                 `protobuf:"bytes,1,opt,name=purpose,proto3" json:"purpose,omitempty"` // a ring purpose
+	Kid           string                 `protobuf:"bytes,2,opt,name=kid,proto3" json:"kid,omitempty"`         // the kid; one the ring does not hold yet is recorded too, so that the key never joins
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RevokeRequest) Reset() {
+	*x = RevokeRequest{}
+	mi := &file_atoom_token_v1alpha1_token_proto_msgTypes[19]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RevokeRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RevokeRequest) ProtoMessage() {}
+
+func (x *RevokeRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_atoom_token_v1alpha1_token_proto_msgTypes[19]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RevokeRequest.ProtoReflect.Descriptor instead.
+func (*RevokeRequest) Descriptor() ([]byte, []int) {
+	return file_atoom_token_v1alpha1_token_proto_rawDescGZIP(), []int{19}
+}
+
+func (x *RevokeRequest) GetPurpose() string {
+	if x != nil {
+		return x.Purpose
+	}
+	return ""
+}
+
+func (x *RevokeRequest) GetKid() string {
+	if x != nil {
+		return x.Kid
+	}
+	return ""
+}
+
+// RevokeResponse says what changed.
+type RevokeResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Changed       bool                   `protobuf:"varint,1,opt,name=changed,proto3" json:"changed,omitempty"` // false when the kid was revoked already
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RevokeResponse) Reset() {
+	*x = RevokeResponse{}
+	mi := &file_atoom_token_v1alpha1_token_proto_msgTypes[20]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RevokeResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RevokeResponse) ProtoMessage() {}
+
+func (x *RevokeResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_atoom_token_v1alpha1_token_proto_msgTypes[20]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RevokeResponse.ProtoReflect.Descriptor instead.
+func (*RevokeResponse) Descriptor() ([]byte, []int) {
+	return file_atoom_token_v1alpha1_token_proto_rawDescGZIP(), []int{20}
+}
+
+func (x *RevokeResponse) GetChanged() bool {
+	if x != nil {
+		return x.Changed
+	}
+	return false
+}
+
+// ConfirmPublishedRequest is the host's statement that every published copy of the key set has these kids since a time.
+type ConfirmPublishedRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Purpose       string                 `protobuf:"bytes,1,opt,name=purpose,proto3" json:"purpose,omitempty"`                      // a ring purpose
+	Kids          []string               `protobuf:"bytes,2,rep,name=kids,proto3" json:"kids,omitempty"`                            // kids of the ring; a kid it does not hold, or one that is not pre-published, changes nothing
+	AtUnixMs      int64                  `protobuf:"varint,3,opt,name=at_unix_ms,json=atUnixMs,proto3" json:"at_unix_ms,omitempty"` // since when, milliseconds since the epoch; 0: now; not after now
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ConfirmPublishedRequest) Reset() {
+	*x = ConfirmPublishedRequest{}
+	mi := &file_atoom_token_v1alpha1_token_proto_msgTypes[21]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ConfirmPublishedRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ConfirmPublishedRequest) ProtoMessage() {}
+
+func (x *ConfirmPublishedRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_atoom_token_v1alpha1_token_proto_msgTypes[21]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ConfirmPublishedRequest.ProtoReflect.Descriptor instead.
+func (*ConfirmPublishedRequest) Descriptor() ([]byte, []int) {
+	return file_atoom_token_v1alpha1_token_proto_rawDescGZIP(), []int{21}
+}
+
+func (x *ConfirmPublishedRequest) GetPurpose() string {
+	if x != nil {
+		return x.Purpose
+	}
+	return ""
+}
+
+func (x *ConfirmPublishedRequest) GetKids() []string {
+	if x != nil {
+		return x.Kids
+	}
+	return nil
+}
+
+func (x *ConfirmPublishedRequest) GetAtUnixMs() int64 {
+	if x != nil {
+		return x.AtUnixMs
+	}
+	return 0
+}
+
+// ConfirmPublishedResponse says which kids it confirmed.
+type ConfirmPublishedResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Confirmed     []string               `protobuf:"bytes,1,rep,name=confirmed,proto3" json:"confirmed,omitempty"` // the kids whose first confirmation this was
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ConfirmPublishedResponse) Reset() {
+	*x = ConfirmPublishedResponse{}
+	mi := &file_atoom_token_v1alpha1_token_proto_msgTypes[22]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ConfirmPublishedResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ConfirmPublishedResponse) ProtoMessage() {}
+
+func (x *ConfirmPublishedResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_atoom_token_v1alpha1_token_proto_msgTypes[22]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ConfirmPublishedResponse.ProtoReflect.Descriptor instead.
+func (*ConfirmPublishedResponse) Descriptor() ([]byte, []int) {
+	return file_atoom_token_v1alpha1_token_proto_rawDescGZIP(), []int{22}
+}
+
+func (x *ConfirmPublishedResponse) GetConfirmed() []string {
+	if x != nil {
+		return x.Confirmed
+	}
+	return nil
+}
+
 // VerifyRequest asks whether a token is signed by a key of the set.
 type VerifyRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
@@ -684,7 +1593,7 @@ type VerifyRequest struct {
 
 func (x *VerifyRequest) Reset() {
 	*x = VerifyRequest{}
-	mi := &file_atoom_token_v1alpha1_token_proto_msgTypes[10]
+	mi := &file_atoom_token_v1alpha1_token_proto_msgTypes[23]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -696,7 +1605,7 @@ func (x *VerifyRequest) String() string {
 func (*VerifyRequest) ProtoMessage() {}
 
 func (x *VerifyRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_atoom_token_v1alpha1_token_proto_msgTypes[10]
+	mi := &file_atoom_token_v1alpha1_token_proto_msgTypes[23]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -709,7 +1618,7 @@ func (x *VerifyRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use VerifyRequest.ProtoReflect.Descriptor instead.
 func (*VerifyRequest) Descriptor() ([]byte, []int) {
-	return file_atoom_token_v1alpha1_token_proto_rawDescGZIP(), []int{10}
+	return file_atoom_token_v1alpha1_token_proto_rawDescGZIP(), []int{23}
 }
 
 func (x *VerifyRequest) GetToken() string {
@@ -755,7 +1664,7 @@ type VerifyResponse struct {
 
 func (x *VerifyResponse) Reset() {
 	*x = VerifyResponse{}
-	mi := &file_atoom_token_v1alpha1_token_proto_msgTypes[11]
+	mi := &file_atoom_token_v1alpha1_token_proto_msgTypes[24]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -767,7 +1676,7 @@ func (x *VerifyResponse) String() string {
 func (*VerifyResponse) ProtoMessage() {}
 
 func (x *VerifyResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_atoom_token_v1alpha1_token_proto_msgTypes[11]
+	mi := &file_atoom_token_v1alpha1_token_proto_msgTypes[24]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -780,7 +1689,7 @@ func (x *VerifyResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use VerifyResponse.ProtoReflect.Descriptor instead.
 func (*VerifyResponse) Descriptor() ([]byte, []int) {
-	return file_atoom_token_v1alpha1_token_proto_rawDescGZIP(), []int{11}
+	return file_atoom_token_v1alpha1_token_proto_rawDescGZIP(), []int{24}
 }
 
 func (x *VerifyResponse) GetKid() string {
@@ -825,12 +1734,26 @@ const file_atoom_token_v1alpha1_token_proto_rawDesc = "" +
 	" atoom/token/v1alpha1/token.proto\x12\x14atoom.token.v1alpha1\"\x15\n" +
 	"\x13CapabilitiesRequest\"U\n" +
 	"\x14CapabilitiesResponse\x12=\n" +
-	"\bpurposes\x18\x01 \x03(\v2!.atoom.token.v1alpha1.PurposeInfoR\bpurposes\"\x82\x01\n" +
+	"\bpurposes\x18\x01 \x03(\v2!.atoom.token.v1alpha1.PurposeInfoR\bpurposes\"\xb6\x01\n" +
 	"\vPurposeInfo\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x1c\n" +
 	"\talgorithm\x18\x02 \x01(\tR\talgorithm\x12\x14\n" +
 	"\x05types\x18\x03 \x03(\tR\x05types\x12+\n" +
-	"\x03kid\x18\x04 \x01(\x0e2\x19.atoom.token.v1alpha1.KidR\x03kid\"\x80\x01\n" +
+	"\x03kid\x18\x04 \x01(\x0e2\x19.atoom.token.v1alpha1.KidR\x03kid\x122\n" +
+	"\x04ring\x18\x05 \x01(\v2\x1e.atoom.token.v1alpha1.RingInfoR\x04ring\"\x8a\x03\n" +
+	"\bRingInfo\x12\x14\n" +
+	"\x05slots\x18\x01 \x03(\tR\x05slots\x12\x18\n" +
+	"\acurrent\x18\x02 \x01(\tR\acurrent\x12!\n" +
+	"\flead_seconds\x18\x03 \x01(\x03R\vleadSeconds\x12%\n" +
+	"\x0eretain_seconds\x18\x04 \x01(\x03R\rretainSeconds\x121\n" +
+	"\x15cache_max_age_seconds\x18\x05 \x01(\x03R\x12cacheMaxAgeSeconds\x124\n" +
+	"\x16token_lifetime_seconds\x18\x06 \x01(\x03R\x14tokenLifetimeSeconds\x12+\n" +
+	"\x11bootstrap_seconds\x18\a \x01(\x03R\x10bootstrapSeconds\x12'\n" +
+	"\x0foverlap_seconds\x18\b \x01(\x03R\x0eoverlapSeconds\x12\x17\n" +
+	"\aat_once\x18\t \x01(\bR\x06atOnce\x12\x18\n" +
+	"\aconfirm\x18\n" +
+	" \x01(\bR\aconfirm\x12\x12\n" +
+	"\x04node\x18\v \x01(\tR\x04node\"\x80\x01\n" +
 	"\vSignRequest\x12\x18\n" +
 	"\apurpose\x18\x01 \x01(\tR\apurpose\x12\x10\n" +
 	"\x03typ\x18\x02 \x01(\tR\x03typ\x12\x1f\n" +
@@ -848,23 +1771,77 @@ const file_atoom_token_v1alpha1_token_proto_rawDesc = "" +
 	"\bspki_der\x18\x03 \x01(\fR\aspkiDer\x12\x10\n" +
 	"\x03x5c\x18\x04 \x03(\fR\x03x5c\"$\n" +
 	"\x10CertificateChain\x12\x10\n" +
-	"\x03x5c\x18\x01 \x03(\fR\x03x5c\"\x8a\x02\n" +
+	"\x03x5c\x18\x01 \x03(\fR\x03x5c\"\xc3\x03\n" +
 	"\rKeySetRequest\x12\x1a\n" +
 	"\bpurposes\x18\x01 \x03(\tR\bpurposes\x121\n" +
 	"\x04keys\x18\x02 \x03(\v2\x1d.atoom.token.v1alpha1.HostKeyR\x04keys\x12G\n" +
-	"\x06chains\x18\x03 \x03(\v2/.atoom.token.v1alpha1.KeySetRequest.ChainsEntryR\x06chains\x1aa\n" +
+	"\x06chains\x18\x03 \x03(\v2/.atoom.token.v1alpha1.KeySetRequest.ChainsEntryR\x06chains\x12Q\n" +
+	"\n" +
+	"key_chains\x18\x04 \x03(\v22.atoom.token.v1alpha1.KeySetRequest.KeyChainsEntryR\tkeyChains\x1aa\n" +
 	"\vChainsEntry\x12\x10\n" +
+	"\x03key\x18\x01 \x01(\tR\x03key\x12<\n" +
+	"\x05value\x18\x02 \x01(\v2&.atoom.token.v1alpha1.CertificateChainR\x05value:\x028\x01\x1ad\n" +
+	"\x0eKeyChainsEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12<\n" +
 	"\x05value\x18\x02 \x01(\v2&.atoom.token.v1alpha1.CertificateChainR\x05value:\x028\x01\"e\n" +
 	"\x0eKeySetResponse\x12\x1b\n" +
 	"\tjwks_json\x18\x01 \x01(\fR\bjwksJson\x126\n" +
-	"\x04keys\x18\x02 \x03(\v2\".atoom.token.v1alpha1.PublishedKeyR\x04keys\"\x8a\x01\n" +
+	"\x04keys\x18\x02 \x03(\v2\".atoom.token.v1alpha1.PublishedKeyR\x04keys\"\xd4\x01\n" +
 	"\fPublishedKey\x12\x10\n" +
 	"\x03kid\x18\x01 \x01(\tR\x03kid\x12\x1c\n" +
 	"\talgorithm\x18\x02 \x01(\tR\talgorithm\x12\x19\n" +
 	"\bspki_der\x18\x03 \x01(\fR\aspkiDer\x12\x18\n" +
 	"\apurpose\x18\x04 \x01(\tR\apurpose\x12\x15\n" +
-	"\x06key_id\x18\x05 \x01(\tR\x05keyId\"\x8a\x01\n" +
+	"\x06key_id\x18\x05 \x01(\tR\x05keyId\x124\n" +
+	"\x05state\x18\x06 \x01(\x0e2\x1e.atoom.token.v1alpha1.KeyStateR\x05state\x12\x12\n" +
+	"\x04node\x18\a \x01(\tR\x04node\"\xc8\x02\n" +
+	"\aRingKey\x12\x10\n" +
+	"\x03kid\x18\x01 \x01(\tR\x03kid\x12\x15\n" +
+	"\x06key_id\x18\x02 \x01(\tR\x05keyId\x12\x1c\n" +
+	"\talgorithm\x18\x03 \x01(\tR\talgorithm\x12\x19\n" +
+	"\bspki_der\x18\x04 \x01(\fR\aspkiDer\x12\x12\n" +
+	"\x04node\x18\x05 \x01(\tR\x04node\x12\x12\n" +
+	"\x04slot\x18\x06 \x01(\tR\x04slot\x124\n" +
+	"\x05state\x18\a \x01(\x0e2\x1e.atoom.token.v1alpha1.KeyStateR\x05state\x12\"\n" +
+	"\radded_unix_ms\x18\b \x01(\x03R\vaddedUnixMs\x12-\n" +
+	"\x13state_since_unix_ms\x18\t \x01(\x03R\x10stateSinceUnixMs\x12*\n" +
+	"\x11confirmed_unix_ms\x18\n" +
+	" \x01(\x03R\x0fconfirmedUnixMs\">\n" +
+	"\tRingState\x121\n" +
+	"\x04keys\x18\x01 \x03(\v2\x1d.atoom.token.v1alpha1.RingKeyR\x04keys\"{\n" +
+	"\vPurposeRing\x12\x18\n" +
+	"\apurpose\x18\x01 \x01(\tR\apurpose\x121\n" +
+	"\x04keys\x18\x02 \x03(\v2\x1d.atoom.token.v1alpha1.RingKeyR\x04keys\x12\x1f\n" +
+	"\vsigning_kid\x18\x03 \x01(\tR\n" +
+	"signingKid\")\n" +
+	"\vRingRequest\x12\x1a\n" +
+	"\bpurposes\x18\x01 \x03(\tR\bpurposes\"G\n" +
+	"\fRingResponse\x127\n" +
+	"\x05rings\x18\x01 \x03(\v2!.atoom.token.v1alpha1.PurposeRingR\x05rings\".\n" +
+	"\x10ReconcileRequest\x12\x1a\n" +
+	"\bpurposes\x18\x01 \x03(\tR\bpurposes\"\x9e\x01\n" +
+	"\n" +
+	"RingChange\x12\x18\n" +
+	"\apurpose\x18\x01 \x01(\tR\apurpose\x12\x10\n" +
+	"\x03kid\x18\x02 \x01(\tR\x03kid\x12\x16\n" +
+	"\x06change\x18\x03 \x01(\tR\x06change\x124\n" +
+	"\x05state\x18\x04 \x01(\x0e2\x1e.atoom.token.v1alpha1.KeyStateR\x05state\x12\x16\n" +
+	"\x06reason\x18\x05 \x01(\tR\x06reason\"\x88\x01\n" +
+	"\x11ReconcileResponse\x127\n" +
+	"\x05rings\x18\x01 \x03(\v2!.atoom.token.v1alpha1.PurposeRingR\x05rings\x12:\n" +
+	"\achanges\x18\x02 \x03(\v2 .atoom.token.v1alpha1.RingChangeR\achanges\";\n" +
+	"\rRevokeRequest\x12\x18\n" +
+	"\apurpose\x18\x01 \x01(\tR\apurpose\x12\x10\n" +
+	"\x03kid\x18\x02 \x01(\tR\x03kid\"*\n" +
+	"\x0eRevokeResponse\x12\x18\n" +
+	"\achanged\x18\x01 \x01(\bR\achanged\"e\n" +
+	"\x17ConfirmPublishedRequest\x12\x18\n" +
+	"\apurpose\x18\x01 \x01(\tR\apurpose\x12\x12\n" +
+	"\x04kids\x18\x02 \x03(\tR\x04kids\x12\x1c\n" +
+	"\n" +
+	"at_unix_ms\x18\x03 \x01(\x03R\batUnixMs\"8\n" +
+	"\x18ConfirmPublishedResponse\x12\x1c\n" +
+	"\tconfirmed\x18\x01 \x03(\tR\tconfirmed\"\x8a\x01\n" +
 	"\rVerifyRequest\x12\x14\n" +
 	"\x05token\x18\x01 \x01(\tR\x05token\x12\x1a\n" +
 	"\bpurposes\x18\x02 \x03(\tR\bpurposes\x121\n" +
@@ -881,12 +1858,23 @@ const file_atoom_token_v1alpha1_token_proto_rawDesc = "" +
 	"\x0fKID_UNSPECIFIED\x10\x00\x12\x0e\n" +
 	"\n" +
 	"KID_KEY_ID\x10\x01\x12\x12\n" +
-	"\x0eKID_THUMBPRINT\x10\x022\xee\x02\n" +
+	"\x0eKID_THUMBPRINT\x10\x02*\x9e\x01\n" +
+	"\bKeyState\x12\x19\n" +
+	"\x15KEY_STATE_UNSPECIFIED\x10\x00\x12\x1b\n" +
+	"\x17KEY_STATE_PRE_PUBLISHED\x10\x01\x12\x14\n" +
+	"\x10KEY_STATE_ACTIVE\x10\x02\x12\x16\n" +
+	"\x12KEY_STATE_RETIRING\x10\x03\x12\x15\n" +
+	"\x11KEY_STATE_DROPPED\x10\x04\x12\x15\n" +
+	"\x11KEY_STATE_REVOKED\x10\x052\xe3\x05\n" +
 	"\fTokenService\x12e\n" +
 	"\fCapabilities\x12).atoom.token.v1alpha1.CapabilitiesRequest\x1a*.atoom.token.v1alpha1.CapabilitiesResponse\x12M\n" +
 	"\x04Sign\x12!.atoom.token.v1alpha1.SignRequest\x1a\".atoom.token.v1alpha1.SignResponse\x12S\n" +
 	"\x06KeySet\x12#.atoom.token.v1alpha1.KeySetRequest\x1a$.atoom.token.v1alpha1.KeySetResponse\x12S\n" +
-	"\x06Verify\x12#.atoom.token.v1alpha1.VerifyRequest\x1a$.atoom.token.v1alpha1.VerifyResponseB\xe6\x01\n" +
+	"\x06Verify\x12#.atoom.token.v1alpha1.VerifyRequest\x1a$.atoom.token.v1alpha1.VerifyResponse\x12M\n" +
+	"\x04Ring\x12!.atoom.token.v1alpha1.RingRequest\x1a\".atoom.token.v1alpha1.RingResponse\x12\\\n" +
+	"\tReconcile\x12&.atoom.token.v1alpha1.ReconcileRequest\x1a'.atoom.token.v1alpha1.ReconcileResponse\x12S\n" +
+	"\x06Revoke\x12#.atoom.token.v1alpha1.RevokeRequest\x1a$.atoom.token.v1alpha1.RevokeResponse\x12q\n" +
+	"\x10ConfirmPublished\x12-.atoom.token.v1alpha1.ConfirmPublishedRequest\x1a..atoom.token.v1alpha1.ConfirmPublishedResponseB\xe6\x01\n" +
 	"\x18com.atoom.token.v1alpha1B\n" +
 	"TokenProtoP\x01ZLgithub.com/truvity/atoom/blocks/token/gen/atoom/token/v1alpha1;tokenv1alpha1\xa2\x02\x03ATX\xaa\x02\x14Atoom.Token.V1alpha1\xca\x02\x14Atoom\\Token\\V1alpha1\xe2\x02 Atoom\\Token\\V1alpha1\\GPBMetadata\xea\x02\x16Atoom::Token::V1alpha1b\x06proto3"
 
@@ -902,45 +1890,79 @@ func file_atoom_token_v1alpha1_token_proto_rawDescGZIP() []byte {
 	return file_atoom_token_v1alpha1_token_proto_rawDescData
 }
 
-var file_atoom_token_v1alpha1_token_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_atoom_token_v1alpha1_token_proto_msgTypes = make([]protoimpl.MessageInfo, 13)
+var file_atoom_token_v1alpha1_token_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
+var file_atoom_token_v1alpha1_token_proto_msgTypes = make([]protoimpl.MessageInfo, 27)
 var file_atoom_token_v1alpha1_token_proto_goTypes = []any{
-	(Kid)(0),                     // 0: atoom.token.v1alpha1.Kid
-	(*CapabilitiesRequest)(nil),  // 1: atoom.token.v1alpha1.CapabilitiesRequest
-	(*CapabilitiesResponse)(nil), // 2: atoom.token.v1alpha1.CapabilitiesResponse
-	(*PurposeInfo)(nil),          // 3: atoom.token.v1alpha1.PurposeInfo
-	(*SignRequest)(nil),          // 4: atoom.token.v1alpha1.SignRequest
-	(*SignResponse)(nil),         // 5: atoom.token.v1alpha1.SignResponse
-	(*HostKey)(nil),              // 6: atoom.token.v1alpha1.HostKey
-	(*CertificateChain)(nil),     // 7: atoom.token.v1alpha1.CertificateChain
-	(*KeySetRequest)(nil),        // 8: atoom.token.v1alpha1.KeySetRequest
-	(*KeySetResponse)(nil),       // 9: atoom.token.v1alpha1.KeySetResponse
-	(*PublishedKey)(nil),         // 10: atoom.token.v1alpha1.PublishedKey
-	(*VerifyRequest)(nil),        // 11: atoom.token.v1alpha1.VerifyRequest
-	(*VerifyResponse)(nil),       // 12: atoom.token.v1alpha1.VerifyResponse
-	nil,                          // 13: atoom.token.v1alpha1.KeySetRequest.ChainsEntry
+	(Kid)(0),                         // 0: atoom.token.v1alpha1.Kid
+	(KeyState)(0),                    // 1: atoom.token.v1alpha1.KeyState
+	(*CapabilitiesRequest)(nil),      // 2: atoom.token.v1alpha1.CapabilitiesRequest
+	(*CapabilitiesResponse)(nil),     // 3: atoom.token.v1alpha1.CapabilitiesResponse
+	(*PurposeInfo)(nil),              // 4: atoom.token.v1alpha1.PurposeInfo
+	(*RingInfo)(nil),                 // 5: atoom.token.v1alpha1.RingInfo
+	(*SignRequest)(nil),              // 6: atoom.token.v1alpha1.SignRequest
+	(*SignResponse)(nil),             // 7: atoom.token.v1alpha1.SignResponse
+	(*HostKey)(nil),                  // 8: atoom.token.v1alpha1.HostKey
+	(*CertificateChain)(nil),         // 9: atoom.token.v1alpha1.CertificateChain
+	(*KeySetRequest)(nil),            // 10: atoom.token.v1alpha1.KeySetRequest
+	(*KeySetResponse)(nil),           // 11: atoom.token.v1alpha1.KeySetResponse
+	(*PublishedKey)(nil),             // 12: atoom.token.v1alpha1.PublishedKey
+	(*RingKey)(nil),                  // 13: atoom.token.v1alpha1.RingKey
+	(*RingState)(nil),                // 14: atoom.token.v1alpha1.RingState
+	(*PurposeRing)(nil),              // 15: atoom.token.v1alpha1.PurposeRing
+	(*RingRequest)(nil),              // 16: atoom.token.v1alpha1.RingRequest
+	(*RingResponse)(nil),             // 17: atoom.token.v1alpha1.RingResponse
+	(*ReconcileRequest)(nil),         // 18: atoom.token.v1alpha1.ReconcileRequest
+	(*RingChange)(nil),               // 19: atoom.token.v1alpha1.RingChange
+	(*ReconcileResponse)(nil),        // 20: atoom.token.v1alpha1.ReconcileResponse
+	(*RevokeRequest)(nil),            // 21: atoom.token.v1alpha1.RevokeRequest
+	(*RevokeResponse)(nil),           // 22: atoom.token.v1alpha1.RevokeResponse
+	(*ConfirmPublishedRequest)(nil),  // 23: atoom.token.v1alpha1.ConfirmPublishedRequest
+	(*ConfirmPublishedResponse)(nil), // 24: atoom.token.v1alpha1.ConfirmPublishedResponse
+	(*VerifyRequest)(nil),            // 25: atoom.token.v1alpha1.VerifyRequest
+	(*VerifyResponse)(nil),           // 26: atoom.token.v1alpha1.VerifyResponse
+	nil,                              // 27: atoom.token.v1alpha1.KeySetRequest.ChainsEntry
+	nil,                              // 28: atoom.token.v1alpha1.KeySetRequest.KeyChainsEntry
 }
 var file_atoom_token_v1alpha1_token_proto_depIdxs = []int32{
-	3,  // 0: atoom.token.v1alpha1.CapabilitiesResponse.purposes:type_name -> atoom.token.v1alpha1.PurposeInfo
+	4,  // 0: atoom.token.v1alpha1.CapabilitiesResponse.purposes:type_name -> atoom.token.v1alpha1.PurposeInfo
 	0,  // 1: atoom.token.v1alpha1.PurposeInfo.kid:type_name -> atoom.token.v1alpha1.Kid
-	6,  // 2: atoom.token.v1alpha1.KeySetRequest.keys:type_name -> atoom.token.v1alpha1.HostKey
-	13, // 3: atoom.token.v1alpha1.KeySetRequest.chains:type_name -> atoom.token.v1alpha1.KeySetRequest.ChainsEntry
-	10, // 4: atoom.token.v1alpha1.KeySetResponse.keys:type_name -> atoom.token.v1alpha1.PublishedKey
-	6,  // 5: atoom.token.v1alpha1.VerifyRequest.keys:type_name -> atoom.token.v1alpha1.HostKey
-	7,  // 6: atoom.token.v1alpha1.KeySetRequest.ChainsEntry.value:type_name -> atoom.token.v1alpha1.CertificateChain
-	1,  // 7: atoom.token.v1alpha1.TokenService.Capabilities:input_type -> atoom.token.v1alpha1.CapabilitiesRequest
-	4,  // 8: atoom.token.v1alpha1.TokenService.Sign:input_type -> atoom.token.v1alpha1.SignRequest
-	8,  // 9: atoom.token.v1alpha1.TokenService.KeySet:input_type -> atoom.token.v1alpha1.KeySetRequest
-	11, // 10: atoom.token.v1alpha1.TokenService.Verify:input_type -> atoom.token.v1alpha1.VerifyRequest
-	2,  // 11: atoom.token.v1alpha1.TokenService.Capabilities:output_type -> atoom.token.v1alpha1.CapabilitiesResponse
-	5,  // 12: atoom.token.v1alpha1.TokenService.Sign:output_type -> atoom.token.v1alpha1.SignResponse
-	9,  // 13: atoom.token.v1alpha1.TokenService.KeySet:output_type -> atoom.token.v1alpha1.KeySetResponse
-	12, // 14: atoom.token.v1alpha1.TokenService.Verify:output_type -> atoom.token.v1alpha1.VerifyResponse
-	11, // [11:15] is the sub-list for method output_type
-	7,  // [7:11] is the sub-list for method input_type
-	7,  // [7:7] is the sub-list for extension type_name
-	7,  // [7:7] is the sub-list for extension extendee
-	0,  // [0:7] is the sub-list for field type_name
+	5,  // 2: atoom.token.v1alpha1.PurposeInfo.ring:type_name -> atoom.token.v1alpha1.RingInfo
+	8,  // 3: atoom.token.v1alpha1.KeySetRequest.keys:type_name -> atoom.token.v1alpha1.HostKey
+	27, // 4: atoom.token.v1alpha1.KeySetRequest.chains:type_name -> atoom.token.v1alpha1.KeySetRequest.ChainsEntry
+	28, // 5: atoom.token.v1alpha1.KeySetRequest.key_chains:type_name -> atoom.token.v1alpha1.KeySetRequest.KeyChainsEntry
+	12, // 6: atoom.token.v1alpha1.KeySetResponse.keys:type_name -> atoom.token.v1alpha1.PublishedKey
+	1,  // 7: atoom.token.v1alpha1.PublishedKey.state:type_name -> atoom.token.v1alpha1.KeyState
+	1,  // 8: atoom.token.v1alpha1.RingKey.state:type_name -> atoom.token.v1alpha1.KeyState
+	13, // 9: atoom.token.v1alpha1.RingState.keys:type_name -> atoom.token.v1alpha1.RingKey
+	13, // 10: atoom.token.v1alpha1.PurposeRing.keys:type_name -> atoom.token.v1alpha1.RingKey
+	15, // 11: atoom.token.v1alpha1.RingResponse.rings:type_name -> atoom.token.v1alpha1.PurposeRing
+	1,  // 12: atoom.token.v1alpha1.RingChange.state:type_name -> atoom.token.v1alpha1.KeyState
+	15, // 13: atoom.token.v1alpha1.ReconcileResponse.rings:type_name -> atoom.token.v1alpha1.PurposeRing
+	19, // 14: atoom.token.v1alpha1.ReconcileResponse.changes:type_name -> atoom.token.v1alpha1.RingChange
+	8,  // 15: atoom.token.v1alpha1.VerifyRequest.keys:type_name -> atoom.token.v1alpha1.HostKey
+	9,  // 16: atoom.token.v1alpha1.KeySetRequest.ChainsEntry.value:type_name -> atoom.token.v1alpha1.CertificateChain
+	9,  // 17: atoom.token.v1alpha1.KeySetRequest.KeyChainsEntry.value:type_name -> atoom.token.v1alpha1.CertificateChain
+	2,  // 18: atoom.token.v1alpha1.TokenService.Capabilities:input_type -> atoom.token.v1alpha1.CapabilitiesRequest
+	6,  // 19: atoom.token.v1alpha1.TokenService.Sign:input_type -> atoom.token.v1alpha1.SignRequest
+	10, // 20: atoom.token.v1alpha1.TokenService.KeySet:input_type -> atoom.token.v1alpha1.KeySetRequest
+	25, // 21: atoom.token.v1alpha1.TokenService.Verify:input_type -> atoom.token.v1alpha1.VerifyRequest
+	16, // 22: atoom.token.v1alpha1.TokenService.Ring:input_type -> atoom.token.v1alpha1.RingRequest
+	18, // 23: atoom.token.v1alpha1.TokenService.Reconcile:input_type -> atoom.token.v1alpha1.ReconcileRequest
+	21, // 24: atoom.token.v1alpha1.TokenService.Revoke:input_type -> atoom.token.v1alpha1.RevokeRequest
+	23, // 25: atoom.token.v1alpha1.TokenService.ConfirmPublished:input_type -> atoom.token.v1alpha1.ConfirmPublishedRequest
+	3,  // 26: atoom.token.v1alpha1.TokenService.Capabilities:output_type -> atoom.token.v1alpha1.CapabilitiesResponse
+	7,  // 27: atoom.token.v1alpha1.TokenService.Sign:output_type -> atoom.token.v1alpha1.SignResponse
+	11, // 28: atoom.token.v1alpha1.TokenService.KeySet:output_type -> atoom.token.v1alpha1.KeySetResponse
+	26, // 29: atoom.token.v1alpha1.TokenService.Verify:output_type -> atoom.token.v1alpha1.VerifyResponse
+	17, // 30: atoom.token.v1alpha1.TokenService.Ring:output_type -> atoom.token.v1alpha1.RingResponse
+	20, // 31: atoom.token.v1alpha1.TokenService.Reconcile:output_type -> atoom.token.v1alpha1.ReconcileResponse
+	22, // 32: atoom.token.v1alpha1.TokenService.Revoke:output_type -> atoom.token.v1alpha1.RevokeResponse
+	24, // 33: atoom.token.v1alpha1.TokenService.ConfirmPublished:output_type -> atoom.token.v1alpha1.ConfirmPublishedResponse
+	26, // [26:34] is the sub-list for method output_type
+	18, // [18:26] is the sub-list for method input_type
+	18, // [18:18] is the sub-list for extension type_name
+	18, // [18:18] is the sub-list for extension extendee
+	0,  // [0:18] is the sub-list for field type_name
 }
 
 func init() { file_atoom_token_v1alpha1_token_proto_init() }
@@ -953,8 +1975,8 @@ func file_atoom_token_v1alpha1_token_proto_init() {
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_atoom_token_v1alpha1_token_proto_rawDesc), len(file_atoom_token_v1alpha1_token_proto_rawDesc)),
-			NumEnums:      1,
-			NumMessages:   13,
+			NumEnums:      2,
+			NumMessages:   27,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

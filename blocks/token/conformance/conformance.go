@@ -1,8 +1,9 @@
 // Package conformance is the kit of the token block (docs/token-block.md, "The kit"): the cases that the block, and any other
 // implementation of TokenService, must pass, run through a client of the contract.
 //
-// The kit declares its own purposes (Purposes: one for each algorithm and both kid rules) and its own rules (Rules), and the block under
-// test is started with them over a seal block that serves SealPurposes. Its checks of what the block answers are its own: it verifies
+// The kit declares its own purposes (Purposes: one for each algorithm and both kid rules, and a purpose with a ring of two slots) and its
+// own rules (Rules), and the block under test is started with them over a seal block that serves SealPurposes, and with a store for the
+// ring that holds no ring of the kit yet: the kit revokes the ring's key in its last case. Its checks of what the block answers are its own: it verifies
 // every signature with the standard library and makes the RFC 7638 thumbprint itself, so it does not trust the code under test. The
 // block's own tests run it over a seal block on stand-ins of the ports, and `just conformance` over the memory drivers (key/software and
 // store/memory), through their sockets, both with the block in the kit's process and behind the socket of its thin main.
@@ -32,6 +33,9 @@ const (
 	PurposeES384 = "kit-token-es384" // kid: the key port's key_id
 	PurposeES256 = "kit-token-es256" // kid: the RFC 7638 thumbprint
 	PurposeRS256 = "kit-token-rs256" // kid: the RFC 7638 thumbprint
+	PurposeRing  = "kit-token-ring"  // a ring of two slots, the first current; kid: the key port's key_id
+	SlotRingA    = "kit-token-ring-a"
+	SlotRingB    = "kit-token-ring-b"
 	TypeJWT      = "JWT"
 	TypeAccess   = "at+jwt"
 	TypeKit      = "kit+jwt"
@@ -47,6 +51,10 @@ func Purposes() []token.Purpose {
 		{Name: PurposeES384, Algorithm: purpose.ES384, Types: []string{TypeJWT, TypeAccess}, Kid: token.KidKeyID},
 		{Name: PurposeES256, Algorithm: purpose.ES256, Types: []string{TypeKit}, Kid: token.KidThumbprint},
 		{Name: PurposeRS256, Algorithm: purpose.RS256, Types: []string{TypeJWT}, Kid: token.KidThumbprint},
+		{Name: PurposeRing, Algorithm: purpose.ES256, Types: []string{TypeKit}, Kid: token.KidKeyID, Ring: &token.Ring{
+			Slots: []string{SlotRingA, SlotRingB}, Current: SlotRingA,
+			Lead: 10 * time.Minute, Retain: 10 * time.Minute, CacheMaxAge: 5 * time.Minute, TokenLifetime: 5 * time.Minute,
+		}},
 	}
 }
 

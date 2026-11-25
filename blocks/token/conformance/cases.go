@@ -18,6 +18,7 @@ import (
 	"fmt"
 	"math/big"
 	"strings"
+	"time"
 
 	"connectrpc.com/connect"
 
@@ -38,8 +39,11 @@ func Cases() []Case {
 		{"verify_refuses_any_change", verifyTampered},
 		{"verify_with_a_hosts_key", verifyHostKey},
 		{"the_claims_are_one_strict_object", strictClaims},
+		{"the_ring_signs_with_its_current_slots_key", ringSigns},
+		{"a_reconcile_of_a_ring_in_line_changes_nothing", ringReconcile},
 		{RulesCase, rules},
 		{"what_is_not_a_call_is_refused", refusals},
+		{"a_revoked_key_leaves_the_ring", ringRevoke}, // last: a revocation is for good
 	}
 }
 
@@ -211,6 +215,16 @@ func capabilities(ctx context.Context, k *Kit) error {
 		if got.GetAlgorithm() != want.Algorithm || got.GetKid() != kids[want.Kid] || strings.Join(got.GetTypes(), ",") != strings.Join(want.Types, ",") {
 			return fmt.Errorf("the purpose %s is served as another one", want.Name)
 		}
+		r, g := want.Ring, got.GetRing()
+		if (r == nil) != (g == nil) {
+			return fmt.Errorf("the purpose %s is served with a ring, or without its ring", want.Name)
+		}
+		if r != nil && (strings.Join(g.GetSlots(), ",") != strings.Join(r.Slots, ",") || g.GetCurrent() != r.Current ||
+			g.GetLeadSeconds() != int64(r.Lead/time.Second) || g.GetRetainSeconds() != int64(r.Retain/time.Second) ||
+			g.GetCacheMaxAgeSeconds() != int64(r.CacheMaxAge/time.Second) || g.GetTokenLifetimeSeconds() != int64(r.TokenLifetime/time.Second) ||
+			g.GetBootstrapSeconds() != 0 || g.GetOverlapSeconds() != 0 || g.GetAtOnce() || g.GetConfirm()) {
+			return fmt.Errorf("the ring of %s is served as another one", want.Name)
+		}
 	}
 	return nil
 }
@@ -315,7 +329,7 @@ func keySet(ctx context.Context, k *Kit) error {
 	if err := json.Unmarshal(set.GetJwksJson(), &doc); err != nil {
 		return fmt.Errorf("the key set is not JSON: %w", err)
 	}
-	want := []string{PurposeES384, PurposeES256, PurposeRS256, ""}
+	want := []string{PurposeES384, PurposeES256, PurposeRS256, PurposeRing, ""}
 	if len(doc.Keys) != len(want) || len(set.GetKeys()) != len(want) {
 		return fmt.Errorf("%d keys in the set, want %d", len(doc.Keys), len(want))
 	}
@@ -340,7 +354,7 @@ func keySet(ctx context.Context, k *Kit) error {
 		switch i {
 		case 0:
 			x5c = chain
-		case 3:
+		case len(want) - 1:
 			x5c = host.GetX5C()
 		}
 		got, _ := entry["x5c"].([]any)
@@ -353,7 +367,7 @@ func keySet(ctx context.Context, k *Kit) error {
 			}
 		}
 	}
-	last := set.GetKeys()[3]
+	last := set.GetKeys()[len(want)-1]
 	if last.GetKid() != host.GetKid() || !bytes.Equal(last.GetSpkiDer(), host.GetSpkiDer()) || last.GetKeyId() != "" {
 		return errors.New("the host's key is not published as it was handed in")
 	}
@@ -546,11 +560,159 @@ func refusals(ctx context.Context, k *Kit) error {
 		{"a verification of no purpose", second(k.verify(ctx, &tokenv1alpha1.VerifyRequest{Token: "a.b.c", Purposes: []string{"kit-no-such-purpose"}})), connect.CodeInvalidArgument, token.ReasonPurpose},
 		{"a verification of a bad type", second(k.verify(ctx, &tokenv1alpha1.VerifyRequest{Token: "a.b.c", Types: []string{"no type"}})), connect.CodeInvalidArgument, token.ReasonTyp},
 		{"a verification of a token too long", second(k.verify(ctx, &tokenv1alpha1.VerifyRequest{Token: strings.Repeat("a", token.MaxToken+1)})), connect.CodeInvalidArgument, token.ReasonSize},
+		{"the ring of a purpose with no ring", second(k.Client.Ring(ctx, connect.NewRequest(&tokenv1alpha1.RingRequest{Purposes: []string{PurposeES384}}))), connect.CodeInvalidArgument, token.ReasonPurpose},
+		{"a reconcile of no purpose", second(k.Client.Reconcile(ctx, connect.NewRequest(&tokenv1alpha1.ReconcileRequest{Purposes: []string{"kit-no-such-purpose"}}))), connect.CodeInvalidArgument, token.ReasonPurpose},
+		{"a revocation by a purpose with no ring", second(k.Client.Revoke(ctx, connect.NewRequest(&tokenv1alpha1.RevokeRequest{Purpose: PurposeES384, Kid: cur.GetKid()}))), connect.CodeInvalidArgument, token.ReasonPurpose},
+		{"a revocation of no kid", second(k.Client.Revoke(ctx, connect.NewRequest(&tokenv1alpha1.RevokeRequest{Purpose: PurposeRing}))), connect.CodeInvalidArgument, token.ReasonKeys},
+		{"a confirmation of a time to come", second(k.Client.ConfirmPublished(ctx, connect.NewRequest(&tokenv1alpha1.ConfirmPublishedRequest{Purpose: PurposeRing, Kids: []string{"kit"}, AtUnixMs: time.Now().Add(time.Hour).UnixMilli()}))), connect.CodeInvalidArgument, token.ReasonTime},
+		{"a chain of a kid not in the set", second(k.keySet(ctx, &tokenv1alpha1.KeySetRequest{KeyChains: map[string]*tokenv1alpha1.CertificateChain{"kit-no-such-kid": {}}})), connect.CodeInvalidArgument, token.ReasonKeys},
 	}
 	for _, c := range cases {
 		if err := refused(c.err, c.code, c.reason); err != nil {
 			return fmt.Errorf("%s: %w", c.what, err)
 		}
+	}
+	return nil
+}
+
+// ring is the kit's ring as the block answers it.
+func (k *Kit) ring(ctx context.Context) (*tokenv1alpha1.PurposeRing, error) {
+	res, err := k.Client.Ring(ctx, connect.NewRequest(&tokenv1alpha1.RingRequest{Purposes: []string{PurposeRing}}))
+	if err != nil {
+		return nil, err
+	}
+	if len(res.Msg.GetRings()) != 1 || res.Msg.GetRings()[0].GetPurpose() != PurposeRing {
+		return nil, errors.New("the ring of the kit's ring purpose is not one ring of it")
+	}
+	return res.Msg.GetRings()[0], nil
+}
+
+func ringSigns(ctx context.Context, k *Kit) error {
+	r, err := k.ring(ctx)
+	if err != nil {
+		return err
+	}
+	if len(r.GetKeys()) != 1 {
+		return fmt.Errorf("the ring holds %d keys, want the current slot's one: a key of the spare slot joined, or the ring is not fresh", len(r.GetKeys()))
+	}
+	key := r.GetKeys()[0]
+	sum := sha256.Sum256(key.GetSpkiDer())
+	if key.GetState() != tokenv1alpha1.KeyState_KEY_STATE_ACTIVE || key.GetSlot() != SlotRingA || key.GetAlgorithm() != purpose.ES256 ||
+		key.GetKid() != key.GetKeyId() || !strings.HasSuffix(key.GetKeyId(), hex.EncodeToString(sum[:])) || r.GetSigningKid() != key.GetKid() {
+		return errors.New("the ring's one key is not the current slot's active key that this node signs with, kid its key_id")
+	}
+	if key.GetAddedUnixMs() == 0 || key.GetStateSinceUnixMs() < key.GetAddedUnixMs() || key.GetConfirmedUnixMs() != 0 {
+		return errors.New("the ring's key has no time it joined, or a confirmation nobody gave")
+	}
+	res, err := k.sign(ctx, PurposeRing, TypeKit, k.claims(`,"p":"ring"`))
+	if err != nil {
+		return err
+	}
+	if res.GetKid() != key.GetKid() || res.GetKeyId() != key.GetKeyId() {
+		return errors.New("the ring signs with another key than its active one")
+	}
+	parts := strings.Split(res.GetToken(), ".")
+	sig, _ := b64.DecodeString(parts[2])
+	if err := verifyJWS(purpose.ES256, key.GetSpkiDer(), []byte(parts[0]+"."+parts[1]), sig); err != nil {
+		return err
+	}
+	pub, err := k.current(ctx, PurposeRing)
+	if err != nil {
+		return err
+	}
+	if pub.GetKid() != key.GetKid() || pub.GetState() != tokenv1alpha1.KeyState_KEY_STATE_ACTIVE || pub.GetNode() != key.GetNode() || !bytes.Equal(pub.GetSpkiDer(), key.GetSpkiDer()) {
+		return errors.New("the key set does not publish the ring's key with its state and node")
+	}
+	got, err := k.verify(ctx, &tokenv1alpha1.VerifyRequest{Token: res.GetToken(), Purposes: []string{PurposeRing}})
+	if err != nil {
+		return fmt.Errorf("a token of the ring: %w", err)
+	}
+	if got.GetPurpose() != PurposeRing || got.GetKid() != key.GetKid() {
+		return errors.New("the verification names another purpose or kid")
+	}
+	return nil
+}
+
+func ringReconcile(ctx context.Context, k *Kit) error {
+	before, err := k.ring(ctx)
+	if err != nil {
+		return err
+	}
+	res, err := k.Client.Reconcile(ctx, connect.NewRequest(&tokenv1alpha1.ReconcileRequest{}))
+	if err != nil {
+		return err
+	}
+	if len(res.Msg.GetChanges()) != 0 {
+		return fmt.Errorf("a reconcile of a ring in line changed %d keys", len(res.Msg.GetChanges()))
+	}
+	if len(res.Msg.GetRings()) != 1 || res.Msg.GetRings()[0].GetPurpose() != PurposeRing || len(res.Msg.GetRings()[0].GetKeys()) != 1 ||
+		res.Msg.GetRings()[0].GetKeys()[0].GetKid() != before.GetKeys()[0].GetKid() || res.Msg.GetRings()[0].GetSigningKid() != before.GetSigningKid() {
+		return errors.New("a reconcile of every ring answers another ring")
+	}
+	// A confirmation of an active key changes nothing.
+	conf, err := k.Client.ConfirmPublished(ctx, connect.NewRequest(&tokenv1alpha1.ConfirmPublishedRequest{Purpose: PurposeRing, Kids: []string{before.GetSigningKid()}}))
+	if err != nil {
+		return err
+	}
+	if len(conf.Msg.GetConfirmed()) != 0 {
+		return errors.New("an active key was confirmed")
+	}
+	return nil
+}
+
+func ringRevoke(ctx context.Context, k *Kit) error {
+	before, err := k.ring(ctx)
+	if err != nil {
+		return err
+	}
+	kid := before.GetSigningKid()
+	res, err := k.sign(ctx, PurposeRing, TypeKit, k.claims(`,"p":"revoked"`))
+	if err != nil {
+		return err
+	}
+	rev, err := k.Client.Revoke(ctx, connect.NewRequest(&tokenv1alpha1.RevokeRequest{Purpose: PurposeRing, Kid: kid}))
+	if err != nil {
+		return err
+	}
+	again, err := k.Client.Revoke(ctx, connect.NewRequest(&tokenv1alpha1.RevokeRequest{Purpose: PurposeRing, Kid: kid}))
+	if err != nil {
+		return err
+	}
+	if !rev.Msg.GetChanged() || again.Msg.GetChanged() {
+		return errors.New("a revocation changed nothing, or a second one changed something")
+	}
+	unseen := "kit-unseen-" + k.run
+	r, err := k.Client.Revoke(ctx, connect.NewRequest(&tokenv1alpha1.RevokeRequest{Purpose: PurposeRing, Kid: unseen}))
+	if err != nil {
+		return fmt.Errorf("a kid the ring does not hold: %w", err)
+	}
+	if !r.Msg.GetChanged() {
+		return errors.New("a kid the ring does not hold is not recorded as revoked")
+	}
+	after, err := k.ring(ctx)
+	if err != nil {
+		return err
+	}
+	if len(after.GetKeys()) != 2 || after.GetSigningKid() != "" {
+		return errors.New("after the revocations the ring does not hold its two revoked kids, or still signs")
+	}
+	for _, key := range after.GetKeys() {
+		if key.GetState() != tokenv1alpha1.KeyState_KEY_STATE_REVOKED || len(key.GetSpkiDer()) != 0 {
+			return fmt.Errorf("the key %s is not revoked, or keeps its public key", key.GetKid())
+		}
+	}
+	set, err := k.keySet(ctx, &tokenv1alpha1.KeySetRequest{Purposes: []string{PurposeRing}})
+	if err != nil {
+		return err
+	}
+	if len(set.GetKeys()) != 0 || string(set.GetJwksJson()) != `{"keys":[]}` {
+		return errors.New("the key set still publishes a revoked key")
+	}
+	if err := refused(second(k.verify(ctx, &tokenv1alpha1.VerifyRequest{Token: res.GetToken()})), connect.CodePermissionDenied, token.ReasonToken); err != nil {
+		return fmt.Errorf("a token of a revoked key: %w", err)
+	}
+	if err := refused(second(k.sign(ctx, PurposeRing, TypeKit, k.claims(""))), connect.CodeUnavailable, token.ReasonNotActive); err != nil {
+		return fmt.Errorf("a signature after the revocation: %w", err)
 	}
 	return nil
 }

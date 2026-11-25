@@ -3,6 +3,7 @@ package token_test
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/truvity/atoom/blocks/seal"
 	"github.com/truvity/atoom/blocks/seal/gen/atoom/seal/v1alpha1/sealv1alpha1connect"
@@ -18,6 +19,8 @@ import (
 // stack is a seal block over fakeKeys, and a token block over it, each called in-process through its client.
 type stack struct {
 	keys   *tokentest.Keys
+	items  *tokentest.Items
+	store  storev1alpha1connect.ItemServiceClient
 	seal   sealv1alpha1connect.SealServiceClient
 	client tokenv1alpha1connect.TokenServiceClient
 	block  *token.Block
@@ -29,6 +32,9 @@ type stackOptions struct {
 	sealRules seal.Rules
 	observe   func(context.Context, token.Event)
 	keys      keyv1alpha1connect.KeyStoreServiceClient // instead of one fakeKeys
+	items     *tokentest.Items                         // the rings' store; a new one when nil
+	node      string
+	clock     func() time.Time
 }
 
 func newStack(t *testing.T, o stackOptions) *stack {
@@ -65,7 +71,14 @@ func newStack(t *testing.T, o stackOptions) *stack {
 	if o.rules == nil {
 		o.rules = token.AllowAll()
 	}
-	s.block, err = token.New(ctx, token.Options{Seal: s.seal, Purposes: o.purposes, Rules: o.rules, Observe: o.observe})
+	s.items = o.items
+	if s.items == nil {
+		s.items = tokentest.NewItems()
+	}
+	ihc, istop := socket.InProcess(storev1alpha1connect.NewItemServiceHandler(s.items))
+	t.Cleanup(istop)
+	s.store = storev1alpha1connect.NewItemServiceClient(ihc, "http://items", call.ClientOptions()...)
+	s.block, err = token.New(ctx, token.Options{Seal: s.seal, Purposes: o.purposes, Rules: o.rules, Observe: o.observe, Items: s.store, Node: o.node, Clock: o.clock})
 	if err != nil {
 		t.Fatal(err)
 	}

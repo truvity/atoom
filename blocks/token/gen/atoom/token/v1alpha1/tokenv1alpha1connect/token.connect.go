@@ -47,6 +47,15 @@ const (
 	TokenServiceKeySetProcedure = "/atoom.token.v1alpha1.TokenService/KeySet"
 	// TokenServiceVerifyProcedure is the fully-qualified name of the TokenService's Verify RPC.
 	TokenServiceVerifyProcedure = "/atoom.token.v1alpha1.TokenService/Verify"
+	// TokenServiceRingProcedure is the fully-qualified name of the TokenService's Ring RPC.
+	TokenServiceRingProcedure = "/atoom.token.v1alpha1.TokenService/Ring"
+	// TokenServiceReconcileProcedure is the fully-qualified name of the TokenService's Reconcile RPC.
+	TokenServiceReconcileProcedure = "/atoom.token.v1alpha1.TokenService/Reconcile"
+	// TokenServiceRevokeProcedure is the fully-qualified name of the TokenService's Revoke RPC.
+	TokenServiceRevokeProcedure = "/atoom.token.v1alpha1.TokenService/Revoke"
+	// TokenServiceConfirmPublishedProcedure is the fully-qualified name of the TokenService's
+	// ConfirmPublished RPC.
+	TokenServiceConfirmPublishedProcedure = "/atoom.token.v1alpha1.TokenService/ConfirmPublished"
 )
 
 // TokenServiceClient is a client for the atoom.token.v1alpha1.TokenService service.
@@ -55,6 +64,10 @@ type TokenServiceClient interface {
 	Sign(context.Context, *connect.Request[v1alpha1.SignRequest]) (*connect.Response[v1alpha1.SignResponse], error)
 	KeySet(context.Context, *connect.Request[v1alpha1.KeySetRequest]) (*connect.Response[v1alpha1.KeySetResponse], error)
 	Verify(context.Context, *connect.Request[v1alpha1.VerifyRequest]) (*connect.Response[v1alpha1.VerifyResponse], error)
+	Ring(context.Context, *connect.Request[v1alpha1.RingRequest]) (*connect.Response[v1alpha1.RingResponse], error)
+	Reconcile(context.Context, *connect.Request[v1alpha1.ReconcileRequest]) (*connect.Response[v1alpha1.ReconcileResponse], error)
+	Revoke(context.Context, *connect.Request[v1alpha1.RevokeRequest]) (*connect.Response[v1alpha1.RevokeResponse], error)
+	ConfirmPublished(context.Context, *connect.Request[v1alpha1.ConfirmPublishedRequest]) (*connect.Response[v1alpha1.ConfirmPublishedResponse], error)
 }
 
 // NewTokenServiceClient constructs a client for the atoom.token.v1alpha1.TokenService service. By
@@ -92,15 +105,43 @@ func NewTokenServiceClient(httpClient connect.HTTPClient, baseURL string, opts .
 			connect.WithSchema(tokenServiceMethods.ByName("Verify")),
 			connect.WithClientOptions(opts...),
 		),
+		ring: connect.NewClient[v1alpha1.RingRequest, v1alpha1.RingResponse](
+			httpClient,
+			baseURL+TokenServiceRingProcedure,
+			connect.WithSchema(tokenServiceMethods.ByName("Ring")),
+			connect.WithClientOptions(opts...),
+		),
+		reconcile: connect.NewClient[v1alpha1.ReconcileRequest, v1alpha1.ReconcileResponse](
+			httpClient,
+			baseURL+TokenServiceReconcileProcedure,
+			connect.WithSchema(tokenServiceMethods.ByName("Reconcile")),
+			connect.WithClientOptions(opts...),
+		),
+		revoke: connect.NewClient[v1alpha1.RevokeRequest, v1alpha1.RevokeResponse](
+			httpClient,
+			baseURL+TokenServiceRevokeProcedure,
+			connect.WithSchema(tokenServiceMethods.ByName("Revoke")),
+			connect.WithClientOptions(opts...),
+		),
+		confirmPublished: connect.NewClient[v1alpha1.ConfirmPublishedRequest, v1alpha1.ConfirmPublishedResponse](
+			httpClient,
+			baseURL+TokenServiceConfirmPublishedProcedure,
+			connect.WithSchema(tokenServiceMethods.ByName("ConfirmPublished")),
+			connect.WithClientOptions(opts...),
+		),
 	}
 }
 
 // tokenServiceClient implements TokenServiceClient.
 type tokenServiceClient struct {
-	capabilities *connect.Client[v1alpha1.CapabilitiesRequest, v1alpha1.CapabilitiesResponse]
-	sign         *connect.Client[v1alpha1.SignRequest, v1alpha1.SignResponse]
-	keySet       *connect.Client[v1alpha1.KeySetRequest, v1alpha1.KeySetResponse]
-	verify       *connect.Client[v1alpha1.VerifyRequest, v1alpha1.VerifyResponse]
+	capabilities     *connect.Client[v1alpha1.CapabilitiesRequest, v1alpha1.CapabilitiesResponse]
+	sign             *connect.Client[v1alpha1.SignRequest, v1alpha1.SignResponse]
+	keySet           *connect.Client[v1alpha1.KeySetRequest, v1alpha1.KeySetResponse]
+	verify           *connect.Client[v1alpha1.VerifyRequest, v1alpha1.VerifyResponse]
+	ring             *connect.Client[v1alpha1.RingRequest, v1alpha1.RingResponse]
+	reconcile        *connect.Client[v1alpha1.ReconcileRequest, v1alpha1.ReconcileResponse]
+	revoke           *connect.Client[v1alpha1.RevokeRequest, v1alpha1.RevokeResponse]
+	confirmPublished *connect.Client[v1alpha1.ConfirmPublishedRequest, v1alpha1.ConfirmPublishedResponse]
 }
 
 // Capabilities calls atoom.token.v1alpha1.TokenService.Capabilities.
@@ -123,12 +164,36 @@ func (c *tokenServiceClient) Verify(ctx context.Context, req *connect.Request[v1
 	return c.verify.CallUnary(ctx, req)
 }
 
+// Ring calls atoom.token.v1alpha1.TokenService.Ring.
+func (c *tokenServiceClient) Ring(ctx context.Context, req *connect.Request[v1alpha1.RingRequest]) (*connect.Response[v1alpha1.RingResponse], error) {
+	return c.ring.CallUnary(ctx, req)
+}
+
+// Reconcile calls atoom.token.v1alpha1.TokenService.Reconcile.
+func (c *tokenServiceClient) Reconcile(ctx context.Context, req *connect.Request[v1alpha1.ReconcileRequest]) (*connect.Response[v1alpha1.ReconcileResponse], error) {
+	return c.reconcile.CallUnary(ctx, req)
+}
+
+// Revoke calls atoom.token.v1alpha1.TokenService.Revoke.
+func (c *tokenServiceClient) Revoke(ctx context.Context, req *connect.Request[v1alpha1.RevokeRequest]) (*connect.Response[v1alpha1.RevokeResponse], error) {
+	return c.revoke.CallUnary(ctx, req)
+}
+
+// ConfirmPublished calls atoom.token.v1alpha1.TokenService.ConfirmPublished.
+func (c *tokenServiceClient) ConfirmPublished(ctx context.Context, req *connect.Request[v1alpha1.ConfirmPublishedRequest]) (*connect.Response[v1alpha1.ConfirmPublishedResponse], error) {
+	return c.confirmPublished.CallUnary(ctx, req)
+}
+
 // TokenServiceHandler is an implementation of the atoom.token.v1alpha1.TokenService service.
 type TokenServiceHandler interface {
 	Capabilities(context.Context, *connect.Request[v1alpha1.CapabilitiesRequest]) (*connect.Response[v1alpha1.CapabilitiesResponse], error)
 	Sign(context.Context, *connect.Request[v1alpha1.SignRequest]) (*connect.Response[v1alpha1.SignResponse], error)
 	KeySet(context.Context, *connect.Request[v1alpha1.KeySetRequest]) (*connect.Response[v1alpha1.KeySetResponse], error)
 	Verify(context.Context, *connect.Request[v1alpha1.VerifyRequest]) (*connect.Response[v1alpha1.VerifyResponse], error)
+	Ring(context.Context, *connect.Request[v1alpha1.RingRequest]) (*connect.Response[v1alpha1.RingResponse], error)
+	Reconcile(context.Context, *connect.Request[v1alpha1.ReconcileRequest]) (*connect.Response[v1alpha1.ReconcileResponse], error)
+	Revoke(context.Context, *connect.Request[v1alpha1.RevokeRequest]) (*connect.Response[v1alpha1.RevokeResponse], error)
+	ConfirmPublished(context.Context, *connect.Request[v1alpha1.ConfirmPublishedRequest]) (*connect.Response[v1alpha1.ConfirmPublishedResponse], error)
 }
 
 // NewTokenServiceHandler builds an HTTP handler from the service implementation. It returns the
@@ -162,6 +227,30 @@ func NewTokenServiceHandler(svc TokenServiceHandler, opts ...connect.HandlerOpti
 		connect.WithSchema(tokenServiceMethods.ByName("Verify")),
 		connect.WithHandlerOptions(opts...),
 	)
+	tokenServiceRingHandler := connect.NewUnaryHandler(
+		TokenServiceRingProcedure,
+		svc.Ring,
+		connect.WithSchema(tokenServiceMethods.ByName("Ring")),
+		connect.WithHandlerOptions(opts...),
+	)
+	tokenServiceReconcileHandler := connect.NewUnaryHandler(
+		TokenServiceReconcileProcedure,
+		svc.Reconcile,
+		connect.WithSchema(tokenServiceMethods.ByName("Reconcile")),
+		connect.WithHandlerOptions(opts...),
+	)
+	tokenServiceRevokeHandler := connect.NewUnaryHandler(
+		TokenServiceRevokeProcedure,
+		svc.Revoke,
+		connect.WithSchema(tokenServiceMethods.ByName("Revoke")),
+		connect.WithHandlerOptions(opts...),
+	)
+	tokenServiceConfirmPublishedHandler := connect.NewUnaryHandler(
+		TokenServiceConfirmPublishedProcedure,
+		svc.ConfirmPublished,
+		connect.WithSchema(tokenServiceMethods.ByName("ConfirmPublished")),
+		connect.WithHandlerOptions(opts...),
+	)
 	return "/atoom.token.v1alpha1.TokenService/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case TokenServiceCapabilitiesProcedure:
@@ -172,6 +261,14 @@ func NewTokenServiceHandler(svc TokenServiceHandler, opts ...connect.HandlerOpti
 			tokenServiceKeySetHandler.ServeHTTP(w, r)
 		case TokenServiceVerifyProcedure:
 			tokenServiceVerifyHandler.ServeHTTP(w, r)
+		case TokenServiceRingProcedure:
+			tokenServiceRingHandler.ServeHTTP(w, r)
+		case TokenServiceReconcileProcedure:
+			tokenServiceReconcileHandler.ServeHTTP(w, r)
+		case TokenServiceRevokeProcedure:
+			tokenServiceRevokeHandler.ServeHTTP(w, r)
+		case TokenServiceConfirmPublishedProcedure:
+			tokenServiceConfirmPublishedHandler.ServeHTTP(w, r)
 		default:
 			http.NotFound(w, r)
 		}
@@ -195,4 +292,20 @@ func (UnimplementedTokenServiceHandler) KeySet(context.Context, *connect.Request
 
 func (UnimplementedTokenServiceHandler) Verify(context.Context, *connect.Request[v1alpha1.VerifyRequest]) (*connect.Response[v1alpha1.VerifyResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("atoom.token.v1alpha1.TokenService.Verify is not implemented"))
+}
+
+func (UnimplementedTokenServiceHandler) Ring(context.Context, *connect.Request[v1alpha1.RingRequest]) (*connect.Response[v1alpha1.RingResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("atoom.token.v1alpha1.TokenService.Ring is not implemented"))
+}
+
+func (UnimplementedTokenServiceHandler) Reconcile(context.Context, *connect.Request[v1alpha1.ReconcileRequest]) (*connect.Response[v1alpha1.ReconcileResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("atoom.token.v1alpha1.TokenService.Reconcile is not implemented"))
+}
+
+func (UnimplementedTokenServiceHandler) Revoke(context.Context, *connect.Request[v1alpha1.RevokeRequest]) (*connect.Response[v1alpha1.RevokeResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("atoom.token.v1alpha1.TokenService.Revoke is not implemented"))
+}
+
+func (UnimplementedTokenServiceHandler) ConfirmPublished(context.Context, *connect.Request[v1alpha1.ConfirmPublishedRequest]) (*connect.Response[v1alpha1.ConfirmPublishedResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("atoom.token.v1alpha1.TokenService.ConfirmPublished is not implemented"))
 }

@@ -3,7 +3,8 @@
 # key/software (its Go thin main, with the declaration the kit prints) and the store driver store/memory (its Rust thin main), each on a
 # UNIX socket of its own. First token-conformance hosts the seal block and the token block in its own process over the two sockets and
 # calls the token block through an in-memory transport; then the thin main of the block, cmd/token, hosts both over the same sockets and
-# serves the block on a socket of its own, and the kit runs against it there.
+# serves the block on a socket of its own, and the kit runs against it there. The kit's ring is kept in the same store/memory: the first run
+# under a prefix of its own, the thin main under its default one, so each run meets a fresh ring.
 #
 #   tools/scripts/conformance-token.sh
 set -euo pipefail
