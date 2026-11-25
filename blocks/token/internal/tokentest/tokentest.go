@@ -2,6 +2,7 @@
 package tokentest
 
 import (
+	"bytes"
 	"context"
 	"crypto"
 	"crypto/ecdh"
@@ -21,6 +22,7 @@ import (
 	"github.com/truvity/atoom/key/gen/atoom/key/v1alpha1/keyv1alpha1connect"
 	"github.com/truvity/atoom/key/keyid"
 	"github.com/truvity/atoom/key/purpose"
+	storev1alpha1 "github.com/truvity/atoom/store/gen/atoom/store/v1alpha1"
 	"github.com/truvity/atoom/store/gen/atoom/store/v1alpha1/storev1alpha1connect"
 )
 
@@ -169,4 +171,85 @@ func (f *Keys) Lie(name string) {
 // NoStore is the store port for a seal block that only signs: no call reaches it.
 type NoStore struct {
 	storev1alpha1connect.UnimplementedItemServiceHandler
+}
+
+// Items is a stand-in of the store port for the rings: Get and Transact with conditions, in memory. A test makes it fail, counts its
+// writes, or has another writer change an item between a read and a write.
+type Items struct {
+	storev1alpha1connect.UnimplementedItemServiceHandler
+	mu    sync.Mutex
+	items map[string]*storev1alpha1.DriverItem
+
+	Fail   atomic.Bool
+	Writes atomic.Int64
+	// BeforeWrite runs before a Transact is applied, outside the lock: a race of another writer.
+	BeforeWrite func()
+}
+
+// NewItems is an empty store.
+func NewItems() *Items { return &Items{items: map[string]*storev1alpha1.DriverItem{}} }
+
+// Get reads an item.
+func (f *Items) Get(_ context.Context, req *connect.Request[storev1alpha1.ItemGetRequest]) (*connect.Response[storev1alpha1.ItemGetResponse], error) {
+	if f.Fail.Load() {
+		return nil, connect.NewError(connect.CodeUnavailable, errors.New("fake: down"))
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	it, ok := f.items[string(req.Msg.GetKey())]
+	if !ok {
+		return nil, refusal.New(connect.CodeNotFound, "not_found", "key")
+	}
+	return connect.NewResponse(&storev1alpha1.ItemGetResponse{Item: &storev1alpha1.DriverItem{Key: bytes.Clone(it.GetKey()), Version: it.GetVersion(), Value: bytes.Clone(it.GetValue())}}), nil
+}
+
+// Transact applies the conditions and the puts, all or none.
+func (f *Items) Transact(_ context.Context, req *connect.Request[storev1alpha1.TransactRequest]) (*connect.Response[storev1alpha1.TransactResponse], error) {
+	if f.Fail.Load() {
+		return nil, connect.NewError(connect.CodeUnavailable, errors.New("fake: down"))
+	}
+	if hook := f.BeforeWrite; hook != nil {
+		hook()
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for _, c := range req.Msg.GetConditions() {
+		old, exists := f.items[string(c.GetKey())]
+		if (c.GetAbsent() && exists) || (!c.GetAbsent() && (!exists || old.GetVersion() != c.GetVersion())) {
+			return nil, refusal.New(connect.CodeAborted, "version", "conditions[0]")
+		}
+	}
+	out := &storev1alpha1.TransactResponse{}
+	for _, p := range req.Msg.GetPuts() {
+		v := uint64(1)
+		if old, ok := f.items[string(p.GetKey())]; ok {
+			v = old.GetVersion() + 1
+		}
+		it := &storev1alpha1.DriverItem{Key: bytes.Clone(p.GetKey()), Version: v, Value: bytes.Clone(p.GetValue())}
+		f.items[string(p.GetKey())] = it
+		out.Items = append(out.Items, it)
+	}
+	f.Writes.Add(1)
+	return connect.NewResponse(out), nil
+}
+
+// Put writes an item as another writer would, at the next version.
+func (f *Items) Put(key string, value []byte) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	v := uint64(1)
+	if old, ok := f.items[key]; ok {
+		v = old.GetVersion() + 1
+	}
+	f.items[key] = &storev1alpha1.DriverItem{Key: []byte(key), Version: v, Value: bytes.Clone(value)}
+}
+
+// Value is the value of an item; nil when there is none.
+func (f *Items) Value(key string) []byte {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if it, ok := f.items[key]; ok {
+		return bytes.Clone(it.GetValue())
+	}
+	return nil
 }

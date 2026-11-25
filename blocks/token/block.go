@@ -29,6 +29,10 @@ const (
 	ReasonToken   = "token"   // a token that does not verify, for any reason
 	ReasonSeal    = "seal"    // the seal block did not answer, or refused for a reason of its own that is not a refusal of the caller
 	ReasonKey     = "key"     // the seal block answered a key or a signature that does not hold together
+	// The reasons of a ring (record 0024).
+	ReasonNotActive = "not_active" // this node holds no active key of the ring purpose: still pre-published, revoked or dropped
+	ReasonRing      = "ring"       // the ring cannot be read or written
+	ReasonTime      = "time"       // a confirmation of a time after now
 )
 
 // The limits of a call.
@@ -76,21 +80,41 @@ func New(ctx context.Context, opts Options) (*Block, error) {
 	b := &Block{opts: opts, purposes: map[string]Purpose{}, current: map[string]*currentKey{}}
 	b.opts.Purposes = make([]Purpose, 0, len(opts.Purposes))
 	for _, p := range opts.Purposes {
-		s := served[p.Name]
-		if s == nil || s.GetUse() != sealv1alpha1.Use_USE_SIGN {
-			return nil, fmt.Errorf("token: the seal block does not serve the signing purpose %q", p.Name)
+		algorithm := p.Algorithm
+		for _, slot := range slotsOf(p) {
+			s := served[slot]
+			if s == nil || s.GetUse() != sealv1alpha1.Use_USE_SIGN {
+				return nil, fmt.Errorf("token: the seal block does not serve the signing purpose %q", slot)
+			}
+			if algorithm != "" && algorithm != s.GetAlgorithm() {
+				return nil, fmt.Errorf("token: the seal block serves the purpose %q as %s, not %s", slot, s.GetAlgorithm(), algorithm)
+			}
+			algorithm = s.GetAlgorithm()
 		}
-		if p.Algorithm != "" && p.Algorithm != s.GetAlgorithm() {
-			return nil, fmt.Errorf("token: the seal block serves the purpose %q as %s, not %s", p.Name, s.GetAlgorithm(), p.Algorithm)
-		}
-		p.Algorithm = s.GetAlgorithm()
+		p.Algorithm = algorithm
 		p.Types = slices.Clone(p.Types)
+		if p.Ring != nil {
+			r := *p.Ring
+			r.Slots = slices.Clone(r.slots(p.Name))
+			r.Current = r.current(p.Name)
+			p.Ring = &r
+		}
 		b.opts.Purposes = append(b.opts.Purposes, p)
 		b.purposes[p.Name] = p
 	}
 	for _, p := range b.opts.Purposes {
-		if _, err := b.refresh(ctx, p); err != nil {
-			return nil, fmt.Errorf("token: the key of the purpose %q: %w", p.Name, err)
+		if p.Ring == nil {
+			if _, err := b.refresh(ctx, p); err != nil {
+				return nil, fmt.Errorf("token: the key of the purpose %q: %w", p.Name, err)
+			}
+			continue
+		}
+		held, err := b.observe(ctx, p, true)
+		if err != nil {
+			return nil, fmt.Errorf("token: the keys of the slots of %q: %w", p.Name, err)
+		}
+		if _, _, err := b.reconcile(ctx, OpReconcile, p, held); err != nil {
+			return nil, fmt.Errorf("token: the ring of %q: %w", p.Name, err)
 		}
 	}
 	return b, nil
@@ -101,14 +125,14 @@ func (b *Block) Handler(opts ...connect.HandlerOption) (string, http.Handler) {
 	return tokenv1alpha1connect.NewTokenServiceHandler(b, opts...)
 }
 
-func (b *Block) observe(ctx context.Context, e Event) {
+func (b *Block) observeEvent(ctx context.Context, e Event) {
 	if b.opts.Observe != nil {
 		b.opts.Observe(ctx, e)
 	}
 }
 
 func (b *Block) refuse(ctx context.Context, op Op, p string, code connect.Code, reason, field string) *connect.Error {
-	b.observe(ctx, Event{Action: EventRefuse, Op: op, Purpose: p, Reason: reason})
+	b.observeEvent(ctx, Event{Action: EventRefuse, Op: op, Purpose: p, Reason: reason})
 	return refusal.New(code, reason, field)
 }
 
@@ -119,7 +143,7 @@ func (b *Block) decide(ctx context.Context, r Request) error {
 	}
 	var ce *connect.Error
 	if errors.As(err, &ce) {
-		b.observe(ctx, Event{Action: EventRefuse, Op: r.Op, Purpose: r.Purpose, Reason: ReasonRule})
+		b.observeEvent(ctx, Event{Action: EventRefuse, Op: r.Op, Purpose: r.Purpose, Reason: ReasonRule})
 		return ce
 	}
 	return b.refuse(ctx, r.Op, r.Purpose, connect.CodePermissionDenied, ReasonRule, "")
@@ -139,7 +163,7 @@ func (b *Block) sealFailure(ctx context.Context, op Op, p string, err error) err
 	case errors.Is(err, context.DeadlineExceeded):
 		return connect.NewError(connect.CodeDeadlineExceeded, errors.New("deadline exceeded"))
 	case connect.CodeOf(err) == connect.CodePermissionDenied:
-		b.observe(ctx, Event{Action: EventRefuse, Op: op, Purpose: p, Reason: ReasonSeal})
+		b.observeEvent(ctx, Event{Action: EventRefuse, Op: op, Purpose: p, Reason: ReasonSeal})
 		var ce *connect.Error
 		if errors.As(err, &ce) {
 			return ce
@@ -150,7 +174,12 @@ func (b *Block) sealFailure(ctx context.Context, op Op, p string, err error) err
 
 // refresh reads the current key of a purpose from the seal block and keeps it.
 func (b *Block) refresh(ctx context.Context, p Purpose) (*currentKey, error) {
-	res, err := b.opts.Seal.PublicKey(ctx, connect.NewRequest(&sealv1alpha1.PublicKeyRequest{Purpose: p.Name}))
+	return b.refreshSlot(ctx, p, p.Name)
+}
+
+// refreshSlot reads the key of a slot of a purpose (a seal purpose: the purpose's own name, or a slot of its ring) and keeps it.
+func (b *Block) refreshSlot(ctx context.Context, p Purpose, slot string) (*currentKey, error) {
+	res, err := b.opts.Seal.PublicKey(ctx, connect.NewRequest(&sealv1alpha1.PublicKeyRequest{Purpose: slot}))
 	if err != nil {
 		return nil, err
 	}
@@ -169,27 +198,40 @@ func (b *Block) refresh(ctx context.Context, p Purpose) (*currentKey, error) {
 		return nil, errInconsistent
 	}
 	b.mu.Lock()
-	b.current[p.Name] = c
+	b.current[slot] = c
 	b.mu.Unlock()
 	return c, nil
 }
 
 // cached is the kept current key of a purpose, read when there is none.
 func (b *Block) cached(ctx context.Context, p Purpose) (*currentKey, error) {
+	return b.cachedSlot(ctx, p, p.Name)
+}
+
+// cachedSlot is the kept key of a slot, read when there is none.
+func (b *Block) cachedSlot(ctx context.Context, p Purpose, slot string) (*currentKey, error) {
 	b.mu.Lock()
-	c := b.current[p.Name]
+	c := b.current[slot]
 	b.mu.Unlock()
 	if c != nil {
 		return c, nil
 	}
-	return b.refresh(ctx, p)
+	return b.refreshSlot(ctx, p, slot)
 }
 
 // Capabilities says what the block serves.
 func (b *Block) Capabilities(context.Context, *connect.Request[tokenv1alpha1.CapabilitiesRequest]) (*connect.Response[tokenv1alpha1.CapabilitiesResponse], error) {
 	out := &tokenv1alpha1.CapabilitiesResponse{}
 	for _, p := range b.opts.Purposes {
-		out.Purposes = append(out.Purposes, &tokenv1alpha1.PurposeInfo{Name: p.Name, Algorithm: p.Algorithm, Types: slices.Clone(p.Types), Kid: p.Kid.proto()})
+		info := &tokenv1alpha1.PurposeInfo{Name: p.Name, Algorithm: p.Algorithm, Types: slices.Clone(p.Types), Kid: p.Kid.proto()}
+		if r := p.Ring; r != nil {
+			info.Ring = &tokenv1alpha1.RingInfo{
+				Slots: slices.Clone(r.Slots), Current: r.Current, LeadSeconds: seconds(r.Lead), RetainSeconds: seconds(r.Retain),
+				CacheMaxAgeSeconds: seconds(r.CacheMaxAge), TokenLifetimeSeconds: seconds(r.TokenLifetime), BootstrapSeconds: seconds(r.Bootstrap),
+				OverlapSeconds: seconds(r.Overlap), AtOnce: r.AtOnce, Confirm: r.Confirm, Node: b.opts.Node,
+			}
+		}
+		out.Purposes = append(out.Purposes, info)
 	}
 	return connect.NewResponse(out), nil
 }
@@ -214,17 +256,20 @@ func (b *Block) Sign(ctx context.Context, req *connect.Request[tokenv1alpha1.Sig
 	if err := b.decide(ctx, Request{Op: OpSign, Purpose: p.Name, Typ: m.GetTyp(), Claims: claims, Authorization: m.GetAuthorization()}); err != nil {
 		return nil, err
 	}
+	if p.Ring != nil {
+		res, err := b.signRing(ctx, p, m.GetTyp(), claims, m.GetAuthorization())
+		if err != nil {
+			return nil, err
+		}
+		return connect.NewResponse(res), nil
+	}
 	c, err := b.cached(ctx, p)
 	if err != nil {
 		return nil, b.sealFailure(ctx, OpSign, p.Name, err)
 	}
 	for attempt := 0; ; attempt++ {
-		input := b64.EncodeToString(marshal(header{Alg: p.Algorithm, Kid: c.kid, Typ: m.GetTyp()})) + "." + b64.EncodeToString(claims)
-		res, err := b.opts.Seal.Sign(ctx, connect.NewRequest(&sealv1alpha1.SignRequest{Purpose: p.Name, Content: []byte(input), Authorization: m.GetAuthorization()}))
-		if err != nil {
-			return nil, b.sealFailure(ctx, OpSign, p.Name, err)
-		}
-		if res.Msg.GetKeyId() != c.keyID {
+		res, err := b.signWith(ctx, p, p.Name, c, m.GetTyp(), claims, m.GetAuthorization())
+		if errors.Is(err, errReplaced) {
 			if attempt > 0 {
 				return nil, b.sealFailure(ctx, OpSign, p.Name, errInconsistent)
 			}
@@ -233,15 +278,32 @@ func (b *Block) Sign(ctx context.Context, req *connect.Request[tokenv1alpha1.Sig
 			}
 			continue
 		}
-		sig := res.Msg.GetSignatureRaw()
-		if res.Msg.GetAlgorithm() != p.Algorithm || !c.key.verify([]byte(input), sig) {
-			return nil, b.sealFailure(ctx, OpSign, p.Name, errInconsistent)
+		if err != nil {
+			return nil, b.sealFailure(ctx, OpSign, p.Name, err)
 		}
-		b.observe(ctx, Event{Action: EventSign, Op: OpSign, Purpose: p.Name, Kid: c.kid})
-		return connect.NewResponse(&tokenv1alpha1.SignResponse{
-			Token: input + "." + b64.EncodeToString(sig), Kid: c.kid, Algorithm: p.Algorithm, KeyId: c.keyID,
-		}), nil
+		return connect.NewResponse(res), nil
 	}
+}
+
+// errReplaced is a signature by another key than the slot's kept one: the key was replaced behind the block.
+var errReplaced = errors.New("token: the slot's key was replaced")
+
+// signWith signs the claims by the seal purpose slot, whose key the block keeps as c, and checks the signature under it.
+func (b *Block) signWith(ctx context.Context, p Purpose, slot string, c *currentKey, typ string, claims, authorization []byte) (*tokenv1alpha1.SignResponse, error) {
+	input := b64.EncodeToString(marshal(header{Alg: p.Algorithm, Kid: c.kid, Typ: typ})) + "." + b64.EncodeToString(claims)
+	res, err := b.opts.Seal.Sign(ctx, connect.NewRequest(&sealv1alpha1.SignRequest{Purpose: slot, Content: []byte(input), Authorization: authorization}))
+	if err != nil {
+		return nil, err
+	}
+	if res.Msg.GetKeyId() != c.keyID {
+		return nil, errReplaced
+	}
+	sig := res.Msg.GetSignatureRaw()
+	if res.Msg.GetAlgorithm() != p.Algorithm || !c.key.verify([]byte(input), sig) {
+		return nil, errInconsistent
+	}
+	b.observeEvent(ctx, Event{Action: EventSign, Op: OpSign, Purpose: p.Name, Kid: c.kid})
+	return &tokenv1alpha1.SignResponse{Token: input + "." + b64.EncodeToString(sig), Kid: c.kid, Algorithm: p.Algorithm, KeyId: c.keyID}, nil
 }
 
 // entry is one key that a key set publishes or a verification may use.
@@ -252,6 +314,8 @@ type entry struct {
 	purpose string
 	keyID   string
 	types   []string
+	state   tokenv1alpha1.KeyState // a ring key's; 0 for any other
+	node    string
 }
 
 // purposesOf is the named purposes, or every purpose of the declaration.
@@ -319,6 +383,22 @@ func (b *Block) KeySet(ctx context.Context, req *connect.Request[tokenv1alpha1.K
 	}
 	var set []entry
 	for _, p := range ps {
+		if p.Ring != nil {
+			keys, signingKid, err := b.ringEntries(ctx, OpKeySet, p, true, published)
+			if err != nil {
+				return nil, b.ringFailure(ctx, OpKeySet, p.Name, err)
+			}
+			for _, e := range keys {
+				if slices.ContainsFunc(set, func(o entry) bool { return o.kid == e.kid }) {
+					continue
+				}
+				if e.kid == signingKid {
+					e.x5c = m.GetChains()[p.Name].GetX5C()
+				}
+				set = append(set, e)
+			}
+			continue
+		}
 		c, err := b.refresh(ctx, p)
 		if err != nil {
 			return nil, b.sealFailure(ctx, OpKeySet, p.Name, err)
@@ -327,6 +407,9 @@ func (b *Block) KeySet(ctx context.Context, req *connect.Request[tokenv1alpha1.K
 			continue
 		}
 		set = append(set, entry{kid: c.kid, key: c.key, x5c: m.GetChains()[p.Name].GetX5C(), purpose: p.Name, keyID: c.keyID})
+	}
+	if err := b.keyChains(ctx, set, m.GetKeyChains()); err != nil {
+		return nil, err
 	}
 	if set, err = b.hostKeys(ctx, OpKeySet, set, m.GetKeys()); err != nil {
 		return nil, err
@@ -337,7 +420,7 @@ func (b *Block) KeySet(ctx context.Context, req *connect.Request[tokenv1alpha1.K
 	}{Keys: []jwk{}}
 	for _, e := range set {
 		jwks.Keys = append(jwks.Keys, e.key.jwk(e.kid, e.x5c))
-		out.Keys = append(out.Keys, &tokenv1alpha1.PublishedKey{Kid: e.kid, Algorithm: e.key.algorithm, SpkiDer: e.key.spki, Purpose: e.purpose, KeyId: e.keyID})
+		out.Keys = append(out.Keys, &tokenv1alpha1.PublishedKey{Kid: e.kid, Algorithm: e.key.algorithm, SpkiDer: e.key.spki, Purpose: e.purpose, KeyId: e.keyID, State: e.state, Node: e.node})
 	}
 	out.JwksJson = marshal(jwks)
 	return connect.NewResponse(out), nil
@@ -364,9 +447,21 @@ func (b *Block) Verify(ctx context.Context, req *connect.Request[tokenv1alpha1.V
 	if err := b.decide(ctx, Request{Op: OpVerify}); err != nil {
 		return nil, err
 	}
-	build := func(read func(context.Context, Purpose) (*currentKey, error)) ([]entry, error) {
+	build := func(fresh bool) ([]entry, error) {
+		read := b.cached
+		if fresh {
+			read = b.refresh
+		}
 		var set []entry
 		for _, p := range ps {
+			if p.Ring != nil {
+				keys, _, err := b.ringEntries(ctx, OpVerify, p, fresh, verifies)
+				if err != nil {
+					return nil, b.ringFailure(ctx, OpVerify, p.Name, err)
+				}
+				set = append(set, keys...)
+				continue
+			}
 			c, err := read(ctx, p)
 			if err != nil {
 				return nil, b.sealFailure(ctx, OpVerify, p.Name, err)
@@ -375,7 +470,7 @@ func (b *Block) Verify(ctx context.Context, req *connect.Request[tokenv1alpha1.V
 		}
 		return b.hostKeys(ctx, OpVerify, set, m.GetKeys())
 	}
-	set, err := build(b.cached)
+	set, err := build(false)
 	if err != nil {
 		return nil, err
 	}
@@ -406,7 +501,7 @@ func (b *Block) Verify(ctx context.Context, req *connect.Request[tokenv1alpha1.V
 	found := find(set)
 	if len(found) == 0 && len(ps) > 0 {
 		// A key may have changed behind the block since it was read: read the purposes' keys again, once.
-		if set, err = build(b.refresh); err != nil {
+		if set, err = build(true); err != nil {
 			return nil, err
 		}
 		found = find(set)

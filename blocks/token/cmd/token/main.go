@@ -1,9 +1,10 @@
 // Command token is the thin main of the token block: it serves TokenService on a UNIX socket, over a seal block, and does nothing else.
 // A host in another language reaches the block through it (record 0008: one implementation, in Go; sluis's Rust signer is such a host).
 //
-//	token serve --socket PATH --purposes FILE --seal-socket PATH
+//	token serve --socket PATH --purposes FILE --seal-socket PATH [--store-socket PATH] [--node NAME] [--ring-prefix PREFIX]
 //	            [--allow-uid UID]... [--allow-any-uid] [--socket-gid GID] [--socket-mode MODE]
-//	token serve --socket PATH --purposes FILE --key-socket PATH --store-socket PATH --installation NAME [the guard flags]
+//	token serve --socket PATH --purposes FILE --key-socket PATH --store-socket PATH --installation NAME [--node NAME] [--ring-prefix PREFIX]
+//	            [the guard flags]
 //	token key-purposes --purposes FILE
 //	token check --purposes FILE
 //	token version  (also --version)
@@ -14,6 +15,10 @@
 // With --seal-socket the block calls a seal block that another process serves (sluis key@). With --key-socket and --store-socket it
 // hosts a seal block in this process over those two drivers, with the signing purposes of the declaration and no other, and is its only
 // caller; key-purposes prints the declaration that key driver must be started with (the JSON file of its --purposes).
+//
+// A purpose with a ring (record 0024) keeps its ring in the store driver on --store-socket, under --ring-prefix (token-ring/ by default),
+// which a declaration with a ring requires also with --seal-socket; --node names the node of this instance (the holder of the keys of its
+// slots).
 //
 // The socket is guarded (github.com/truvity/atoom/socket, docs/socket-guard.md): mode 0600 and the uid of the process by default;
 // --allow-uid names the callers. The guard is the access rule of this main: every caller it admits may sign by every purpose, so a host
@@ -29,6 +34,7 @@ import (
 	"os"
 	"os/signal"
 	"runtime/debug"
+	"slices"
 	"syscall"
 
 	"github.com/truvity/atoom/blocks/seal"
@@ -94,12 +100,14 @@ func serve(ctx context.Context, args []string, stderr io.Writer) int {
 	purposes := fs.String("purposes", "", "the JSON file of the block's purposes (required)")
 	sealSocket := fs.String("seal-socket", "", "the UNIX socket of the seal block that holds the keys")
 	keySocket := fs.String("key-socket", "", "host a seal block in this process over the key driver on this socket")
-	storeSocket := fs.String("store-socket", "", "and the store driver on this socket")
+	storeSocket := fs.String("store-socket", "", "the store driver on this socket: the hosted seal block's, and the rings'")
 	installation := fs.String("installation", "", "the installation of the hosted seal block")
+	node := fs.String("node", "", "the node of this instance, for the rings")
+	ringPrefix := fs.String("ring-prefix", "", "the prefix of the rings' items in the store (token-ring/ when empty)")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
-	hosted := *keySocket != "" || *storeSocket != "" || *installation != ""
+	hosted := *keySocket != "" || *installation != "" || (*storeSocket != "" && *sealSocket == "")
 	switch {
 	case *socket == "" || *purposes == "" || fs.NArg() != 0:
 		_, _ = fmt.Fprintln(stderr, "token serve: --socket and --purposes are required")
@@ -116,6 +124,10 @@ func serve(ctx context.Context, args []string, stderr io.Writer) int {
 		_, _ = fmt.Fprintln(stderr, "token serve:", err)
 		return 2
 	}
+	if *storeSocket == "" && slices.ContainsFunc(decls, func(p token.Purpose) bool { return p.Ring != nil }) {
+		_, _ = fmt.Fprintln(stderr, "token serve: a purpose has a ring: --store-socket names the store that keeps it")
+		return 2
+	}
 	cfg, err := guard.Config(*socket)
 	if err != nil {
 		_, _ = fmt.Fprintln(stderr, "token serve:", err)
@@ -130,7 +142,11 @@ func serve(ctx context.Context, args []string, stderr io.Writer) int {
 		return 1
 	}
 	defer closeSeal()
-	b, err := token.New(ctx, token.Options{Seal: sealClient, Purposes: decls, Rules: token.AllowAll()})
+	opts := token.Options{Seal: sealClient, Purposes: decls, Rules: token.AllowAll(), Node: *node, RingPrefix: *ringPrefix}
+	if *storeSocket != "" {
+		opts.Items = storev1alpha1connect.NewItemServiceClient(atoomsocket.Client(*storeSocket), "http://store", call.ClientOptions()...)
+	}
+	b, err := token.New(ctx, opts)
 	if err != nil {
 		_, _ = fmt.Fprintln(stderr, "token:", err)
 		return 1

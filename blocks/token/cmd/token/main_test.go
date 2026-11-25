@@ -82,7 +82,7 @@ func TestKeyPurposesIsWhatTheKeyDriverTakes(t *testing.T) {
 	if err != nil {
 		t.Fatalf("%v\n%s", err, out.String())
 	}
-	for _, name := range []string{seal.DefaultWrappingPurpose, conformance.PurposeES384, conformance.PurposeES256, conformance.PurposeRS256} {
+	for _, name := range []string{seal.DefaultWrappingPurpose, conformance.PurposeES384, conformance.PurposeES256, conformance.PurposeRS256, conformance.SlotRingA, conformance.SlotRingB} {
 		if _, ok := set.Lookup(name); !ok {
 			t.Errorf("no %s in %s", name, out.String())
 		}
@@ -126,7 +126,7 @@ func keysAndStore(t *testing.T, dir string) (string, string) {
 	t.Cleanup(cancel)
 	k, s := filepath.Join(dir, "k"), filepath.Join(dir, "s")
 	kp, kh := keyv1alpha1connect.NewKeyStoreServiceHandler(keys)
-	sp, sh := storev1alpha1connect.NewItemServiceHandler(tokentest.NoStore{})
+	sp, sh := storev1alpha1connect.NewItemServiceHandler(tokentest.NewItems())
 	go func() { _ = atoomsocket.Serve(ctx, atoomsocket.Config{Socket: k}, kp, kh) }()
 	go func() { _ = atoomsocket.Serve(ctx, atoomsocket.Config{Socket: s}, sp, sh) }()
 	for _, p := range []string{k, s} {
@@ -179,7 +179,12 @@ func TestServeOverASealBlockOnASocket(t *testing.T) {
 		}
 		time.Sleep(50 * time.Millisecond)
 	}
-	client := serveIn(t, "--socket", filepath.Join(dir, "t"), "--purposes", declarationFile(t, dir), "--seal-socket", sealSock)
+	// Without the store, a declaration with a ring is a usage error.
+	var errb bytes.Buffer
+	if code := serve(ctx, []string{"--socket", filepath.Join(dir, "t"), "--purposes", declarationFile(t, dir), "--seal-socket", sealSock}, &errb); code != 2 {
+		t.Fatalf("a ring without --store-socket: exit %d, want 2: %s", code, errb.String())
+	}
+	client := serveIn(t, "--socket", filepath.Join(dir, "t"), "--purposes", declarationFile(t, dir), "--seal-socket", sealSock, "--store-socket", s, "--node", "n1")
 	var out bytes.Buffer
 	if err := conformance.RunCases(context.Background(), client, conformance.CasesWithoutRules(), &out); err != nil {
 		t.Fatalf("%v\n%s", err, out.String())
@@ -189,7 +194,7 @@ func TestServeOverASealBlockOnASocket(t *testing.T) {
 func TestServeFailsOverASealBlockThatDoesNotAnswer(t *testing.T) {
 	dir := shortDir(t)
 	var errb bytes.Buffer
-	code := serve(context.Background(), []string{"--socket", filepath.Join(dir, "t"), "--purposes", declarationFile(t, dir), "--seal-socket", filepath.Join(dir, "none")}, &errb)
+	code := serve(context.Background(), []string{"--socket", filepath.Join(dir, "t"), "--purposes", declarationFile(t, dir), "--seal-socket", filepath.Join(dir, "none"), "--store-socket", filepath.Join(dir, "none-store")}, &errb)
 	if code != 1 {
 		t.Fatalf("exit %d, want 1: %s", code, errb.String())
 	}

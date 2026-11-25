@@ -7,7 +7,9 @@
 //
 // With --key-socket and --store-socket it hosts a seal block over the key driver and the store driver that listen on those sockets, and
 // the token block over it, both in this process with the kit's purposes and rules, and runs the kit against the token block through an
-// in-memory transport (socket.InProcess). The key driver must be started with the declaration that --print-declaration writes. With
+// in-memory transport (socket.InProcess); the rings of the kit are kept in the same store driver, under a prefix of this run's own, so a
+// store that an earlier run used holds no ring of this one. The key driver must be started with the declaration that --print-declaration
+// writes. With
 // --socket it runs the kit against a token block that another host serves (the thin main, started with the declaration file that
 // --print-purposes writes); --without-rules skips the one case that needs the kit's rules, for a host whose rules are its own (the thin
 // main's access rule is its socket guard).
@@ -17,6 +19,8 @@ package main
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"flag"
 	"fmt"
 	"io"
@@ -106,10 +110,15 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		defer s.Close()
 		shc, sstop := socket.InProcess(s.Handler())
 		defer sstop()
+		run := make([]byte, 6)
+		_, _ = rand.Read(run)
 		b, err := token.New(ctx, token.Options{
-			Seal:     sealv1alpha1connect.NewSealServiceClient(shc, "http://seal", call.ClientOptions()...),
-			Purposes: conformance.Purposes(),
-			Rules:    conformance.Rules(),
+			Seal:       sealv1alpha1connect.NewSealServiceClient(shc, "http://seal", call.ClientOptions()...),
+			Purposes:   conformance.Purposes(),
+			Rules:      conformance.Rules(),
+			Items:      storev1alpha1connect.NewItemServiceClient(socket.Client(*storeSocket), "http://store", call.ClientOptions()...),
+			RingPrefix: "token-conformance/" + hex.EncodeToString(run) + "/",
+			Node:       "kit",
 		})
 		if err != nil {
 			_, _ = fmt.Fprintln(stderr, "token-conformance:", err)

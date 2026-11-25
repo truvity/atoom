@@ -12,6 +12,10 @@ service TokenService {
   rpc Sign(SignRequest) returns (SignResponse);                          // a compact JWS of the host's claims, by the key of a purpose
   rpc KeySet(KeySetRequest) returns (KeySetResponse);                    // the JWK Set: the current keys of purposes and the host's keys
   rpc Verify(VerifyRequest) returns (VerifyResponse);                    // the signature of a compact JWS, against the same keys
+  rpc Ring(RingRequest) returns (RingResponse);                          // the rings of ring purposes, as they are: nothing is written
+  rpc Reconcile(ReconcileRequest) returns (ReconcileResponse);           // applies the ring's rules now, for a host's loop
+  rpc Revoke(RevokeRequest) returns (RevokeResponse);                    // a kid of a ring purpose is revoked, at once and for good
+  rpc ConfirmPublished(ConfirmPublishedRequest) returns (ConfirmPublishedResponse); // the host: every published copy has these kids
 }
 
 // Kid is how the kid of a purpose's key is made.
@@ -35,6 +39,22 @@ message PurposeInfo {
   string algorithm = 2;       // its algorithm, from the seal block: "ES384", "ES256" or "RS256"
   repeated string types = 3;  // the values of the JWS typ header that the purpose signs
   Kid kid = 4;                // how its kid is made
+  RingInfo ring = 5;          // its ring; absent for a purpose without one
+}
+
+// RingInfo is the ring of a purpose, as the host declared it (record 0024).
+message RingInfo {
+  repeated string slots = 1;         // the seal block's signing purposes that hold the purpose's keys on this node, in order
+  string current = 2;                // the slot whose key is to sign
+  int64 lead_seconds = 3;            // a new key is in the key set this long before it signs
+  int64 retain_seconds = 4;          // a key that stopped signing stays in the key set this long
+  int64 cache_max_age_seconds = 5;   // the longest cache of the published key set, which the lead is at least
+  int64 token_lifetime_seconds = 6;  // the longest life of a token of the purpose with the skew, which the retention is at least
+  int64 bootstrap_seconds = 7;       // a node's first key signs at once while every key joined less than this ago; 0: never
+  int64 overlap_seconds = 8;         // a node's earlier active key still signs this long after a newer one became active
+  bool at_once = 9;                  // a new key signs at once when this node holds no other active key (a restart rotation)
+  bool confirm = 10;                 // a key becomes active only after the host confirmed it published
+  string node = 11;                  // the node of this instance, as the host named it
 }
 
 // SignRequest asks for a compact JWS of the claims.
@@ -71,7 +91,8 @@ message CertificateChain {
 message KeySetRequest {
   repeated string purposes = 1;                   // the purposes whose current key is published, in this order; none: every purpose of the declaration
   repeated HostKey keys = 2;                      // the host's keys, published after the current keys, in this order
-  map<string, CertificateChain> chains = 3;       // the x5c of a purpose's current key, by purpose; a purpose not named here has none
+  map<string, CertificateChain> chains = 3;       // the x5c of a purpose's current key (for a ring, the key this node signs with), by purpose
+  map<string, CertificateChain> key_chains = 4;   // the x5c of a ring key, by kid; a kid that is not in the set is refused
 }
 
 // KeySetResponse carries the key set.
@@ -87,6 +108,98 @@ message PublishedKey {
   bytes spki_der = 3;    // the public key, SubjectPublicKeyInfo in DER
   string purpose = 4;    // the purpose whose current key it is; empty for a host's key
   string key_id = 5;     // the key port's key_id of a current key; empty for a host's key
+  KeyState state = 6;    // the state of a ring key; KEY_STATE_UNSPECIFIED for a key of no ring
+  string node = 7;       // the node of a ring key
+}
+
+// KeyState is the state of a key of a ring (record 0024). A key moves one way, through pre-published, active, retiring and dropped;
+// revoked is reachable from any state and is terminal.
+enum KeyState {
+  KEY_STATE_UNSPECIFIED = 0;  // not a key of a ring
+  KEY_STATE_PRE_PUBLISHED = 1; // in the key set, does not sign yet
+  KEY_STATE_ACTIVE = 2;        // in the key set, signs on its own node
+  KEY_STATE_RETIRING = 3;      // in the key set until every token it signed has expired, signs no more
+  KEY_STATE_DROPPED = 4;       // a tombstone: its kid and times, no key, so that it never joins again
+  KEY_STATE_REVOKED = 5;       // revoked by the host: in no key set, never signs, never joins again
+}
+
+// RingKey is one key of a ring.
+message RingKey {
+  string kid = 1;                 // its kid, by the purpose's kid rule
+  string key_id = 2;              // the key port's key_id
+  string algorithm = 3;           // its algorithm
+  bytes spki_der = 4;             // the public key, SubjectPublicKeyInfo in DER; none for a dropped or revoked key
+  string node = 5;                // the node that holds it
+  string slot = 6;                // the slot it was found in
+  KeyState state = 7;             // its state
+  int64 added_unix_ms = 8;        // when it joined the ring, milliseconds since the epoch
+  int64 state_since_unix_ms = 9;  // when it entered its state
+  int64 confirmed_unix_ms = 10;   // when the host confirmed it published; 0: not confirmed
+}
+
+// RingState is a ring as the block keeps it in its item of the store port. Its readers call the block; the format is the block's.
+message RingState {
+  repeated RingKey keys = 1;  // in the order they joined
+}
+
+// PurposeRing is the ring of one purpose.
+message PurposeRing {
+  string purpose = 1;          // the purpose
+  repeated RingKey keys = 2;   // its keys, in the order they joined
+  string signing_kid = 3;      // the kid this instance signs with now; empty when it has none
+}
+
+// RingRequest asks for rings.
+message RingRequest {
+  repeated string purposes = 1;  // ring purposes; none: every ring purpose of the declaration
+}
+
+// RingResponse carries the rings.
+message RingResponse {
+  repeated PurposeRing rings = 1;  // in the order of the purposes
+}
+
+// ReconcileRequest asks the block to apply the ring's rules now.
+message ReconcileRequest {
+  repeated string purposes = 1;  // ring purposes; none: every ring purpose of the declaration
+}
+
+// RingChange is one change that a reconcile made.
+message RingChange {
+  string purpose = 1;    // the purpose
+  string kid = 2;        // the key
+  string change = 3;     // "joined", "activated", "retired", "dropped", "forgotten", "revoked" or "confirmed"
+  KeyState state = 4;    // the state the key is in after it
+  string reason = 5;     // "shortcut" when the key skipped its lead; empty otherwise
+}
+
+// ReconcileResponse carries the rings after the reconcile and what changed.
+message ReconcileResponse {
+  repeated PurposeRing rings = 1;     // in the order of the purposes
+  repeated RingChange changes = 2;    // what this call changed; none when the rings were in line
+}
+
+// RevokeRequest revokes a kid of a ring purpose.
+message RevokeRequest {
+  string purpose = 1;  // a ring purpose
+  string kid = 2;      // the kid; one the ring does not hold yet is recorded too, so that the key never joins
+}
+
+// RevokeResponse says what changed.
+message RevokeResponse {
+  bool changed = 1;  // false when the kid was revoked already
+}
+
+// ConfirmPublishedRequest is the host's statement that every published copy of the key set has these kids since a time.
+message ConfirmPublishedRequest {
+  string purpose = 1;          // a ring purpose
+  repeated string kids = 2;    // kids of the ring; a kid it does not hold, or one that is not pre-published, changes nothing
+  int64 at_unix_ms = 3;        // since when, milliseconds since the epoch; 0: now; not after now
+}
+
+// ConfirmPublishedResponse says which kids it confirmed.
+message ConfirmPublishedResponse {
+  repeated string confirmed = 1;  // the kids whose first confirmation this was
 }
 
 // VerifyRequest asks whether a token is signed by a key of the set.

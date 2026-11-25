@@ -5,7 +5,8 @@
 // The block is built from the seal block alone, and holds no key: seal hashes what the block hands it and the key port signs the digest.
 // Its host passes in the client of seal, declares the purposes (the types each signs and the rule of its kid), supplies the rules, and
 // serves Block.Handler, in its process (socket.InProcess) or on a socket (socket.Serve, or the thin main cmd/token). The claims are the
-// host's: the block checks that they are one strict JSON object and signs those bytes, and never reads a claim. The block is stateless:
-// which keys besides the current ones a key set holds (a previous key after a rotation) is the host's, until the rotation ring of step
-// B8b.
+// host's: the block checks that they are one strict JSON object and signs those bytes, and never reads a claim. A purpose without a ring
+// is stateless: its key set is its current key and the keys the host hands in. A purpose with a ring (Purpose.Ring, record 0024) keeps
+// its keys in one item of the store port (Options.Items): a key published before it signs and kept after it stops, held in slots of the
+// seal block, a key per node, revocations and the host's confirmations of publication.
 package token
