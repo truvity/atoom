@@ -250,7 +250,7 @@ From sluis `df108e5`.
 
 What stayed in sluis: the wrapper, the `Identify` that turns the peer into `<actor>@<boundary>`, and the audit actors and emitters that call the port.
 
-Added after the move, not from sluis: the case `a_redelivered_or_repeated_message_is_one_record` of the kit (D50 A), and the Go drivers below.
+Added after the move, not from sluis: the case `a_redelivered_or_repeated_message_is_one_record` of the kit (D50 A; `a_redelivered_or_repeated_message_is_one_message` since record 0025, when `AuditMessage` became `Message`), and the Go drivers below.
 
 ### transport/nats
 

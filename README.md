@@ -17,7 +17,7 @@ atoom owns the contracts and the implementations of the parts. It does not own a
 
 - **sluis** (identity) keeps its actors, its registry, its grants and its release train. Its key and store actors are thin hosts around the `seal` and `state` blocks.
 - **session** (browser sessions) keeps its session contract, and builds its core as a block inside session first.
-- **audit** keeps its model, its records, its classes and its operations. atoom's blob, transport and index ports serve it, and are being made generic.
+- **audit** keeps its model, its records, its classes and its operations. atoom's blob, transport and index ports serve it, and name none of it: the host declares what it needs ([record 0025](docs/decisions/0025-generic-blob-transport-and-index.md)).
 - **ritueel** keeps its ceremonies and its OpenPGP keyring.
 
 What atoom proves, and what each consumer proves, is [record 0014](docs/decisions/0014-what-atoom-proves.md).
@@ -42,7 +42,7 @@ The Cedar loader is [policy](policy/README.md): the signed policy bundle, its lo
 
 The shared libraries are [common](common/README.md) (the types every port speaks), [socket](socket/README.md) (the socket host and its guard) and, for the card driver, [key/slotplan](key/slotplan/README.md) and [key/pinrelease](key/pinrelease/README.md).
 
-Planned: the blocks `state`, `token` and `export`, Lambda extension zips, more drivers (PostgreSQL and Valkey stores, an SSM source, rqlite and PostgreSQL indexes), and generic blob, transport and index contracts. The order is the [plan](docs/plan.md).
+Planned: the blocks `state`, `token` and `export`, Lambda extension zips, more drivers (PostgreSQL and Valkey stores, an SSM source, rqlite and PostgreSQL indexes). The order is the [plan](docs/plan.md).
 
 ## Documents
 

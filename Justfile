@@ -8,7 +8,7 @@ default:
 
 # Everything CI runs, in one go: format and lint, build and test every library, the generated code, the dependency rules, the pinned
 # versions, licences, advisories, the breaking-change check, the conformance kits and the release rehearsal.
-check: lint test go-card gen-check check-isolation check-versions check-licenses check-advisories proto-breaking conformance release-rehearsal release-check-table release-candidate-test
+check: lint test go-card gen-check check-isolation check-versions check-vocabulary check-licenses check-advisories proto-breaking conformance release-rehearsal release-check-table release-candidate-test
 
 # Build every library, Go and Rust.
 build: go-build rust-build
@@ -272,6 +272,11 @@ rqlite-fetch:
 # (the rehearsal proves it).
 check-isolation: rust-toolchain
     go run ./tools/isolation
+
+# The blob, transport and index contracts name no product (step B12, record 0025): no message, field or call of their proto files carries
+# audit's vocabulary, and no source names a retired type (tools/scripts/check-vocabulary.sh).
+check-vocabulary:
+    tools/scripts/check-vocabulary.sh
 
 # Every file that spells a pinned runtime agrees with versions.yaml.
 check-versions:
