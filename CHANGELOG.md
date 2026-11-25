@@ -5,7 +5,19 @@ libraries changed. `just release-prepare X.Y.Z` writes the section.
 
 <!-- release-prepare: new sections go below this line -->
 
-## Unreleased
+## 0.8.0 - 2026-11-25
+
+One version for the whole repository: every library is tagged 0.8.0, changed or not.
+
+Libraries that changed since v0.7.0:
+- `blocks/token`
+- `source`
+- `source/appconfig`
+- `source/conformance`
+- `transport`
+- `transport/conformance`
+- `transport/nats`
+- `transport/sqs`
 
 ### Added
 
