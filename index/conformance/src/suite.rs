@@ -410,7 +410,7 @@ impl Suite {
             partitions: vec![],
             ..self.query(&["acme"])
         };
-        let usage = SearchRequest {
+        let undeclared = SearchRequest {
             partitions: vec![Partition {
                 scope: self.scope.clone(),
                 kind: NO_INDEX.into(),
@@ -420,7 +420,7 @@ impl Suite {
         };
         for (req, field, what) in [
             (no_partitions, "partitions", "no partitions"),
-            (usage, "partitions", "a log kind that has no index"),
+            (undeclared, "partitions", "a log kind that has no index"),
             (self.query(&[]), "tenants", "no tenants"),
             (self.query(&["acme", "*"]), "tenants", "* beside a tenant"),
         ] {

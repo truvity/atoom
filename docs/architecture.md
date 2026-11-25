@@ -109,7 +109,7 @@ Every port has one page, `<port>/docs/<port>-port.md`, in the same shape: the ca
 `common` is not a port: it holds the types every port speaks ([refusal](../common/docs/refusal.md)).
 
 - **Capabilities.** A port with optional calls or properties has a `Capabilities` call: `key` (the store, its algorithms, the purposes its host declared, attestation), `store` (the engine, the change log, the durability of [record 0012](decisions/0012-store-durability.md)) and `source` (how a newer version is reported). A driver answers `unimplemented` for a call it does not offer, and the kit skips the cases that need it. The other ports have none today, and their pages say so.
-- **Generic ports.** The blob, transport and index contracts were written for an audit log and still carry audit's vocabulary in a few fields. Their pages describe them generically, and the rename is planned (step B12 of the [plan](plan.md)). The audit model lives in [truvity/audit](https://github.com/truvity/audit).
+- **Generic ports.** The blob, transport and index contracts were written for an audit log; since step B12 ([record 0025](decisions/0025-generic-blob-transport-and-index.md)) they name no product: the host declares its blob pointers, a transport message is an id and an opaque payload, and the host declares an index's kinds and columns. `just check-vocabulary` keeps audit's names out of their contracts. The audit model lives in [truvity/audit](https://github.com/truvity/audit).
 - **Refusals.** A refusal is a Connect error with the `Refusal` detail of `common`: a reason from a closed list and the path of the field at fault, never a value.
 
 ## Drivers

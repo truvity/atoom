@@ -89,7 +89,7 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
       - uses: truvity/ci-actions/setup-devbox@82e404675ef3f826755e2939d1072cddcd07ed26 # v3.9.0
-      - run: devbox run -- just gen-check proto-breaking check-isolation check-versions release-check-table
+      - run: devbox run -- just gen-check proto-breaking check-isolation check-versions check-vocabulary release-check-table
 
   # Licences of the Rust dependencies, and known advisories in the Go and Rust dependencies.
   supply:
