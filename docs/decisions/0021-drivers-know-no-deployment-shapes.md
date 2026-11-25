@@ -40,6 +40,7 @@ The owner asked for every mistake of this kind to be fixed, in one break:
 
 - **`store/rqlite`:** the refusal of another schema version named the first host's recipes; it now says the driver migrates no data and the host recreates the store's data.
 - **The correlation header (step B14, [0009](0009-connectrpc-in-process.md)):** `Sluis-Correlation-Id` named a product on a shared contract. The header is `Atoom-Correlation-Id`; for the 0.7.x releases a server reads it first and the old name after it (`HeaderCorrelationLegacy`, `HEADER_CORRELATION_LEGACY`, deprecated), and a client sends the new name only. The old name goes in the release after.
+- **The PIN release domains (`key/pinrelease`):** the two texts began with the fixed strings `sluis-pin-release-v1` and `sluis-pin-release-answer-v1`. They are the host's now, as the seal block's `Domain` is: `pinrelease.Domains` (methods `RequestText`, `ParseRequest`, `AnswerText`, `ParseAnswer`, `Seal`, `Open` in place of the package functions) and `yubikeypiv.Options.PinReleaseDomains`. The zero value is atoom's neutral pair, `atoom-pin-release-v1` and `atoom-pin-release-answer-v1`; a pair whose two strings are equal is refused (`ErrDomains`). **sluis must pass its two strings**, so that its existing cards keep releasing to each other with the same bytes.
 
 ## Roads not taken
 
