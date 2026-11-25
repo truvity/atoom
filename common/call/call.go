@@ -16,8 +16,15 @@ import (
 	"connectrpc.com/connect"
 )
 
-// HeaderCorrelation is the header that carries the correlation id: one id for a request and every call it causes.
-const HeaderCorrelation = "Sluis-Correlation-Id"
+// HeaderCorrelation is the header that carries the correlation id: one id for a request and every call it causes. A client sends this
+// name only.
+const HeaderCorrelation = "Atoom-Correlation-Id"
+
+// HeaderCorrelationLegacy is the name the header had before 0.7.0. A server still reads it, after HeaderCorrelation, for one release
+// (step B14, record 0009); a client never sends it. It is removed in the release after 0.7.0.
+//
+// Deprecated: send HeaderCorrelation.
+const HeaderCorrelationLegacy = "Sluis-Correlation-Id"
 
 // idMax is the longest correlation id.
 const idMax = 64
@@ -61,11 +68,23 @@ func CorrelationID(ctx context.Context) string {
 // function, a test) wraps it itself. The deadline needs nothing here: the Connect handler reads Connect-Timeout-Ms itself.
 func Inherit(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if id := r.Header.Get(HeaderCorrelation); ValidCorrelationID(id) {
+		if id := correlationOf(r.Header); id != "" {
 			r = r.WithContext(WithCorrelationID(r.Context(), id))
 		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+// correlationOf returns the valid correlation id of the headers: the new name first, then, for one release, the legacy name; "" when
+// neither holds a valid id.
+func correlationOf(h http.Header) string {
+	if id := h.Get(HeaderCorrelation); ValidCorrelationID(id) {
+		return id
+	}
+	if id := h.Get(HeaderCorrelationLegacy); ValidCorrelationID(id) {
+		return id
+	}
+	return ""
 }
 
 // ClientOptions returns the options of a generated New<Service>Client that put the correlation id of the context on every call, unary

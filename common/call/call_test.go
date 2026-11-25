@@ -244,3 +244,31 @@ func TestTheDefaultDeadlineOnAHandlerCoversACallThatHasNone(t *testing.T) {
 		t.Errorf("the handler has %d ms left of the default 2000", n)
 	}
 }
+
+// Step B14: for one release a server also reads the name the header had before 0.7.0, after the new one; a client sends the new
+// name only.
+func TestTheServerReadsTheLegacyHeaderForOneReleaseAndTheNewNameFirst(t *testing.T) {
+	srv := serve(t, "")
+	c := connect.NewClient[commonv1alpha1.Refusal, commonv1alpha1.Refusal](srv.Client(), srv.URL+see)
+	for name, tc := range map[string]struct{ newID, oldID, want string }{
+		"legacy only":       {"", "old-name", "old-name"},
+		"both":              {"new-name", "old-name", "new-name"},
+		"an invalid new id": {"not an id", "old-name", "old-name"},
+	} {
+		req := connect.NewRequest(&commonv1alpha1.Refusal{})
+		if tc.newID != "" {
+			req.Header().Set(call.HeaderCorrelation, tc.newID)
+		}
+		req.Header().Set(call.HeaderCorrelationLegacy, tc.oldID)
+		res, err := c.CallUnary(context.Background(), req)
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		if got := res.Msg.GetReason(); got != tc.want {
+			t.Errorf("%s: read %q, want %q", name, got, tc.want)
+		}
+	}
+	if call.HeaderCorrelation != "Atoom-Correlation-Id" {
+		t.Errorf("a client sends %q", call.HeaderCorrelation)
+	}
+}
