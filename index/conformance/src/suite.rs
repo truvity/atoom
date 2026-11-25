@@ -1,13 +1,15 @@
-//! The index-port suite: the cases every driver behind `atoom.index.v1alpha1` must pass. The suite speaks the contract and nothing else,
-//! over two clients the caller dials. It writes under a project of its own and cannot remove what it wrote: the contract has no delete.
+//! The index-port suite: the cases every driver behind `atoom.index.v1alpha2` must pass, started under the kit's declaration
+//! ([`crate::DECLARATION`]). The suite speaks the contract and nothing else, over two clients the caller dials. It writes under a scope
+//! of its own and cannot remove what it wrote: the contract has no delete.
 
 use std::time::Duration;
 
 use anyhow::{Context, bail, ensure};
 use atoom_common::refusal;
-use atoom_index::atoom::index::v1alpha1::{
+use atoom_index::atoom::index::v1alpha2::__buffa::oneof::value::Kind;
+use atoom_index::atoom::index::v1alpha2::{
     ApplyRequest, ApplyResponse, Cursor, GetCursorRequest, IndexReadServiceClient,
-    IndexServiceClient, LogRef, Partition, Row, SearchRequest, SearchResponse,
+    IndexServiceClient, LogRef, Match, Partition, Row, SearchRequest, SearchResponse, Value,
 };
 use atoom_socket::Client;
 use connectrpc::ConnectError;
@@ -21,6 +23,40 @@ const ANSWERS: Duration = Duration::from_secs(30);
 const T0: i64 = 1_700_000_000_000;
 /// The size of the cursor after the fixture is applied.
 const SEEDED: i64 = 5;
+/// The kit's main log kind, one it declares.
+const KIND: &str = "kit-events";
+/// A log kind the kit does not declare, which has no index.
+const NO_INDEX: &str = "kit-undeclared";
+
+fn text(t: &str) -> Value {
+    Value {
+        kind: Some(Kind::Text(t.into())),
+        ..Value::default()
+    }
+}
+
+fn int(n: i64) -> Value {
+    Value {
+        kind: Some(Kind::Int(n)),
+        ..Value::default()
+    }
+}
+
+/// `r` with the column `name` set to `v`.
+fn with(mut r: Row, name: &str, v: Value) -> Row {
+    r.columns.insert(name.into(), v);
+    r
+}
+
+/// `q` with an exact match of the column `name` to `v`.
+fn matching(mut q: SearchRequest, name: &str, v: Value) -> SearchRequest {
+    q.matches.push(Match {
+        column: name.into(),
+        value: ::buffa::MessageField::some(v),
+        ..Match::default()
+    });
+    q
+}
 
 /// Runs every case against the driver whose write side is behind `write` and whose read side is behind `read` (the same socket for a
 /// driver that serves both on one), and returns their results. The caller decides what a failure means ([`crate::report`] fails on any
@@ -42,6 +78,7 @@ pub async fn index_suite(write: Client, read: Client) -> Vec<Case> {
         run_case("search_newest_first_in_pages", s.pages()).await,
         run_case("search_filters", s.filters()).await,
         run_case("search_by_words", s.words()).await,
+        run_case("the_declared_columns_are_held", s.declared()).await,
         run_case("a_row_comes_back_as_written", s.as_written()).await,
     ]
 }
@@ -49,8 +86,8 @@ pub async fn index_suite(write: Client, read: Client) -> Vec<Case> {
 struct Suite {
     write: Client,
     read: Client,
-    /// The project of this run: `conformance-<nanos><pid>`.
-    project: String,
+    /// The scope of this run: `conformance-<nanos><pid>`.
+    scope: String,
 }
 
 impl Suite {
@@ -61,13 +98,13 @@ impl Suite {
         Self {
             write,
             read,
-            project: format!("conformance-{:x}{:x}", nanos, std::process::id()),
+            scope: format!("conformance-{:x}{:x}", nanos, std::process::id()),
         }
     }
 
     fn log(&self, kind: &str, log: &str) -> LogRef {
         LogRef {
-            project: self.project.clone(),
+            scope: self.scope.clone(),
             kind: kind.into(),
             log: log.into(),
             ..LogRef::default()
@@ -75,7 +112,7 @@ impl Suite {
     }
 
     fn main_log(&self) -> LogRef {
-        self.log("audit", "main")
+        self.log(KIND, "main")
     }
 
     /// The fixture row `n` (1 to 5): its tenant, its time (`T0` plus `n` seconds), and fields that tell it from the others.
@@ -87,26 +124,27 @@ impl Suite {
             4 => ("globex", "token.exchange", "ok", 1),
             _ => ("acme", "key.sign", "ok", 1),
         };
-        Row {
+        let mut r = Row {
             tenant: tenant.into(),
             hash: vec![n; 48],
             seq: i64::from(n),
             time_ms: T0 + i64::from(n) * 1000,
-            recorded_ms: T0 + i64::from(n) * 1000 + 5,
-            boundary: "main".into(),
-            action: action.into(),
-            class_uid: 3002,
-            activity_id: 1,
-            status_id,
-            status_code: status_code.into(),
-            actor_uid: format!("actor-{n}"),
-            actor_type_id: 3,
-            trace_id: format!("trace-{n}"),
-            record_id: format!("rec-{n}"),
-            product: "kit".into(),
-            record: format!("{{\"n\":{n}}}").into_bytes(),
+            entry_id: format!("rec-{n}"),
+            entry: format!("{{\"n\":{n}}}").into_bytes(),
             ..Row::default()
+        };
+        for (k, v) in [
+            ("action", text(action)),
+            ("status_code", text(status_code)),
+            ("status", int(status_id)),
+            ("actor", text(&format!("actor-{n}"))),
+            ("trace", text(&format!("trace-{n}"))),
+            ("product", text("kit")),
+            ("recorded_ms", int(T0 + i64::from(n) * 1000 + 5)),
+        ] {
+            r.columns.insert(k.into(), v);
         }
+        r
     }
 
     fn rows() -> Vec<Row> {
@@ -171,12 +209,12 @@ impl Suite {
             .map(|r| r.into_owned())
     }
 
-    /// A query of the run's audit partition over `tenants`.
+    /// A query of the run's main partition over `tenants`.
     fn query(&self, tenants: &[&str]) -> SearchRequest {
         SearchRequest {
             partitions: vec![Partition {
-                project: self.project.clone(),
-                kind: "audit".into(),
+                scope: self.scope.clone(),
+                kind: KIND.into(),
                 ..Partition::default()
             }],
             tenants: tenants.iter().map(|t| (*t).to_owned()).collect(),
@@ -186,7 +224,7 @@ impl Suite {
 
     async fn found(&self, req: SearchRequest) -> anyhow::Result<Vec<String>> {
         let res = self.search_with(req).await.context("Search")?;
-        Ok(res.rows.into_iter().map(|r| r.record_id).collect())
+        Ok(res.rows.into_iter().map(|r| r.entry_id).collect())
     }
 
     /// Makes sure the fixture is applied (the case that tests that is `apply`): a later case that runs on its own finds it there.
@@ -201,7 +239,7 @@ impl Suite {
     }
 
     async fn fresh_cursor(&self) -> anyhow::Result<()> {
-        let c = self.cursor_size(self.log("audit", "never")).await?;
+        let c = self.cursor_size(self.log(KIND, "never")).await?;
         ensure!(
             c.size == 0,
             "the cursor of a log never indexed has size {}",
@@ -321,10 +359,10 @@ impl Suite {
             ),
             (
                 Row {
-                    record: vec![],
+                    entry: vec![],
                     ..Self::row(1)
                 },
-                "rows.record",
+                "rows.entry",
             ),
             (
                 Row {
@@ -351,7 +389,7 @@ impl Suite {
         )
         .context("an apply with no log")?;
         expect_refusal(
-            self.apply_to(self.log("usage", "main"), 0, None, vec![Self::row(1)])
+            self.apply_to(self.log(NO_INDEX, "main"), 0, None, vec![Self::row(1)])
                 .await,
             ErrorCode::PermissionDenied,
             "rule",
@@ -374,8 +412,8 @@ impl Suite {
         };
         let usage = SearchRequest {
             partitions: vec![Partition {
-                project: self.project.clone(),
-                kind: "usage".into(),
+                scope: self.scope.clone(),
+                kind: NO_INDEX.into(),
                 ..Partition::default()
             }],
             ..self.query(&["acme"])
@@ -415,24 +453,24 @@ impl Suite {
         ensure!(nobody.is_empty(), "a tenant with no rows: {nobody:?}");
         let other = SearchRequest {
             partitions: vec![Partition {
-                project: format!("{}-other", self.project),
-                kind: "audit".into(),
+                scope: format!("{}-other", self.scope),
+                kind: KIND.into(),
                 ..Partition::default()
             }],
             ..self.query(&["*"])
         };
         let none = self.found(other).await?;
-        ensure!(none.is_empty(), "another project's partition: {none:?}");
+        ensure!(none.is_empty(), "another scope's partition: {none:?}");
         let two = SearchRequest {
             partitions: vec![
                 Partition {
-                    project: self.project.clone(),
-                    kind: "audit".into(),
+                    scope: self.scope.clone(),
+                    kind: KIND.into(),
                     ..Partition::default()
                 },
                 Partition {
-                    project: format!("{}-other", self.project),
-                    kind: "audit".into(),
+                    scope: format!("{}-other", self.scope),
+                    kind: KIND.into(),
                     ..Partition::default()
                 },
             ],
@@ -465,7 +503,7 @@ impl Suite {
                     "a page of {} rows for a page size of {size}",
                     res.rows.len()
                 );
-                got.extend(res.rows.into_iter().map(|r| r.record_id));
+                got.extend(res.rows.into_iter().map(|r| r.entry_id));
                 if res.next_page_token.is_empty() {
                     break;
                 }
@@ -489,28 +527,41 @@ impl Suite {
         let cases: Vec<(&str, SearchRequest, Vec<&str>)> = vec![
             (
                 "action",
-                q(&|r| r.action = "key.sign".into()),
+                matching(self.query(&["*"]), "action", text("key.sign")),
                 vec!["rec-5", "rec-3"],
             ),
             (
                 "status_code",
-                q(&|r| r.status_code = "denied".into()),
+                matching(self.query(&["*"]), "status_code", text("denied")),
                 vec!["rec-3"],
             ),
-            ("status_id", q(&|r| r.status_id = 2), vec!["rec-3"]),
             (
-                "actor_uid",
-                q(&|r| r.actor_uid = "actor-1".into()),
+                "status, an int column",
+                matching(self.query(&["*"]), "status", int(2)),
+                vec!["rec-3"],
+            ),
+            (
+                "actor",
+                matching(self.query(&["*"]), "actor", text("actor-1")),
                 vec!["rec-1"],
             ),
             (
-                "trace_id",
-                q(&|r| r.trace_id = "trace-4".into()),
+                "trace",
+                matching(self.query(&["*"]), "trace", text("trace-4")),
                 vec!["rec-4"],
             ),
             (
-                "record_id",
-                q(&|r| r.record_id = "rec-2".into()),
+                "two matches, all must hold",
+                matching(
+                    matching(self.query(&["*"]), "action", text("key.sign")),
+                    "status",
+                    int(1),
+                ),
+                vec!["rec-5"],
+            ),
+            (
+                "entry_id",
+                q(&|r| r.entry_id = "rec-2".into()),
                 vec!["rec-2"],
             ),
             (
@@ -523,10 +574,7 @@ impl Suite {
             ),
             (
                 "a filter and a tenant",
-                SearchRequest {
-                    action: "token.exchange".into(),
-                    ..self.query(&["globex"])
-                },
+                matching(self.query(&["globex"]), "action", text("token.exchange")),
                 vec!["rec-4"],
             ),
         ];
@@ -549,6 +597,9 @@ impl Suite {
             ("token exchange", vec!["rec-4", "rec-1"]),
             ("token key", vec![]),
             ("nothing", vec![]),
+            // The product is stored, not a word column; the actor is a filter column, not a word column.
+            ("kit", vec![]),
+            ("actor", vec![]),
         ] {
             let got = self.found(q(words)).await?;
             ensure!(
@@ -563,14 +614,14 @@ impl Suite {
         self.seed().await?;
         let res = self
             .search_with(SearchRequest {
-                record_id: "rec-3".into(),
+                entry_id: "rec-3".into(),
                 ..self.query(&["*"])
             })
             .await
             .context("Search")?;
         ensure!(
             res.rows.len() == 1,
-            "{} rows for one record id",
+            "{} rows for one entry id",
             res.rows.len()
         );
         let (got, want) = (&res.rows[0], Self::row(3));
@@ -579,30 +630,103 @@ impl Suite {
             && got.hash == want.hash
             && got.seq == want.seq
             && got.time_ms == want.time_ms
-            && got.recorded_ms == want.recorded_ms
-            && got.boundary == want.boundary
-            && got.action == want.action
-            && got.class_uid == want.class_uid
-            && got.activity_id == want.activity_id
-            && got.status_id == want.status_id
-            && got.status_code == want.status_code
-            && got.actor_uid == want.actor_uid
-            && got.actor_type_id == want.actor_type_id
-            && got.trace_id == want.trace_id
-            && got.record_id == want.record_id
-            && got.product == want.product
-            && got.record == want.record;
+            && got.entry_id == want.entry_id
+            && got.entry == want.entry
+            && got.columns == want.columns;
         ensure!(
             same,
             "the row that came back is not the row that was written"
         );
+        let from = got.log.as_option().cloned().unwrap_or_default();
         ensure!(
-            (got.project.as_str(), got.kind.as_str(), got.log.as_str())
-                == (log.project.as_str(), "audit", "main"),
+            (from.scope.as_str(), from.kind.as_str(), from.log.as_str())
+                == (log.scope.as_str(), KIND, "main"),
             "the row does not say which log it came from: {:?}/{:?}/{:?}",
-            got.project,
-            got.kind,
-            got.log
+            from.scope,
+            from.kind,
+            from.log
+        );
+        Ok(())
+    }
+
+    /// A row is held to the declaration (no undeclared column, the declared types, the required columns), a match only reaches a
+    /// declared filter column with a value of its type, and a column that is not required may be left out and comes back absent.
+    async fn declared(&self) -> anyhow::Result<()> {
+        let log = self.log(KIND, "declared");
+        let size = self.cursor_size(log.clone()).await?.size;
+        let mut missing = Self::row(1);
+        missing.columns.remove("action");
+        for (what, row) in [
+            (
+                "an undeclared column",
+                with(Self::row(1), "nope", text("x")),
+            ),
+            (
+                "a text value in an int column",
+                with(Self::row(1), "status", text("1")),
+            ),
+            (
+                "an int value in a text column",
+                with(Self::row(1), "actor", int(1)),
+            ),
+            ("a required column left out", missing),
+        ] {
+            expect_refusal(
+                self.apply_to(log.clone(), size, None, vec![row]).await,
+                ErrorCode::InvalidArgument,
+                "argument",
+                "rows.columns",
+            )
+            .with_context(|| format!("an apply with {what}"))?;
+        }
+        for (what, req, field) in [
+            (
+                "a column that is not a filter column",
+                matching(self.query(&["*"]), "product", text("kit")),
+                "matches.column",
+            ),
+            (
+                "an undeclared column",
+                matching(self.query(&["*"]), "nope", text("x")),
+                "matches.column",
+            ),
+            (
+                "a value of another type",
+                matching(self.query(&["*"]), "status", text("1")),
+                "matches.value",
+            ),
+        ] {
+            expect_refusal(
+                self.search_with(req).await,
+                ErrorCode::InvalidArgument,
+                "argument",
+                field,
+            )
+            .with_context(|| format!("a match on {what}"))?;
+        }
+        let mut sparse = Self::row(6);
+        sparse.columns.remove("trace");
+        sparse.columns.insert("action".into(), text("sparse.row"));
+        self.apply_to(log, size, None, vec![sparse])
+            .await
+            .context("an apply of a row without a column that is not required")?;
+        let res = self
+            .search_with(SearchRequest {
+                partitions: vec![Partition {
+                    scope: self.scope.clone(),
+                    kind: KIND.into(),
+                    ..Partition::default()
+                }],
+                ..matching(self.query(&["*"]), "action", text("sparse.row"))
+            })
+            .await
+            .context("Search")?;
+        ensure!(
+            res.rows.len() == 1
+                && !res.rows[0].columns.contains_key("trace")
+                && res.rows[0].columns.get("status") == Some(&int(1)),
+            "the row without trace came back as {:?}",
+            res.rows
         );
         Ok(())
     }

@@ -12,8 +12,8 @@ use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant};
 
 const BIN: &str = env!("CARGO_BIN_EXE_index-sqlite");
-const PROCEDURE: &str = "/atoom.index.v1alpha1.IndexService/GetCursor";
-const READ_PROCEDURE: &str = "/atoom.index.v1alpha1.IndexReadService/Search";
+const PROCEDURE: &str = "/atoom.index.v1alpha2.IndexService/GetCursor";
+const READ_PROCEDURE: &str = "/atoom.index.v1alpha2.IndexReadService/Search";
 
 /// A main that serves, and the directory that holds its socket and its state.
 struct Running {
@@ -38,6 +38,13 @@ fn socket(dir: &Path) -> PathBuf {
     dir.join("s.sock")
 }
 
+/// The backend suite's declaration, written into `dir`.
+fn declaration(dir: &std::path::Path) -> std::path::PathBuf {
+    let f = dir.join("declaration.json");
+    std::fs::write(&f, atoom_index_sqlite::suite::DECLARATION).unwrap();
+    f
+}
+
 fn start(extra: &[&str]) -> Running {
     let dir = tempfile::tempdir().unwrap();
     let mut cmd = Command::new(BIN);
@@ -50,7 +57,9 @@ fn start(extra: &[&str]) -> Running {
         .arg("--read-socket")
         .arg(dir.path().join("read.sock"))
         .arg("--state-dir")
-        .arg(&state);
+        .arg(&state)
+        .arg("--declaration")
+        .arg(declaration(dir.path()));
     cmd.args(extra)
         .stdin(Stdio::null())
         .stdout(Stdio::null())
@@ -210,7 +219,9 @@ fn a_bad_guard_flag_is_a_usage_error() {
             .arg("--read-socket")
             .arg(dir.path().join("read.sock"))
             .arg("--state-dir")
-            .arg(&state);
+            .arg(&state)
+            .arg("--declaration")
+            .arg(declaration(dir.path()));
         let out = cmd.args(bad).output().unwrap();
         assert_eq!(out.status.code(), Some(2), "{bad:?}: {out:?}");
     }

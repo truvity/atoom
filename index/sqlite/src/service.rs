@@ -8,7 +8,7 @@
 #![allow(refining_impl_trait)] // the generated trait returns `impl Encodable`; a concrete type is fine
 
 use atoom_common::refusal;
-use atoom_index::atoom::index::v1alpha1::{
+use atoom_index::atoom::index::v1alpha2::{
     ApplyRequest, ApplyResponse, GetCursorRequest, GetCursorResponse, IndexReadService,
     IndexReadServiceExt, IndexService, IndexServiceExt, SearchRequest, SearchResponse,
 };

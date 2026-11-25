@@ -1,22 +1,23 @@
-//! The `sqlite` driver of the index port: the search index of audit records (`atoom.index.v1alpha1`, see `index/docs/index-port.md`).
+//! The `sqlite` driver of the index port: a search index of the entries of append-only logs (`atoom.index.v1alpha2`, see
+//! `index/docs/index-port.md`), under the host's declaration of kinds and columns (record 0025).
 //!
-//! One SQLite file holds the whole index of a boundary. The driver serves two contracts, which a host puts on two sockets:
-//! `IndexService` for the one that indexes, which can read its cursor and write rows, and `IndexReadService` for the one that reads,
-//! which can only search. The read side runs on connections opened read-only, so that no query can write, whatever it holds.
+//! One SQLite file holds the whole index. The driver serves two contracts, which a host puts on two sockets: `IndexService` for the one
+//! that indexes, which can read its cursor and write rows, and `IndexReadService` for the one that reads, which can only search. The
+//! read side runs on connections opened read-only, so that no query can write, whatever it holds.
 //!
 //! What the file holds:
 //!
-//! - `cursor`: one row per log, the last verified checkpoint the indexer indexed to. It moves
-//!   forward only, by a conditional write.
-//! - `record`: one row per record, with the fixed columns of the contract and the record once. A row is
-//!   unique by project, log kind, log, tenant and the record's hash, so indexing a record twice is
-//!   a no-op.
-//! - `record_fts`: the full-text table, external content over `record`, `unicode61` with
-//!   `remove_diacritics 2` and no stemming (the same words on every driver). It holds only the
-//!   columns listed in [`SEARCHABLE`].
+//! - `meta`: the tokenizer and the canonical text of the declaration the file was made under; a file of another is refused at the
+//!   start (a rebuild, not a migration).
+//! - `cursor`: one row per log, the last verified checkpoint the indexer indexed to. It moves forward only, by a conditional write.
+//! - `record`: one row per entry, with the fixed columns (scope, kind, log, tenant, hash, sequence, time, entry id, the entry once) and
+//!   one column `c_<name>` per declared column, `NULL` where a row has no value. A row is unique by scope, kind, log, tenant and the
+//!   entry's hash, so indexing an entry twice is a no-op. Each filter column has a database index.
+//! - `record_fts`: the full-text table, external content over `record`, `unicode61` with `remove_diacritics 2` and no stemming (the
+//!   same words on every driver), over the declared word columns only; there is none when no column is reached by words.
 //!
-//! A query names its partitions (project and log kind) and its tenants. A query without either is
-//! refused: the grant of the reader is a mandatory filter of every query.
+//! A query names its partitions (scope and declared kind) and its tenants. A query without either is refused: the grant of the reader
+//! is a mandatory filter of every query.
 
 pub mod service;
 pub mod suite;
@@ -26,10 +27,12 @@ use std::os::unix::fs::{MetadataExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
-use atoom_index::atoom::index::v1alpha1::{
+use atoom_index::atoom::index::v1alpha2::__buffa::oneof::value::Kind;
+use atoom_index::atoom::index::v1alpha2::{
     ApplyRequest, ApplyResponse, Cursor, GetCursorRequest, GetCursorResponse, LogRef, Row,
-    SearchRequest, SearchResponse,
+    SearchRequest, SearchResponse, Value as Cell,
 };
+pub use atoom_index::declaration::{Column, Schema, Type};
 use rusqlite::types::Value;
 use rusqlite::{Connection, OpenFlags, TransactionBehavior, params_from_iter};
 
@@ -37,15 +40,8 @@ use rusqlite::{Connection, OpenFlags, TransactionBehavior, params_from_iter};
 pub const FILE: &str = "index.sqlite";
 /// The tokenizer of the full-text table: `unicode61` with `remove_diacritics 2`.
 pub const TOKENIZER: &str = "unicode61 remove_diacritics 2";
-/// The columns of `record` that the full-text table holds, and so the only fields a word search
-/// reaches. A field is searchable only when the catalogue of the records says so, and the catalogue of
-/// the first working version carries action names only, so the set is the non-personal columns: the action, the status code and the product. A person's pseudonym, a
-/// subject and any free text are found by an exact filter, never by a word.
-pub const SEARCHABLE: [&str; 3] = ["action", "status_code", "product"];
-/// The log kinds that have an index. The usage log has none.
-pub const KINDS: [&str; 2] = ["audit", "issuance"];
 
-const SCHEMA_VERSION: i64 = 1;
+const SCHEMA_VERSION: i64 = 2;
 const DIR_MODE: u32 = 0o750;
 const FILE_MODE: u32 = 0o640;
 const DEFAULT_PAGE: usize = 50;
@@ -56,11 +52,14 @@ const MAX_TEXT: usize = 1024;
 const MAX_RECORD: usize = 1 << 20;
 const MAX_TENANTS: usize = 100;
 const MAX_PARTITIONS: usize = 32;
+const MAX_MATCHES: usize = 16;
 const MAX_TERMS: usize = 16;
 const MAX_TERM: usize = 64;
 const MAX_READERS: usize = 8;
 /// The version byte of a page token.
 const TOKEN_V1: u8 = 1;
+/// The fixed columns a read selects, before the declared ones.
+const SELECT_FIXED: &str = "id, tenant, hash, seq, time_ms, entry_id, body, scope, kind, log";
 
 /// Why an operation was refused. [`service`] turns each into a Connect code and a reason.
 #[derive(Debug)]
@@ -102,6 +101,7 @@ pub struct Index {
     path: Arc<PathBuf>,
     write: Arc<Mutex<Connection>>,
     readers: Arc<Mutex<Vec<Connection>>>,
+    schema: Arc<Schema>,
 }
 
 fn pragmas(c: &Connection, read_only: bool) -> rusqlite::Result<()> {
@@ -113,15 +113,16 @@ fn pragmas(c: &Connection, read_only: bool) -> rusqlite::Result<()> {
 }
 
 impl Index {
-    /// Opens the index in `dir`, which must be a directory (not a symlink) owned by this process's
-    /// uid and closed to others (no wider than 0750). It is checked at every start. A new file is
-    /// made with the schema; a file of another schema version or another tokenizer is refused,
-    /// because the index is derived data and a rebuild, not a migration, is the way.
+    /// Opens the index in `dir` under the host's declaration, `schema`. The directory must be a
+    /// directory (not a symlink) owned by this process's uid and closed to others (no wider than
+    /// 0750); it is checked at every start. A new file is made with the tables of the declaration; a
+    /// file of another schema version, another tokenizer or another declaration is refused, because
+    /// the index is derived data and a rebuild, not a migration, is the way.
     ///
     /// # Errors
     ///
     /// Fails when the directory is not acceptable or the database cannot be opened.
-    pub fn open(dir: &Path) -> anyhow::Result<Self> {
+    pub fn open(dir: &Path, schema: &Schema) -> anyhow::Result<Self> {
         use anyhow::{Context, bail};
         let m = std::fs::symlink_metadata(dir).context("the state directory")?;
         if !m.is_dir() {
@@ -164,11 +165,12 @@ impl Index {
             bail!("the index file would not take the WAL journal mode (it said {mode})");
         }
         w.pragma_update(None, "synchronous", "NORMAL")?;
-        migrate(&w)?;
+        migrate(&w, schema)?;
         Ok(Self {
             path: Arc::new(path),
             write: Arc::new(Mutex::new(w)),
             readers: Arc::default(),
+            schema: Arc::new(schema.clone()),
         })
     }
 
@@ -200,6 +202,12 @@ impl Index {
         out
     }
 
+    /// The declaration the index serves.
+    #[must_use]
+    pub fn schema(&self) -> &Schema {
+        &self.schema
+    }
+
     /// The cursor of a log; size 0 and no root for a log never indexed.
     ///
     /// # Errors
@@ -227,14 +235,14 @@ impl Index {
     /// [`Error::Argument`] for a field that is not acceptable.
     pub fn apply(&self, req: &ApplyRequest) -> Result<ApplyResponse> {
         let log = check_log(req.log.as_option(), "log")?;
-        if !KINDS.contains(&log.kind.as_str()) {
+        if !self.schema.has_kind(&log.kind) {
             return Err(Error::Rule);
         }
         if req.rows.len() > MAX_ROWS_PER_APPLY {
             return Err(Error::Argument("rows"));
         }
         for r in &req.rows {
-            check_row(r)?;
+            check_row(r, &self.schema)?;
         }
         let next = match req.next.as_option() {
             None => None,
@@ -251,6 +259,8 @@ impl Index {
                 Some(n)
             }
         };
+        let cols = self.schema.columns();
+        let words: Vec<&Column> = self.schema.word_columns().collect();
         let mut guard = self
             .write
             .lock()
@@ -262,52 +272,51 @@ impl Index {
                 return Err(Error::Version);
             }
             tx.execute(
-                "INSERT INTO cursor (project, kind, log, size, root, state) VALUES (?1, ?2, ?3, ?4, ?5, ?6) \
-                 ON CONFLICT (project, kind, log) DO UPDATE SET size = excluded.size, root = excluded.root, state = excluded.state",
-                rusqlite::params![log.project, log.kind, log.log, n.size, n.root, n.state],
+                "INSERT INTO cursor (scope, kind, log, size, root, state) VALUES (?1, ?2, ?3, ?4, ?5, ?6) \
+                 ON CONFLICT (scope, kind, log) DO UPDATE SET size = excluded.size, root = excluded.root, state = excluded.state",
+                rusqlite::params![log.scope, log.kind, log.log, n.size, n.root, n.state],
             )?;
         }
         let (mut inserted, mut duplicates) = (0i64, 0i64);
         {
-            let mut ins = tx.prepare(
-                "INSERT INTO record (project, kind, log, tenant, hash, seq, time_ms, recorded_ms, boundary, action, \
-                 class_uid, activity_id, status_id, status_code, actor_uid, actor_type_id, trace_id, record_id, product, body) \
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20) \
-                 ON CONFLICT (project, kind, log, tenant, hash) DO NOTHING",
-            )?;
-            let mut fts = tx.prepare(
-                "INSERT INTO record_fts (rowid, action, status_code, product) VALUES (?1, ?2, ?3, ?4)",
-            )?;
+            let names: String = cols.iter().map(|c| format!(", c_{}", c.name)).collect();
+            let marks: String = (0..cols.len()).map(|i| format!(", ?{}", i + 10)).collect();
+            let mut ins = tx.prepare(&format!(
+                "INSERT INTO record (scope, kind, log, tenant, hash, seq, time_ms, entry_id, body{names}) \
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9{marks}) \
+                 ON CONFLICT (scope, kind, log, tenant, hash) DO NOTHING"
+            ))?;
+            let mut fts = if words.is_empty() {
+                None
+            } else {
+                let names: Vec<String> = words.iter().map(|c| format!("c_{}", c.name)).collect();
+                let marks: Vec<String> = (0..words.len()).map(|i| format!("?{}", i + 2)).collect();
+                Some(tx.prepare(&format!(
+                    "INSERT INTO record_fts (rowid, {}) VALUES (?1, {})",
+                    names.join(", "),
+                    marks.join(", ")
+                ))?)
+            };
             for r in &req.rows {
-                let n = ins.execute(rusqlite::params![
-                    log.project,
-                    log.kind,
-                    log.log,
-                    r.tenant,
-                    r.hash,
-                    r.seq,
-                    r.time_ms,
-                    r.recorded_ms,
-                    r.boundary,
-                    r.action,
-                    r.class_uid,
-                    r.activity_id,
-                    r.status_id,
-                    r.status_code,
-                    r.actor_uid,
-                    r.actor_type_id,
-                    r.trace_id,
-                    r.record_id,
-                    r.product,
-                    r.record,
-                ])?;
+                let mut p: Vec<Value> = vec![
+                    Value::Text(log.scope.clone()),
+                    Value::Text(log.kind.clone()),
+                    Value::Text(log.log.clone()),
+                    Value::Text(r.tenant.clone()),
+                    Value::Blob(r.hash.clone()),
+                    Value::Integer(r.seq),
+                    Value::Integer(r.time_ms),
+                    Value::Text(r.entry_id.clone()),
+                    Value::Blob(r.entry.clone()),
+                ];
+                p.extend(cols.iter().map(|c| sql_value(r.columns.get(&c.name))));
+                let n = ins.execute(params_from_iter(p))?;
                 if n == 1 {
-                    fts.execute(rusqlite::params![
-                        tx.last_insert_rowid(),
-                        r.action,
-                        r.status_code,
-                        r.product
-                    ])?;
+                    if let Some(fts) = fts.as_mut() {
+                        let mut p = vec![Value::Integer(tx.last_insert_rowid())];
+                        p.extend(words.iter().map(|c| sql_value(r.columns.get(&c.name))));
+                        fts.execute(params_from_iter(p))?;
+                    }
                     inserted += 1;
                 } else {
                     duplicates += 1;
@@ -329,14 +338,15 @@ impl Index {
     /// [`Error::Argument`] for a query without partitions or tenants, or with a field that is not
     /// acceptable.
     pub fn search(&self, req: &SearchRequest) -> Result<SearchResponse> {
-        let q = Query::new(req)?;
+        let q = Query::new(req, &self.schema)?;
         let (sql, params) = q.sql();
+        let cols = self.schema.columns();
         self.with_reader(|c| {
             let mut stmt = c.prepare(&sql)?;
             let mut rows = stmt.query(params_from_iter(params))?;
             let mut out: Vec<(i64, Row)> = Vec::new();
             while let Some(r) = rows.next()? {
-                out.push((r.get(0)?, row_of(r)?));
+                out.push((r.get(0)?, row_of(r, cols)?));
             }
             let more = out.len() > q.page;
             out.truncate(q.page);
@@ -365,26 +375,32 @@ impl Index {
     }
 }
 
-fn migrate(c: &Connection) -> anyhow::Result<()> {
+fn migrate(c: &Connection, schema: &Schema) -> anyhow::Result<()> {
     use anyhow::bail;
     let have: i64 = c.pragma_query_value(None, "user_version", |r| r.get(0))?;
+    let declared = schema.canonical();
     match have {
         0 => {
-            c.execute_batch(&schema())?;
+            c.execute_batch(&tables(schema))?;
             c.execute(
-                "INSERT INTO meta (key, value) VALUES ('tokenizer', ?1)",
-                [TOKENIZER],
+                "INSERT INTO meta (key, value) VALUES ('tokenizer', ?1), ('declaration', ?2)",
+                [TOKENIZER, declared.as_str()],
             )?;
             c.pragma_update(None, "user_version", SCHEMA_VERSION)?;
         }
         v if v == SCHEMA_VERSION => {
-            let t: String =
-                c.query_row("SELECT value FROM meta WHERE key = 'tokenizer'", [], |r| {
-                    r.get(0)
-                })?;
+            let get = |k: &str| -> rusqlite::Result<String> {
+                c.query_row("SELECT value FROM meta WHERE key = ?1", [k], |r| r.get(0))
+            };
+            let t = get("tokenizer")?;
             if t != TOKENIZER {
                 bail!(
                     "the index was made with the tokenizer {t:?}; rebuild it (a tokenizer change is a rebuild)"
+                );
+            }
+            if get("declaration")? != declared {
+                bail!(
+                    "the index was made under another declaration of kinds and columns; rebuild it (a declaration change is a rebuild)"
                 );
             }
         }
@@ -395,38 +411,66 @@ fn migrate(c: &Connection) -> anyhow::Result<()> {
     Ok(())
 }
 
-fn schema() -> String {
-    format!(
+/// The tables of a declaration. The names of the declared columns are `[a-z][a-z0-9_]{0,31}` (the declaration's rule), so they are
+/// put in the SQL as they are, behind the prefix `c_`, which no fixed column has.
+fn tables(schema: &Schema) -> String {
+    let mut s = String::from(
         "CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL) WITHOUT ROWID;
          CREATE TABLE cursor (
-           project TEXT NOT NULL, kind TEXT NOT NULL, log TEXT NOT NULL,
+           scope TEXT NOT NULL, kind TEXT NOT NULL, log TEXT NOT NULL,
            size INTEGER NOT NULL, root BLOB NOT NULL, state BLOB NOT NULL,
-           PRIMARY KEY (project, kind, log)) WITHOUT ROWID;
+           PRIMARY KEY (scope, kind, log)) WITHOUT ROWID;
          CREATE TABLE record (
            id INTEGER PRIMARY KEY,
-           project TEXT NOT NULL, kind TEXT NOT NULL, log TEXT NOT NULL, tenant TEXT NOT NULL,
-           hash BLOB NOT NULL, seq INTEGER NOT NULL,
-           time_ms INTEGER NOT NULL, recorded_ms INTEGER NOT NULL,
-           boundary TEXT NOT NULL, action TEXT NOT NULL,
-           class_uid INTEGER NOT NULL, activity_id INTEGER NOT NULL,
-           status_id INTEGER NOT NULL, status_code TEXT NOT NULL,
-           actor_uid TEXT NOT NULL, actor_type_id INTEGER NOT NULL,
-           trace_id TEXT NOT NULL, record_id TEXT NOT NULL, product TEXT NOT NULL,
-           body BLOB NOT NULL,
-           UNIQUE (project, kind, log, tenant, hash));
-         CREATE INDEX record_time ON record (project, kind, tenant, time_ms DESC, id DESC);
-         CREATE INDEX record_record_id ON record (project, kind, tenant, record_id);
-         CREATE INDEX record_trace_id ON record (project, kind, tenant, trace_id);
-         CREATE VIRTUAL TABLE record_fts USING fts5({cols}, content='record', content_rowid='id', tokenize='{TOKENIZER}');",
-        cols = SEARCHABLE.join(", ")
-    )
+           scope TEXT NOT NULL, kind TEXT NOT NULL, log TEXT NOT NULL, tenant TEXT NOT NULL,
+           hash BLOB NOT NULL, seq INTEGER NOT NULL, time_ms INTEGER NOT NULL,
+           entry_id TEXT NOT NULL, body BLOB NOT NULL",
+    );
+    for c in schema.columns() {
+        let ty = match c.ty {
+            Type::Text => "TEXT",
+            Type::Int => "INTEGER",
+        };
+        s.push_str(&format!(", c_{} {ty}", c.name));
+    }
+    s.push_str(
+        ",
+           UNIQUE (scope, kind, log, tenant, hash));
+         CREATE INDEX record_time ON record (scope, kind, tenant, time_ms DESC, id DESC);
+         CREATE INDEX record_entry_id ON record (scope, kind, tenant, entry_id);",
+    );
+    for c in schema.columns().iter().filter(|c| c.filter) {
+        s.push_str(&format!(
+            "\nCREATE INDEX record_c_{0} ON record (scope, kind, tenant, c_{0});",
+            c.name
+        ));
+    }
+    let words: Vec<String> = schema
+        .word_columns()
+        .map(|c| format!("c_{}", c.name))
+        .collect();
+    if !words.is_empty() {
+        s.push_str(&format!(
+            "\nCREATE VIRTUAL TABLE record_fts USING fts5({}, content='record', content_rowid='id', tokenize='{TOKENIZER}');",
+            words.join(", ")
+        ));
+    }
+    s
+}
+
+fn sql_value(v: Option<&Cell>) -> Value {
+    match v.and_then(|c| c.kind.as_ref()) {
+        Some(Kind::Text(t)) => Value::Text(t.clone()),
+        Some(Kind::Int(i)) => Value::Integer(*i),
+        None => Value::Null,
+    }
 }
 
 fn cursor_of(c: &Connection, log: &LogRef) -> rusqlite::Result<Option<Cursor>> {
     let mut stmt = c.prepare(
-        "SELECT size, root, state FROM cursor WHERE project = ?1 AND kind = ?2 AND log = ?3",
+        "SELECT size, root, state FROM cursor WHERE scope = ?1 AND kind = ?2 AND log = ?3",
     )?;
-    let mut rows = stmt.query(rusqlite::params![log.project, log.kind, log.log])?;
+    let mut rows = stmt.query(rusqlite::params![log.scope, log.kind, log.log])?;
     match rows.next()? {
         None => Ok(None),
         Some(r) => Ok(Some(Cursor {
@@ -438,33 +482,40 @@ fn cursor_of(c: &Connection, log: &LogRef) -> rusqlite::Result<Option<Cursor>> {
     }
 }
 
-fn row_of(r: &rusqlite::Row<'_>) -> rusqlite::Result<Row> {
-    Ok(Row {
+fn row_of(r: &rusqlite::Row<'_>, cols: &[Column]) -> rusqlite::Result<Row> {
+    let mut row = Row {
         tenant: r.get(1)?,
         hash: r.get(2)?,
         seq: r.get(3)?,
         time_ms: r.get(4)?,
-        recorded_ms: r.get(5)?,
-        boundary: r.get(6)?,
-        action: r.get(7)?,
-        class_uid: r.get(8)?,
-        activity_id: r.get(9)?,
-        status_id: r.get(10)?,
-        status_code: r.get(11)?,
-        actor_uid: r.get(12)?,
-        actor_type_id: r.get(13)?,
-        trace_id: r.get(14)?,
-        record_id: r.get(15)?,
-        product: r.get(16)?,
-        record: r.get(17)?,
-        project: r.get(18)?,
-        kind: r.get(19)?,
-        log: r.get(20)?,
+        entry_id: r.get(5)?,
+        entry: r.get(6)?,
+        log: ::buffa::MessageField::some(LogRef {
+            scope: r.get(7)?,
+            kind: r.get(8)?,
+            log: r.get(9)?,
+            ..LogRef::default()
+        }),
         ..Row::default()
-    })
+    };
+    for (i, c) in cols.iter().enumerate() {
+        let kind = match r.get::<_, Value>(10 + i)? {
+            Value::Text(t) => Kind::Text(t),
+            Value::Integer(n) => Kind::Int(n),
+            _ => continue,
+        };
+        row.columns.insert(
+            c.name.clone(),
+            Cell {
+                kind: Some(kind),
+                ..Cell::default()
+            },
+        );
+    }
+    Ok(row)
 }
 
-/// A name of a project, a log kind, a log, a tenant: printable, no control character, bounded.
+/// A name of a scope, a log kind, a log, a tenant: printable, no control character, bounded.
 fn name_ok(s: &str) -> bool {
     !s.is_empty() && s.len() <= MAX_ID && s.chars().all(|c| !c.is_control())
 }
@@ -475,35 +526,48 @@ fn text_ok(s: &str) -> bool {
 
 fn check_log(l: Option<&LogRef>, path: &'static str) -> Result<LogRef> {
     match l {
-        Some(l) if name_ok(&l.project) && name_ok(&l.kind) && name_ok(&l.log) => Ok(l.clone()),
+        Some(l) if name_ok(&l.scope) && name_ok(&l.kind) && name_ok(&l.log) => Ok(l.clone()),
         _ => Err(Error::Argument(path)),
     }
 }
 
-fn check_row(r: &Row) -> Result<()> {
+/// Whether `v` is a value of the type of `c`, and an acceptable one.
+fn value_ok(c: &Column, v: &Cell) -> bool {
+    match (c.ty, v.kind.as_ref()) {
+        (Type::Text, Some(Kind::Text(t))) => text_ok(t),
+        (Type::Int, Some(Kind::Int(_))) => true,
+        _ => false,
+    }
+}
+
+fn check_row(r: &Row, schema: &Schema) -> Result<()> {
     if !name_ok(&r.tenant) || r.tenant == "*" {
         return Err(Error::Argument("rows.tenant"));
     }
     if r.hash.len() != 48 {
         return Err(Error::Argument("rows.hash"));
     }
-    if r.record.is_empty() || r.record.len() > MAX_RECORD {
-        return Err(Error::Argument("rows.record"));
+    if r.entry.is_empty() || r.entry.len() > MAX_RECORD {
+        return Err(Error::Argument("rows.entry"));
     }
     if r.seq < 0 {
         return Err(Error::Argument("rows.seq"));
     }
-    let texts = [
-        &r.boundary,
-        &r.action,
-        &r.status_code,
-        &r.actor_uid,
-        &r.trace_id,
-        &r.record_id,
-        &r.product,
-    ];
-    if texts.iter().any(|t| !text_ok(t)) {
-        return Err(Error::Argument("rows"));
+    if !text_ok(&r.entry_id) {
+        return Err(Error::Argument("rows.entry_id"));
+    }
+    for (name, v) in &r.columns {
+        match schema.column_named(name) {
+            Some(c) if value_ok(c, v) => {}
+            _ => return Err(Error::Argument("rows.columns")),
+        }
+    }
+    if schema
+        .columns()
+        .iter()
+        .any(|c| c.required && !r.columns.contains_key(&c.name))
+    {
+        return Err(Error::Argument("rows.columns"));
     }
     Ok(())
 }
@@ -511,20 +575,21 @@ fn check_row(r: &Row) -> Result<()> {
 /// A query after its checks.
 struct Query<'a> {
     req: &'a SearchRequest,
+    schema: &'a Schema,
     fts: Option<String>,
     after: Option<(i64, i64)>,
     page: usize,
 }
 
 impl<'a> Query<'a> {
-    fn new(req: &'a SearchRequest) -> Result<Self> {
+    fn new(req: &'a SearchRequest, schema: &'a Schema) -> Result<Self> {
         if req.partitions.is_empty() || req.partitions.len() > MAX_PARTITIONS {
             return Err(Error::Argument("partitions"));
         }
         if req
             .partitions
             .iter()
-            .any(|p| !name_ok(&p.project) || !KINDS.contains(&p.kind.as_str()))
+            .any(|p| !name_ok(&p.scope) || !schema.has_kind(&p.kind))
         {
             return Err(Error::Argument("partitions"));
         }
@@ -541,18 +606,24 @@ impl<'a> Query<'a> {
             0 => DEFAULT_PAGE,
             n => n.min(MAX_PAGE),
         };
-        let texts = [
-            &req.action,
-            &req.status_code,
-            &req.actor_uid,
-            &req.trace_id,
-            &req.record_id,
-        ];
-        if texts.iter().any(|t| !text_ok(t)) {
-            return Err(Error::Argument("filter"));
+        if !text_ok(&req.entry_id) {
+            return Err(Error::Argument("entry_id"));
+        }
+        if req.matches.len() > MAX_MATCHES {
+            return Err(Error::Argument("matches"));
+        }
+        for m in &req.matches {
+            let Some(c) = schema.column_named(&m.column).filter(|c| c.filter) else {
+                return Err(Error::Argument("matches.column"));
+            };
+            if !m.value.as_option().is_some_and(|v| value_ok(c, v)) {
+                return Err(Error::Argument("matches.value"));
+            }
         }
         let fts = if req.q.trim().is_empty() {
             None
+        } else if schema.word_columns().next().is_none() {
+            return Err(Error::Argument("q"));
         } else {
             Some(fts_query(&req.q)?)
         };
@@ -563,6 +634,7 @@ impl<'a> Query<'a> {
         };
         Ok(Self {
             req,
+            schema,
             fts,
             after,
             page,
@@ -576,17 +648,20 @@ impl<'a> Query<'a> {
             p.push(v);
             p.len()
         };
-        let mut sql = String::from(
-            "SELECT id, tenant, hash, seq, time_ms, recorded_ms, boundary, action, class_uid, activity_id, status_id, \
-             status_code, actor_uid, actor_type_id, trace_id, record_id, product, body, project, kind, log FROM record WHERE (",
-        );
+        let declared: String = self
+            .schema
+            .columns()
+            .iter()
+            .map(|c| format!(", c_{}", c.name))
+            .collect();
+        let mut sql = format!("SELECT {SELECT_FIXED}{declared} FROM record WHERE (");
         for (i, part) in r.partitions.iter().enumerate() {
             if i > 0 {
                 sql.push_str(" OR ");
             }
-            let a = push(&mut p, Value::Text(part.project.clone()));
+            let a = push(&mut p, Value::Text(part.scope.clone()));
             let b = push(&mut p, Value::Text(part.kind.clone()));
-            sql.push_str(&format!("(project = ?{a} AND kind = ?{b})"));
+            sql.push_str(&format!("(scope = ?{a} AND kind = ?{b})"));
         }
         sql.push(')');
         if !r.tenants.iter().any(|t| t == "*") {
@@ -597,47 +672,14 @@ impl<'a> Query<'a> {
                 .collect();
             sql.push_str(&format!(" AND tenant IN ({})", marks.join(", ")));
         }
-        let eq = |sql: &mut String, p: &mut Vec<Value>, col: &str, v: Value| {
-            let n = push(p, v);
-            sql.push_str(&format!(" AND {col} = ?{n}"));
-        };
-        if !r.action.is_empty() {
-            eq(&mut sql, &mut p, "action", Value::Text(r.action.clone()));
+        if !r.entry_id.is_empty() {
+            let n = push(&mut p, Value::Text(r.entry_id.clone()));
+            sql.push_str(&format!(" AND entry_id = ?{n}"));
         }
-        if !r.status_code.is_empty() {
-            eq(
-                &mut sql,
-                &mut p,
-                "status_code",
-                Value::Text(r.status_code.clone()),
-            );
-        }
-        if r.status_id != 0 {
-            eq(&mut sql, &mut p, "status_id", Value::Integer(r.status_id));
-        }
-        if !r.actor_uid.is_empty() {
-            eq(
-                &mut sql,
-                &mut p,
-                "actor_uid",
-                Value::Text(r.actor_uid.clone()),
-            );
-        }
-        if !r.trace_id.is_empty() {
-            eq(
-                &mut sql,
-                &mut p,
-                "trace_id",
-                Value::Text(r.trace_id.clone()),
-            );
-        }
-        if !r.record_id.is_empty() {
-            eq(
-                &mut sql,
-                &mut p,
-                "record_id",
-                Value::Text(r.record_id.clone()),
-            );
+        for m in &r.matches {
+            // The column was checked against the declaration in `new`: its name is a declared one.
+            let n = push(&mut p, sql_value(m.value.as_option()));
+            sql.push_str(&format!(" AND c_{} = ?{n}", m.column));
         }
         if r.from_ms != 0 {
             let n = push(&mut p, Value::Integer(r.from_ms));
