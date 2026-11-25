@@ -200,9 +200,14 @@ conformance-seal: rust-toolchain
 conformance-token: rust-toolchain
     tools/scripts/conformance-token.sh
 
-# The transport-port kit against the spool driver, through the sockets of its thin main (tools/scripts/conformance-transport.sh).
+# The transport-port kit against the spool driver, the NATS JetStream driver (over an embedded NATS server run as a process) and the SQS
+# driver (against ElasticMQ in a container; Linux, where there is a runtime), each through the socket of its thin main
+# (tools/scripts/conformance-transport.sh).
 [private]
 conformance-transport: rust-toolchain
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if [ "$(uname -s)" = Linux ]; then export ATOOM_REQUIRE_ELASTICMQ=1; fi
     tools/scripts/conformance-transport.sh
 
 # The index-port kit against the sqlite driver, through the sockets of its thin main (tools/scripts/conformance-index.sh).
