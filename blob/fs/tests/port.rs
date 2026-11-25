@@ -17,7 +17,13 @@ use atoom_socket::{ServerConfig, dial};
 use connectrpc::error::ErrorCode;
 
 fn serve(socket: &Path, root: &Path) -> tokio::sync::oneshot::Sender<()> {
-    let router = Service(Fs::open(root).unwrap()).router();
+    let router = Service(
+        Fs::open(root)
+            .unwrap()
+            .with_pointers(atoom_blob_conformance::POINTERS)
+            .unwrap(),
+    )
+    .router();
     let (tx, rx) = tokio::sync::oneshot::channel::<()>();
     tokio::spawn(atoom_socket::serve(
         ServerConfig::new(socket),
@@ -117,7 +123,7 @@ async fn a_client_uses_the_port_and_every_refusal_names_a_reason() {
     );
     let ptr = c
         .put(PutRequest {
-            path: "a/checkpoint".into(),
+            path: "a/kit-head".into(),
             data: b"z".to_vec(),
             if_match: "old".into(),
             ..Default::default()

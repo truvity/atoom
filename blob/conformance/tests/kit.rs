@@ -62,7 +62,9 @@ impl Store {
 }
 
 fn is_pointer(path: &str) -> bool {
-    matches!(path.rsplit('/').next(), Some("checkpoint" | "writer-state"))
+    path.rsplit('/')
+        .next()
+        .is_some_and(|n| atoom_blob_conformance::POINTERS.contains(&n))
 }
 
 impl BlobService for Store {

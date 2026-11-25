@@ -4,8 +4,8 @@ The fs driver of the [blob port](../docs/blob-port.md): the blob contract over a
 
 | | |
 | --- | --- |
-| Library | crate `atoom-blob-fs`: `Fs::open(root)` opens the directory; `service::Service(fs).router()` is the ConnectRPC handler; `suite::run_temp()` is the backend suite (modes, the root checks, the race of 32 creators, the flock between two drivers, the fallback of `openat2`) that a host may run from a command of its own. `Fs` itself is the shared library [`atoom-blob-fsdir`](../fsdir/README.md), re-exported |
-| Thin main | `blob-fs serve --socket PATH --root DIR` (a socket of mode 0600 that admits this process's uid, until SIGINT or SIGTERM; removes the temporary files an earlier crash left); `blob-fs check --root DIR` (exit 3 when the root cannot be served); `blob-fs version` (and `--version`) |
+| Library | crate `atoom-blob-fs`: `Fs::open(root)` opens the directory and `.with_pointers(names)` declares its pointers; `service::Service(fs).router()` is the ConnectRPC handler; `suite::run_temp()` is the backend suite (modes, the root checks, the race of 32 creators, the flock between two drivers, the fallback of `openat2`) that a host may run from a command of its own. `Fs` itself is the shared library [`atoom-blob-fsdir`](../fsdir/README.md), re-exported |
+| Thin main | `blob-fs serve --socket PATH --root DIR [--pointer NAME]...` (`--pointer` declares a pointer, the last segment of an object that `Put` may overwrite, repeatable; without it every object is written once; a socket of mode 0600 that admits this process's uid, until SIGINT or SIGTERM; removes the temporary files an earlier crash left); `blob-fs check --root DIR [--pointer NAME]...` (exit 3 when the root cannot be served); `blob-fs version` (and `--version`) |
 | Guard flags | `--allow-uid UID` (repeatable; without it only this process's uid may call), `--allow-any-uid`, `--socket-gid GID`, `--socket-mode MODE`: the [socket guard](../../docs/socket-guard.md) |
 | Feature | `cli` (default): the flags and the socket (`clap`, `atoom-socket`, `tracing-subscriber`). A consumer that mounts `router()` in a host of its own turns the default features off |
 

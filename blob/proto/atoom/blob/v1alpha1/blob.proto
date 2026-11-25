@@ -7,7 +7,7 @@ package atoom.blob.v1alpha1;
 // BlobService keeps a log's objects: write-once tiles and a few pointers that move.
 service BlobService {
   rpc Create(CreateRequest) returns (CreateResponse);   // create-if-absent: already_exists if present (the write-once fence)
-  rpc Put(PutRequest) returns (PutResponse);            // conditional overwrite, only for the paths the driver allows (the checkpoint pointer, the writer state)
+  rpc Put(PutRequest) returns (PutResponse);            // conditional overwrite, only of a pointer: a path whose last segment the host declared to the driver
   rpc Get(BlobGetRequest) returns (BlobGetResponse);
   rpc List(BlobListRequest) returns (BlobListResponse);
 }

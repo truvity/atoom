@@ -5,14 +5,15 @@ The conformance kit of the [blob port](../docs/blob-port.md): the cases every bl
 | | |
 | --- | --- |
 | Library | crate `atoom-blob-conformance`: `blob_suite(client)` runs the cases of a driver that can be written to, `blob_read_suite(client, &fixture)` those of a read-only driver; both return the results of the cases, and `report(&cases, out)` prints them and fails on a failed case and on none run |
-| Binary | `blob-conformance --socket PATH` runs the suite against the driver that serves on the UNIX socket PATH, whatever its language; `--read-only --present PATH --bytes FILE` runs the read-only suite; the exit status is 0 only when every case passed |
+| Binary | `blob-conformance --print-pointers` prints the kit's pointer names, to start the driver with; `blob-conformance --socket PATH` runs the suite against the driver that serves on the UNIX socket PATH, whatever its language; `--read-only --present PATH --bytes FILE` runs the read-only suite; the exit status is 0 only when every case passed |
 
 The write suite writes under a prefix of its own, `conformance-<run>/`, and **cannot remove what it wrote**: the contract has no delete. Run it against a scratch root. The read-only suite writes nothing that is accepted, and needs one object in the driver's backend before the run: `--present PATH` is its path, and `--bytes FILE` holds the exact bytes the driver must return for it.
 
 ```sh
 cargo build -p atoom-blob-fs -p atoom-blob-conformance
 mkdir -m 0750 /tmp/blob-root
-target/debug/blob-fs serve --socket /tmp/blob.sock --root /tmp/blob-root &
+target/debug/blob-fs serve --socket /tmp/blob.sock --root /tmp/blob-root \
+  $(target/debug/blob-conformance --print-pointers | sed 's/^/--pointer /') &
 target/debug/blob-conformance --socket /tmp/blob.sock
 ```
 

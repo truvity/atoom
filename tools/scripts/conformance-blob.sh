@@ -38,20 +38,23 @@ wait_for() { # description command...
 
 # The fs driver: a root that only its owner can write.
 mkdir -m 0750 "$tmp/root"
-"$bin/blob-fs" serve --socket "$tmp/fs.sock" --root "$tmp/root" &
+# It declares the kit's pointer names.
+pointers=()
+while read -r p; do pointers+=(--pointer "$p"); done < <("$bin/blob-conformance" --print-pointers)
+"$bin/blob-fs" serve --socket "$tmp/fs.sock" --root "$tmp/root" "${pointers[@]}" &
 pids+=($!)
 wait_for "the fs driver" test -S "$tmp/fs.sock"
 echo "conformance-blob: blob-conformance against blob-fs"
 "$bin/blob-conformance" --socket "$tmp/fs.sock"
 
 # The read-only fs driver: a root with one object, made as the writing driver makes them (mode 0640 in directories of 0750).
-mkdir -m 0750 "$tmp/ro" "$tmp/ro/audit"
+mkdir -m 0750 "$tmp/ro" "$tmp/ro/log"
 printf 'fixture bytes\n' >"$tmp/bytes"
-install -m 0640 "$tmp/bytes" "$tmp/ro/audit/fixture"
+install -m 0640 "$tmp/bytes" "$tmp/ro/log/fixture"
 "$bin/blob-fsreadonly" serve --socket "$tmp/ro.sock" --root "$tmp/ro" &
 pids+=($!)
 wait_for "the read-only fs driver" test -S "$tmp/ro.sock"
 echo "conformance-blob: blob-conformance --read-only against blob-fsreadonly"
-"$bin/blob-conformance" --socket "$tmp/ro.sock" --read-only --present audit/fixture --bytes "$tmp/bytes"
+"$bin/blob-conformance" --socket "$tmp/ro.sock" --read-only --present log/fixture --bytes "$tmp/bytes"
 
 echo "conformance-blob: done"

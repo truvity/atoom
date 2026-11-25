@@ -265,7 +265,7 @@ impl Suite {
             "a refused Put changed the object"
         );
 
-        for name in ["checkpoint", "writer-state"] {
+        for name in crate::POINTERS {
             let ptr = self.path(&format!("p/{name}"));
             expect_refusal(
                 self.put(&ptr, b"c1", "stale").await,
