@@ -13,7 +13,7 @@ use std::time::Duration;
 use atoom_common::refusal::reason as refusal_reason;
 use atoom_socket::{ServerConfig, dial};
 use atoom_transport::atoom::transport::v1alpha1::{
-    AckRequest, AuditMessage, EmitRequest, ReceiveRequest, TransportServiceClient,
+    AckRequest, EmitRequest, Message, ReceiveRequest, TransportServiceClient,
 };
 use atoom_transport_spool::service::{Consume, Emit};
 use atoom_transport_spool::{Config, Spool};
@@ -91,19 +91,19 @@ fn client(socket: &Path) -> TransportServiceClient<atoom_socket::Transport> {
     TransportServiceClient::new(c.transport(), c.config())
 }
 
-fn msg(uid: &str, body: &[u8]) -> EmitRequest {
+fn msg(id: &str, body: &[u8]) -> EmitRequest {
     EmitRequest {
-        message: AuditMessage {
-            uid: uid.into(),
-            record: body.to_vec(),
-            ..AuditMessage::default()
+        message: Message {
+            id: id.into(),
+            payload: body.to_vec(),
+            ..Message::default()
         }
         .into(),
         ..EmitRequest::default()
     }
 }
 
-/// The next batch of a receive stream as (delivery id, emitter, message uid).
+/// The next batch of a receive stream as (delivery id, emitter, message id).
 macro_rules! next {
     ($st:expr) => {{
         let r = tokio::time::timeout(Duration::from_secs(5), $st.message())
@@ -117,7 +117,7 @@ macro_rules! next {
                 (
                     d.delivery_id,
                     d.emitter.to_string(),
-                    d.message.uid.to_string(),
+                    d.message.id.to_string(),
                 )
             })
             .collect::<Vec<(u64, String, String)>>()
@@ -245,8 +245,8 @@ async fn a_malformed_message_is_refused_with_its_field() {
     let c = client(&u.emit);
     for (req, field) in [
         (EmitRequest::default(), "message"),
-        (msg("", b"{}"), "message.uid"),
-        (msg("u", b""), "message.record"),
+        (msg("", b"{}"), "message.id"),
+        (msg("u", b""), "message.payload"),
     ] {
         let e = c.emit(req).await.unwrap_err();
         assert_eq!(e.code, ErrorCode::InvalidArgument, "{field}");
@@ -282,7 +282,7 @@ async fn a_full_spool_refuses_with_unavailable_and_keeps_every_earlier_message()
     assert_eq!(u.spool.depth(), taken, "an accepted message was dropped");
     assert!(u.spool.bytes() <= 1500);
 
-    // The writer drains it all: the earlier messages are all there, in order.
+    // The consumer drains it all: the earlier messages are all there, in order.
     let mut st = client(&u.receive)
         .receive(ReceiveRequest::default())
         .await
@@ -291,11 +291,8 @@ async fn a_full_spool_refuses_with_unavailable_and_keeps_every_earlier_message()
     while seen.len() < taken {
         seen.extend(next!(st));
     }
-    let uids: Vec<_> = seen.iter().map(|d| d.2.clone()).collect();
-    assert_eq!(
-        uids,
-        (0..taken).map(|i| format!("u{i}")).collect::<Vec<_>>()
-    );
+    let ids: Vec<_> = seen.iter().map(|d| d.2.clone()).collect();
+    assert_eq!(ids, (0..taken).map(|i| format!("u{i}")).collect::<Vec<_>>());
     client(&u.receive)
         .ack(AckRequest {
             delivery_ids: seen.iter().map(|d| d.0).collect(),

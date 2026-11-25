@@ -1,25 +1,28 @@
-// The transport port: a durable queue that carries audit messages from emitters to one consumer. The first driver is a local spool.
+// The transport port: a durable queue that carries opaque messages from emitters to one consumer, in order and at least once. What a
+// message's payload holds is the consumer's; the transport never looks inside it.
 syntax = "proto3";
 
 package atoom.transport.v1alpha1;
 
-// TransportService carries audit messages from emitters to the writer.
+// TransportService carries messages from emitters to one consumer.
 service TransportService {
   rpc Emit(EmitRequest) returns (EmitResponse);                    // emitters; caller known by peer uid
-  rpc Receive(ReceiveRequest) returns (stream ReceiveResponse);    // the writer only
-  rpc Ack(AckRequest) returns (AckResponse);                       // the writer only
+  rpc Receive(ReceiveRequest) returns (stream ReceiveResponse);    // the consumer only
+  rpc Ack(AckRequest) returns (AckResponse);                       // the consumer only
 }
 
-// AuditMessage is one audit record with its usage records.
-message AuditMessage {
-  string uid = 1;                // metadata.uid (UUIDv7)
-  bytes record = 2;              // the record as RFC 8785 bytes
-  repeated bytes usage = 3;      // the usage records of the same event
+// Message is one message: its unique id and its payload. The field numbers are those of the message before it was made generic, so
+// the bytes of a message kept by a driver (a spool's segment, a stream, a queue) read the same.
+message Message {
+  string id = 1;        // the message's unique id: the key of at-least-once delivery and of a broker's deduplication
+  bytes payload = 2;    // the consumer's bytes, opaque to the transport; at least one
+  reserved 3;
+  reserved "usage";
 }
 
 // EmitRequest hands a message to the transport.
 message EmitRequest {
-  AuditMessage message = 1;  // the message
+  Message message = 1;       // the message
   bool blocking = 2;         // answer only once fsync'd
 }
 
@@ -31,11 +34,11 @@ message ReceiveRequest {
   uint32 max_batch = 1;  // the most deliveries in one response
 }
 
-// Delivery is one message handed to the writer.
+// Delivery is one message handed to the consumer.
 message Delivery {
-  uint64 delivery_id = 1;     // what the writer acknowledges
-  string emitter = 2;         // "<actor>@<boundary>" from the peer uid
-  AuditMessage message = 3;   // the message
+  uint64 delivery_id = 1;     // what the consumer acknowledges
+  string emitter = 2;         // who the driver took the caller of the emit to be: the socket's peer or the host's naming, never a field of the message
+  Message message = 3;        // the message
 }
 
 // ReceiveResponse is a batch of deliveries.
@@ -43,9 +46,9 @@ message ReceiveResponse {
   repeated Delivery deliveries = 1;  // the batch
 }
 
-// AckRequest acknowledges deliveries once they are sealed.
+// AckRequest acknowledges deliveries once the consumer is done with them.
 message AckRequest {
-  repeated uint64 delivery_ids = 1;  // the deliveries sealed
+  repeated uint64 delivery_ids = 1;  // the deliveries done
 }
 
 // AckResponse says the acknowledgement is recorded.

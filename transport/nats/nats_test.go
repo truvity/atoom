@@ -92,7 +92,7 @@ func TestMessagesComeInOrderWithTheirStreamSequenceAsTheID(t *testing.T) {
 		t.Fatalf("order %v", uids(got))
 	}
 	for i, d := range got {
-		if d.GetDeliveryId() != uint64(i+1) || d.GetEmitter() != "test@host" || string(d.GetMessage().GetUsage()[0]) != "usage-"+d.GetMessage().GetUid() {
+		if d.GetDeliveryId() != uint64(i+1) || d.GetEmitter() != "test@host" || string(d.GetMessage().GetPayload()) != "payload-"+d.GetMessage().GetId() {
 			t.Fatalf("delivery %d: %v", i, d)
 		}
 	}
@@ -123,12 +123,11 @@ func TestARetryAndARedeliveryAreOneRecordByUID(t *testing.T) {
 	c2, _ := mount(t, opts) // a new driver on the same stream and consumer, as after a restart
 	k2 := receive(t, c2)
 	again := k2.take(t, 1)[0]
-	if again.GetDeliveryId() != first.GetDeliveryId() || again.GetMessage().GetUid() != first.GetMessage().GetUid() ||
-		string(again.GetMessage().GetRecord()) != string(first.GetMessage().GetRecord()) ||
-		string(again.GetMessage().GetUsage()[0]) != string(first.GetMessage().GetUsage()[0]) {
+	if again.GetDeliveryId() != first.GetDeliveryId() || again.GetMessage().GetId() != first.GetMessage().GetId() ||
+		string(again.GetMessage().GetPayload()) != string(first.GetMessage().GetPayload()) {
 		t.Fatalf("after the restart: %v, first %v", again, first)
 	}
-	records := map[string]bool{first.GetMessage().GetUid(): true, again.GetMessage().GetUid(): true}
+	records := map[string]bool{first.GetMessage().GetId(): true, again.GetMessage().GetId(): true}
 	if len(records) != 1 {
 		t.Fatalf("%d records", len(records))
 	}
@@ -206,17 +205,17 @@ func TestEveryRefusalNamesAReason(t *testing.T) {
 	js, _, _ := server(t, "")
 	c, _ := mount(t, natsOpts(js))
 	for _, tc := range []struct {
-		m     *transportv1alpha1.AuditMessage
+		m     *transportv1alpha1.Message
 		field string
 	}{
 		{nil, "message"},
-		{&transportv1alpha1.AuditMessage{Record: []byte("r")}, "message.uid"},
-		{&transportv1alpha1.AuditMessage{Uid: "u"}, "message.record"},
+		{&transportv1alpha1.Message{Payload: []byte("r")}, "message.id"},
+		{&transportv1alpha1.Message{Id: "u"}, "message.payload"},
 	} {
 		_, err := c.Emit(context.Background(), connect.NewRequest(&transportv1alpha1.EmitRequest{Message: tc.m}))
 		wantRefusal(t, err, connect.CodeInvalidArgument, "schema", tc.field)
 	}
-	big := &transportv1alpha1.AuditMessage{Uid: "u", Record: make([]byte, nats.MessageMax)}
+	big := &transportv1alpha1.Message{Id: "u", Payload: make([]byte, nats.MessageMax)}
 	_, err := c.Emit(context.Background(), connect.NewRequest(&transportv1alpha1.EmitRequest{Message: big}))
 	wantRefusal(t, err, connect.CodeInvalidArgument, "bound", "message")
 	_, err = c.Ack(context.Background(), connect.NewRequest(&transportv1alpha1.AckRequest{DeliveryIds: make([]uint64, nats.AckMax+1)}))
@@ -257,7 +256,7 @@ func TestAMessageTheDriverDidNotWriteIsNotDelivered(t *testing.T) {
 		t.Fatal(err)
 	}
 	emit(t, c, msg("a"))
-	if got := k.take(t, 1); got[0].GetMessage().GetUid() != "a" {
+	if got := k.take(t, 1); got[0].GetMessage().GetId() != "a" {
 		t.Fatalf("%v", uids(got))
 	}
 }

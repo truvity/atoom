@@ -4,7 +4,7 @@
 //!   kit: one that emits and one that consumes (the same socket for a driver that serves both on one). "A driver passes the suite or it
 //!   is not a driver." The binary `transport-conformance --emit-socket P --receive-socket Q` runs it against the driver that serves on
 //!   those sockets, whatever its language.
-//! - The suite speaks the contract and nothing else. It emits messages of its own (their uid has a prefix of its own, unique to the run),
+//! - The suite speaks the contract and nothing else. It emits messages of its own (their id has a prefix of its own, unique to the run),
 //!   takes them from the driver and acknowledges them, and looks only at those; a message that another emitter left in the queue is
 //!   neither judged nor acknowledged. The driver is one consumer's: run the suite against a driver nobody else is consuming from.
 //!
@@ -20,8 +20,8 @@
 //!   between two consumers).
 //! - **At least once**: a message that was delivered and not acknowledged comes again, under the same id, to the next `Receive`.
 //!   Once acknowledged it does not come again; an id the driver does not know is ignored.
-//! - **A malformed emit** (no message, an empty uid, an empty record) is `invalid_argument` with the reason `schema` and the field path
-//!   `message`, `message.uid` or `message.record`.
+//! - **A malformed emit** (no message, an empty id, an empty payload) is `invalid_argument` with the reason `schema` and the field path
+//!   `message`, `message.id` or `message.payload`.
 
 mod suite;
 

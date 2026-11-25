@@ -5,6 +5,12 @@ libraries changed. `just release-prepare X.Y.Z` writes the section.
 
 <!-- release-prepare: new sections go below this line -->
 
+## Unreleased
+
+**Breaking** in the contracts of the blob, transport and index ports (step B12, [record 0025](docs/decisions/0025-generic-blob-transport-and-index.md)): the three ports lose audit's vocabulary, and the host declares what was fixed.
+
+- **`transport`, `transport/spool`, `transport/nats`, `transport/sqs`, `transport/conformance`: a message is an id and an opaque payload.** `AuditMessage{uid, record, usage}` is `Message{id, payload}`. The field numbers 1 and 2 are kept and 3 (`usage`) is reserved, so the bytes a spool's segments, a JetStream stream or an SQS queue hold read the same: no drain at the upgrade. The refusals of an empty id or payload name `message.id` and `message.payload`. The deduplication of `nats` (`Nats-Msg-Id`) and of `sqs` (SHA-256) is of the id. `Delivery.emitter` keeps its name. The kit's case is `a_redelivered_or_repeated_message_is_one_message`. A consumer that carried a usage part packs it into its payload (truvity/audit decides the form). In Go: `transportv1alpha1.Message`, `GetId`, `GetPayload`; in Rust: `Message { id, payload }`.
+
 ## 0.8.0 - 2026-11-25
 
 One version for the whole repository: every library is tagged 0.8.0, changed or not.

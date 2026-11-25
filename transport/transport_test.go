@@ -26,17 +26,18 @@ func TestTheProceduresHaveTheNamesOfTheContract(t *testing.T) {
 	}
 }
 
-// The field numbers are the ones sluis used, so that the bytes of a message did not change with the move.
-func TestAnEmitRequestKeepsTheFieldNumbersOfSluis(t *testing.T) {
+// The field numbers are the ones sluis used and the ones of the message before it was generic (record 0025): the id is 1 and the
+// payload 2, so that the bytes a driver kept (a spool's segment, a stream, a queue) read the same; 3 (usage) is reserved.
+func TestAnEmitRequestKeepsItsFieldNumbers(t *testing.T) {
 	b, err := proto.Marshal(&transportv1alpha1.EmitRequest{
-		Message:  &transportv1alpha1.AuditMessage{Uid: "u", Record: []byte("r"), Usage: [][]byte{[]byte("a")}},
+		Message:  &transportv1alpha1.Message{Id: "u", Payload: []byte("r")},
 		Blocking: true,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	// message = 1 (uid = 1, record = 2, usage = 3), blocking = 2.
-	want := []byte{0x0a, 9, 0x0a, 1, 'u', 0x12, 1, 'r', 0x1a, 1, 'a', 0x10, 1}
+	// message = 1 (id = 1, payload = 2), blocking = 2.
+	want := []byte{0x0a, 6, 0x0a, 1, 'u', 0x12, 1, 'r', 0x10, 1}
 	if string(b) != string(want) {
 		t.Fatalf("EmitRequest bytes = %x, want %x", b, want)
 	}
@@ -47,7 +48,7 @@ type fake struct {
 }
 
 func (fake) Emit(_ context.Context, req *connect.Request[transportv1alpha1.EmitRequest]) (*connect.Response[transportv1alpha1.EmitResponse], error) {
-	if req.Msg.GetMessage().GetUid() == "" {
+	if req.Msg.GetMessage().GetId() == "" {
 		return nil, connect.NewError(connect.CodeInvalidArgument, nil)
 	}
 	return connect.NewResponse(&transportv1alpha1.EmitResponse{}), nil
@@ -63,7 +64,7 @@ func TestTheClientCallsTheHandler(t *testing.T) {
 
 	c := transportv1alpha1connect.NewTransportServiceClient(srv.Client(), srv.URL)
 	if _, err := c.Emit(context.Background(), connect.NewRequest(&transportv1alpha1.EmitRequest{
-		Message: &transportv1alpha1.AuditMessage{Uid: "u", Record: []byte("{}")},
+		Message: &transportv1alpha1.Message{Id: "u", Payload: []byte("{}")},
 	})); err != nil {
 		t.Fatal(err)
 	}

@@ -7,7 +7,7 @@ The conformance kit of the [transport port](../docs/transport-port.md): the case
 | Library | crate `atoom-transport-conformance`: `transport_suite(emit_client, receive_client)` runs the cases and returns their results, `report(&cases, out)` prints them and fails on a failed case and on none run |
 | Binary | `transport-conformance --emit-socket PATH --receive-socket PATH` runs the suite against the driver that serves on those UNIX sockets (the same path twice for a driver that serves both sides on one), whatever its language; the exit status is 0 only when every case passed |
 
-The suite emits messages of its own (their uid starts with `conformance-<run>-`), takes them from the driver and acknowledges them, and looks only at those: a message that another emitter left in the queue is not judged and not acknowledged. It is one consumer's suite, so run it against a driver that nobody else consumes from.
+The suite emits messages of its own (their id starts with `conformance-<run>-`), takes them from the driver and acknowledges them, and looks only at those: a message that another emitter left in the queue is not judged and not acknowledged. It is one consumer's suite, so run it against a driver that nobody else consumes from.
 
 ```sh
 cargo build -p atoom-transport-spool -p atoom-transport-conformance

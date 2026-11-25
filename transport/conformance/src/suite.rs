@@ -7,7 +7,7 @@ use anyhow::{Context, bail, ensure};
 use atoom_common::refusal;
 use atoom_socket::{Client, Transport};
 use atoom_transport::atoom::transport::v1alpha1::{
-    AckRequest, AuditMessage, Delivery, EmitRequest, ReceiveRequest, ReceiveResponse,
+    AckRequest, Delivery, EmitRequest, Message, ReceiveRequest, ReceiveResponse,
     ReceiveResponseView, TransportServiceClient,
 };
 use connectrpc::client::{ClientTransport, ServerStream};
@@ -36,8 +36,8 @@ pub async fn transport_suite(emit: Client, receive: Client) -> Vec<Case> {
         run_case("unacknowledged_messages_come_again", s.at_least_once()).await,
         run_case("acknowledged_messages_do_not_come_again", s.acknowledged()).await,
         run_case(
-            "a_redelivered_or_repeated_message_is_one_record",
-            s.one_record(),
+            "a_redelivered_or_repeated_message_is_one_message",
+            s.one_message(),
         )
         .await,
         run_case("malformed_emits", s.malformed()).await,
@@ -47,7 +47,7 @@ pub async fn transport_suite(emit: Client, receive: Client) -> Vec<Case> {
 struct Suite {
     emit: Client,
     receive: Client,
-    /// The prefix of the uids of this run: `conformance-<nanos><pid>-`.
+    /// The prefix of the ids of this run: `conformance-<nanos><pid>-`.
     run: String,
 }
 
@@ -86,7 +86,7 @@ impl Suite {
         }
     }
 
-    fn uid(&self, n: u32) -> String {
+    fn id(&self, n: u32) -> String {
         format!("{}{n}", self.run)
     }
 
@@ -98,16 +98,15 @@ impl Suite {
         TransportServiceClient::new(self.receive.transport(), self.receive.config())
     }
 
-    fn message(&self, n: u32) -> AuditMessage {
-        AuditMessage {
-            uid: self.uid(n),
-            record: format!("{{\"n\":{n}}}").into_bytes(),
-            usage: vec![format!("u{n}a").into_bytes(), format!("u{n}b").into_bytes()],
-            ..AuditMessage::default()
+    fn message(&self, n: u32) -> Message {
+        Message {
+            id: self.id(n),
+            payload: format!("{{\"n\":{n}}}\u{0}u{n}a\u{0}u{n}b").into_bytes(),
+            ..Message::default()
         }
     }
 
-    async fn emit(&self, m: AuditMessage, blocking: bool) -> Result<(), ConnectError> {
+    async fn emit(&self, m: Message, blocking: bool) -> Result<(), ConnectError> {
         let rpc = self.emitter();
         let call = rpc.emit(EmitRequest {
             message: m.into(),
@@ -202,7 +201,7 @@ impl Suite {
                 Next::Quiet => bail!("only {} of {want} deliveries came in time", got.len()),
             };
             for d in batch.to_owned_message().deliveries {
-                if d.message.uid.starts_with(&self.run) {
+                if d.message.id.starts_with(&self.run) {
                     got.push(d);
                 }
             }
@@ -225,7 +224,7 @@ impl Suite {
                 .to_owned_message()
                 .deliveries
                 .into_iter()
-                .filter(|d| d.message.uid.starts_with(&self.run))
+                .filter(|d| d.message.id.starts_with(&self.run))
                 .collect();
             if !mine.is_empty() {
                 self.ack(mine.iter().map(|d| d.delivery_id).collect())
@@ -236,9 +235,9 @@ impl Suite {
         Ok(got)
     }
 
-    /// The deliveries of the message `uid` on `st` until nothing more comes for [`SILENT`] after the last one (or after the stream was
+    /// The deliveries of the message `id` on `st` until nothing more comes for [`SILENT`] after the last one (or after the stream was
     /// opened).
-    async fn drain(&self, st: &mut Stream, uid: &str) -> anyhow::Result<Vec<Delivery>> {
+    async fn drain(&self, st: &mut Stream, id: &str) -> anyhow::Result<Vec<Delivery>> {
         let mut got: Vec<Delivery> = Vec::new();
         let mut last = Instant::now();
         loop {
@@ -246,7 +245,7 @@ impl Suite {
                 Next::Quiet | Next::End => return Ok(got),
                 Next::Batch(batch) => {
                     for d in batch.to_owned_message().deliveries {
-                        if d.message.uid == uid {
+                        if d.message.id == id {
                             got.push(d);
                             last = Instant::now();
                         }
@@ -264,9 +263,9 @@ impl Suite {
                 Next::Batch(batch) => {
                     for d in batch.to_owned_message().deliveries {
                         ensure!(
-                            !d.message.uid.starts_with(&self.run),
+                            !d.message.id.starts_with(&self.run),
                             "the message {} came though it was acknowledged",
-                            d.message.uid
+                            d.message.id
                         );
                     }
                 }
@@ -287,13 +286,13 @@ impl Suite {
             let n = u32::try_from(i + 1)?;
             let want = self.message(n);
             ensure!(
-                d.message.uid == want.uid,
+                d.message.id == want.id,
                 "delivery {i}: the message {} came where {} was due",
-                d.message.uid,
-                want.uid
+                d.message.id,
+                want.id
             );
             ensure!(
-                d.message.record == want.record && d.message.usage == want.usage,
+                d.message.payload == want.payload,
                 "delivery {i}: the message is not the message emitted"
             );
             ensure!(!d.emitter.is_empty(), "delivery {i}: no emitter");
@@ -346,7 +345,7 @@ impl Suite {
         let again = self.take(&mut st, 2).await?;
         let ids = |d: &[Delivery]| {
             d.iter()
-                .map(|d| (d.delivery_id, d.message.uid.clone()))
+                .map(|d| (d.delivery_id, d.message.id.clone()))
                 .collect::<Vec<_>>()
         };
         ensure!(
@@ -375,14 +374,13 @@ impl Suite {
         self.silent(&mut st).await
     }
 
-    /// A message that is delivered again after its consumer went away, and a message emitted twice under one uid (a producer's retry), end
-    /// as exactly one record when the consumer keeps one record for each uid, as a writer that deduplicates by the message's id does: every
-    /// delivery of the uid carries the bytes emitted, record and usage alike, so that the record kept loses nothing whichever delivery
-    /// made it. The message comes at least twice (the redelivery), and once it is acknowledged under every id it came with, it does not
+    /// A message that is delivered again after its consumer went away, and a message emitted twice under one id (a producer's retry), end
+    /// as exactly one message when the consumer keeps one message for each id, as a consumer that deduplicates by the message's id does:
+    /// every delivery of the id carries the payload emitted, whole, so that the message kept loses nothing whichever delivery made it. The message comes at least twice (the redelivery), and once it is acknowledged under every id it came with, it does not
     /// come again.
-    async fn one_record(&self) -> anyhow::Result<()> {
+    async fn one_message(&self) -> anyhow::Result<()> {
         let m = self.message(40);
-        let uid = m.uid.clone();
+        let id = m.id.clone();
         // The emit and its retry: both are accepted (a driver may keep both, or one).
         self.emit(m.clone(), true).await.context("Emit")?;
         self.emit(m.clone(), true)
@@ -392,32 +390,27 @@ impl Suite {
         let mut st = self.open().await?;
         let mut all = self.take(&mut st, 1).await?;
         drop(st);
-        // The next one takes it again, and everything else of that uid that comes.
+        // The next one takes it again, and everything else of that id that comes.
         let mut st = self.open().await?;
         let again = self.take(&mut st, 1).await?;
         all.extend(again);
-        all.extend(self.drain(&mut st, &uid).await?);
+        all.extend(self.drain(&mut st, &id).await?);
         ensure!(
             all.len() >= 2,
             "the message did not come again after its consumer went away"
         );
-        // The writer: one record for each uid; a delivery of a uid it has must carry the bytes it has.
-        let mut records: std::collections::BTreeMap<String, (Vec<u8>, Vec<Vec<u8>>)> =
+        // The consumer: one message for each id; a delivery of an id it has must carry the payload it has.
+        let mut kept: std::collections::BTreeMap<String, Vec<u8>> =
             std::collections::BTreeMap::new();
         for d in &all {
             ensure!(
-                d.message.record == m.record && d.message.usage == m.usage,
-                "a delivery of {uid} does not carry the bytes emitted: the usage of a deduplicated record would be lost"
+                d.message.payload == m.payload,
+                "a delivery of {id} does not carry the payload emitted: part of a deduplicated message would be lost"
             );
-            records
-                .entry(d.message.uid.clone())
-                .or_insert_with(|| (d.message.record.clone(), d.message.usage.clone()));
+            kept.entry(d.message.id.clone())
+                .or_insert_with(|| d.message.payload.clone());
         }
-        ensure!(
-            records.len() == 1,
-            "{} records for one message",
-            records.len()
-        );
+        ensure!(kept.len() == 1, "{} messages for one message", kept.len());
         let mut ids: Vec<u64> = all.iter().map(|d| d.delivery_id).collect();
         ids.sort_unstable();
         ids.dedup();
@@ -425,7 +418,7 @@ impl Suite {
         drop(st);
         // Acknowledged under every id it came with, it does not come again.
         let mut st = self.open().await?;
-        let late = self.drain(&mut st, &uid).await?;
+        let late = self.drain(&mut st, &id).await?;
         ensure!(
             late.is_empty(),
             "the message came again after every delivery of it was acknowledged"
@@ -437,18 +430,18 @@ impl Suite {
         let bad = [
             (None, "message"),
             (
-                Some(AuditMessage {
-                    record: b"{}".to_vec(),
-                    ..AuditMessage::default()
+                Some(Message {
+                    payload: b"{}".to_vec(),
+                    ..Message::default()
                 }),
-                "message.uid",
+                "message.id",
             ),
             (
-                Some(AuditMessage {
-                    uid: self.uid(30),
-                    ..AuditMessage::default()
+                Some(Message {
+                    id: self.id(30),
+                    ..Message::default()
                 }),
-                "message.record",
+                "message.payload",
             ),
         ];
         for (m, field) in bad {

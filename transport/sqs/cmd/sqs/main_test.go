@@ -111,7 +111,7 @@ func dial(socket string) transportv1alpha1connect.TransportServiceClient {
 
 func emitOne(socket string) error {
 	_, err := dial(socket).Emit(context.Background(), connect.NewRequest(&transportv1alpha1.EmitRequest{
-		Message: &transportv1alpha1.AuditMessage{Uid: "u-" + strconv.FormatInt(time.Now().UnixNano(), 10), Record: []byte("{}")}, Blocking: true}))
+		Message: &transportv1alpha1.Message{Id: "u-" + strconv.FormatInt(time.Now().UnixNano(), 10), Payload: []byte("{}")}, Blocking: true}))
 	return err
 }
 

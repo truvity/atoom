@@ -1,4 +1,4 @@
-//! The transport port: the contract for a durable queue that carries audit messages from emitters to one consumer, in order and at
+//! The transport port: the contract for a durable queue that carries opaque messages from emitters to one consumer, in order and at
 //! least once.
 //!
 //! The contract is the proto package `atoom.transport.v1alpha1` (`TransportService`: `Emit`, `Receive`, `Ack`); the generated

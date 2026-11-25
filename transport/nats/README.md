@@ -1,6 +1,6 @@
 # transport/nats
 
-The NATS JetStream driver of the [transport port](../docs/transport-port.md): the transport contract over one JetStream stream (the log) and one durable consumer (its writer). A Go host links it and mounts its handler in its own process, so that its audit records reach the writer with no sidecar ([record 0023](../../docs/decisions/0023-session-to-done-first.md), the owner's D65 A); the thin main serves both sides on one UNIX socket. It passes the [conformance suite](../conformance/docs/suite.md), the redelivery and duplicate case included.
+The NATS JetStream driver of the [transport port](../docs/transport-port.md): the transport contract over one JetStream stream (the log) and one durable consumer. A Go host links it and mounts its handler in its own process, so that its messages reach the consumer with no sidecar ([record 0023](../../docs/decisions/0023-session-to-done-first.md), the owner's D65 A); the thin main serves both sides on one UNIX socket. It passes the [conformance suite](../conformance/docs/suite.md), the redelivery and duplicate case included.
 
 | | |
 | --- | --- |
@@ -8,7 +8,7 @@ The NATS JetStream driver of the [transport port](../docs/transport-port.md): th
 | Library | package `nats`: `New(Options)` takes a JetStream context over the host's connection, the stream, the subject, the consumer and the emitter (`Emitter`, or `Identify` for a host that tells its callers apart), and returns a `Service`; `Service.Handler()` is the Connect handler to mount in-process or on a server; `Run(ctx, opts, host)` serves it on a server the host provides |
 | Thin main | `cmd/nats`: `nats serve --socket PATH --url URL --stream NAME --subject SUBJECT --consumer NAME [--create] [--ack-wait D] [--creds FILE \| --token-file FILE] [--tls-ca FILE] [--emitter NAME] [--wait-time D]`, `nats version` (and `--version`) |
 | Guard flags | `--allow-uid UID` (repeatable; without it only this process's uid may call), `--allow-any-uid`, `--socket-gid GID`, `--socket-mode MODE`: the [socket guard](../../docs/socket-guard.md) |
-| Documentation | [docs/nats.md](docs/nats.md): how the contract maps to JetStream, the redelivery and the writer's dedup, the permissions |
+| Documentation | [docs/nats.md](docs/nats.md): how the contract maps to JetStream, the redelivery and the consumer's dedup, the permissions |
 | Where it came from | [provenance](../../docs/provenance.md#transport-nats) |
 
 ## In process
@@ -19,8 +19,8 @@ js, _ := jetstream.New(nc)
 svc, err := nats.New(nats.Options{
     JetStream: js,
     Stream:    "EXAMPLE",           // the stream of the log
-    Subject:   "example.records",   // the subject the stream captures
-    Consumer:  "writer",            // the writer's durable consumer
+    Subject:   "example.messages",  // the subject the stream captures
+    Consumer:  "consumer",          // the consumer's durable consumer
     Emitter:   "example@host",      // the host's name for itself
 })
 path, h := svc.Handler()
@@ -32,7 +32,7 @@ path, h := svc.Handler()
 ## What it keeps
 
 - **The order of the publishes, and the stream sequence as the delivery id.** The id is the same for a message that comes again, after a restart of the driver too, and grows with the order.
-- **A retry is one message.** An emit publishes with `Nats-Msg-Id` set to the message's uid, and JetStream drops a publish of a uid it has seen within the stream's duplicate window.
+- **A retry is one message.** An emit publishes with `Nats-Msg-Id` set to the message's id, and JetStream drops a publish of an id it has seen within the stream's duplicate window.
 - **What it delivered, until it is acknowledged.** A message whose stream ended comes first on the next stream under its id, with no new pull; one that JetStream delivers again after the ack wait takes the place of the held one and is not delivered twice on a stream. An ack waits for JetStream's answer.
 - **Nothing on disk of its own.** The stream's storage is the server's; the held deliveries are in memory, and a restart gets them again from JetStream after the ack wait.
 - **What NATS said stays in the journal.** A refusal carries a code and the reason `engine`, never NATS's text.

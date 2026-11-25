@@ -32,14 +32,14 @@ func mount(t *testing.T, opts nats.Options) (transportv1alpha1connect.TransportS
 	return transportv1alpha1connect.NewTransportServiceClient(hc, "http://transport", call.ClientOptions()...), svc
 }
 
-func msg(uid string) *transportv1alpha1.AuditMessage {
-	return &transportv1alpha1.AuditMessage{Uid: uid, Record: []byte(`{"uid":"` + uid + `"}`), Usage: [][]byte{[]byte("usage-" + uid)}}
+func msg(uid string) *transportv1alpha1.Message {
+	return &transportv1alpha1.Message{Id: uid, Payload: []byte("payload-" + uid)}
 }
 
-func emit(t *testing.T, c transportv1alpha1connect.TransportServiceClient, m *transportv1alpha1.AuditMessage) {
+func emit(t *testing.T, c transportv1alpha1connect.TransportServiceClient, m *transportv1alpha1.Message) {
 	t.Helper()
 	if _, err := c.Emit(context.Background(), connect.NewRequest(&transportv1alpha1.EmitRequest{Message: m, Blocking: true})); err != nil {
-		t.Fatalf("Emit %s: %v", m.GetUid(), err)
+		t.Fatalf("Emit %s: %v", m.GetId(), err)
 	}
 }
 
@@ -112,7 +112,7 @@ func (k *consumer) quiet(t *testing.T, d time.Duration) {
 	t.Helper()
 	select {
 	case got := <-k.got:
-		t.Fatalf("a delivery came: %s (%d)", got.GetMessage().GetUid(), got.GetDeliveryId())
+		t.Fatalf("a delivery came: %s (%d)", got.GetMessage().GetId(), got.GetDeliveryId())
 	case <-time.After(d):
 	}
 }
@@ -131,7 +131,7 @@ func ack(t *testing.T, c transportv1alpha1connect.TransportServiceClient, ds ...
 func uids(ds []*transportv1alpha1.Delivery) []string {
 	out := make([]string, 0, len(ds))
 	for _, d := range ds {
-		out = append(out, d.GetMessage().GetUid())
+		out = append(out, d.GetMessage().GetId())
 	}
 	return out
 }

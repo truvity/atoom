@@ -4,12 +4,12 @@ The cases of `transport_suite`, in the order they run. Each one speaks the contr
 
 | Case | What it holds a driver to |
 | --- | --- |
-| `emit_then_receive_in_order` | three messages emitted (one not blocking, two blocking) come on an open stream in the order emitted, each exactly as emitted (uid, record, both usage records), each with a non-empty emitter and a delivery id other than 0, and the ids increase; each batch is acknowledged as it comes, so that a driver that holds back later messages until earlier ones are acknowledged (a window) passes |
+| `emit_then_receive_in_order` | three messages emitted (one not blocking, two blocking) come on an open stream in the order emitted, each exactly as emitted (id and payload), each with a non-empty emitter and a delivery id other than 0, and the ids increase; each batch is acknowledged as it comes, so that a driver that holds back later messages until earlier ones are acknowledged (a window) passes |
 | `a_second_consumer_is_refused` | while a `Receive` stream is open and served (a message came on it), a second is `already_exists` (at the call or at the first message); the message is acknowledged |
 | `unacknowledged_messages_come_again` | two messages are emitted before the stream opens (so that a driver with a window has both in its first batch), delivered and not acknowledged; the stream is dropped; the next `Receive` delivers the same two under the same ids |
 | `acknowledged_messages_do_not_come_again` | a message that is acknowledged (with an id the driver does not know beside it, and then again) is not delivered to the next stream in 1.5 seconds; an unknown id and a repeated acknowledgement are not errors |
-| `a_redelivered_or_repeated_message_is_one_record` | a message with usage records is emitted twice under one uid (a retry; both emits are answered), taken by a consumer that goes away without acknowledging, and taken again by the next: it comes at least twice, every delivery carries the record and the usage emitted, and a writer that keeps one record for each uid ends with one; acknowledged under every id it came with, it does not come again (D50 A) |
-| `malformed_emits` | an emit with no message, with an empty uid and with an empty record is `invalid_argument`, reason `schema`, field `message`, `message.uid` and `message.record` |
+| `a_redelivered_or_repeated_message_is_one_message` | a message is emitted twice under one id (a retry; both emits are answered), taken by a consumer that goes away without acknowledging, and taken again by the next: it comes at least twice, every delivery carries the payload emitted, whole, and a consumer that keeps one message for each id ends with one; acknowledged under every id it came with, it does not come again (D50 A) |
+| `malformed_emits` | an emit with no message, with an empty id and with an empty payload is `invalid_argument`, reason `schema`, field `message`, `message.id` and `message.payload` |
 
 ## What the suite fixes beyond the proto comments
 
@@ -19,7 +19,7 @@ These are the choices the contract left open. Every driver makes them, and a con
 - The ids of one stream increase with the order of the emits.
 - A second consumer is refused with `already_exists`, not served and not queued behind the first.
 - An unknown id in an `Ack` is ignored.
-- An emit of a uid the driver has seen is answered, not refused; every delivery of a uid carries the same bytes.
+- An emit of an id the driver has seen is answered, not refused; every delivery of an id carries the same payload.
 - A driver may deliver no further ahead of the acknowledgements than one batch.
 
 ## What the suite cannot test

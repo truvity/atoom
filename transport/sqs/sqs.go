@@ -1,18 +1,18 @@
 // Package sqs is the Amazon SQS driver of the transport port of atoom, atoom.transport.v1alpha1.TransportService, in Go: the transport
 // contract over one SQS FIFO queue. The Go module is github.com/truvity/atoom/transport/sqs. A Go program, a Lambda function for one, links
-// it and mounts its handler in its own process, so that audit on Lambda emits with no sidecar; the thin main (cmd/sqs) serves both sides on
+// it and mounts its handler in its own process, so that a Lambda function emits with no sidecar; the thin main (cmd/sqs) serves both sides on
 // a UNIX socket.
 //
 //   - Emit is one SendMessage to the FIFO queue, in the one message group the host names, so that the queue keeps the order of the emits.
 //     The body is the message in its Protobuf encoding, in base64; the emitter, as the host names the caller, is a message attribute. The
-//     deduplication id is the SHA-256 of the message's uid, so that an emit made again with the same uid (a retry) within SQS's five
+//     deduplication id is the SHA-256 of the message's id, so that an emit made again with the same id (a retry) within SQS's five
 //     minutes is one message. SQS answers once the message is stored, so a blocking emit and another are answered alike.
 //   - Receive long-polls the queue and hands each message on as a delivery. The driver gives each message a delivery id when it first
 //     takes it and holds it until it is acknowledged: a message that comes again (a stream that ended, a visibility timeout that passed)
 //     comes under the same id, first on the next stream. One stream at a time.
 //   - Ack deletes the messages by their latest receipt handles. An id the driver does not hold is ignored.
 //
-// SQS delivers at least once, so a message may come twice; it is the consumer that makes it one record, by the message's uid (the writer's
+// SQS delivers at least once, so a message may come twice; it is the consumer that makes it one, by the message's id (its
 // dedup, docs/sqs.md). A FIFO queue hands out no message of a group while an earlier one of it is in flight, so the driver delivers at most
 // one receive (ten messages) ahead of the acknowledgements: a consumer acknowledges what it holds to receive more.
 package sqs
@@ -235,9 +235,9 @@ func engine(what string, err error) error {
 	return refusal.New(connect.CodeUnavailable, "engine", "")
 }
 
-// DeduplicationID is the deduplication id of a message: the SHA-256 of its uid, in hex.
-func DeduplicationID(uid string) string {
-	sum := sha256.Sum256([]byte(uid))
+// DeduplicationID is the deduplication id of a message: the SHA-256 of its id, in hex.
+func DeduplicationID(id string) string {
+	sum := sha256.Sum256([]byte(id))
 	return hex.EncodeToString(sum[:])
 }
 
@@ -247,10 +247,10 @@ func (s *Service) Emit(ctx context.Context, req *connect.Request[transportv1alph
 	switch {
 	case m == nil:
 		return nil, refusal.New(connect.CodeInvalidArgument, "schema", "message")
-	case m.GetUid() == "":
-		return nil, refusal.New(connect.CodeInvalidArgument, "schema", "message.uid")
-	case len(m.GetRecord()) == 0:
-		return nil, refusal.New(connect.CodeInvalidArgument, "schema", "message.record")
+	case m.GetId() == "":
+		return nil, refusal.New(connect.CodeInvalidArgument, "schema", "message.id")
+	case len(m.GetPayload()) == 0:
+		return nil, refusal.New(connect.CodeInvalidArgument, "schema", "message.payload")
 	}
 	emitter, ok := s.identify(ctx)
 	if !ok || emitter == "" {
@@ -270,7 +270,7 @@ func (s *Service) Emit(ctx context.Context, req *connect.Request[transportv1alph
 		QueueUrl:               aws.String(s.queue),
 		MessageBody:            aws.String(base64.StdEncoding.EncodeToString(raw)),
 		MessageGroupId:         aws.String(s.group),
-		MessageDeduplicationId: aws.String(DeduplicationID(m.GetUid())),
+		MessageDeduplicationId: aws.String(DeduplicationID(m.GetId())),
 		MessageAttributes: map[string]types.MessageAttributeValue{
 			EmitterAttribute: {DataType: aws.String("String"), StringValue: aws.String(emitter)},
 		},
@@ -287,8 +287,8 @@ func decode(m types.Message) (*transportv1alpha1.Delivery, bool) {
 	if err != nil {
 		return nil, false
 	}
-	msg := &transportv1alpha1.AuditMessage{}
-	if err := proto.Unmarshal(raw, msg); err != nil || msg.GetUid() == "" || len(msg.GetRecord()) == 0 {
+	msg := &transportv1alpha1.Message{}
+	if err := proto.Unmarshal(raw, msg); err != nil || msg.GetId() == "" || len(msg.GetPayload()) == 0 {
 		return nil, false
 	}
 	emitter := aws.ToString(m.MessageAttributes[EmitterAttribute].StringValue)
@@ -442,7 +442,7 @@ func (s *Service) send(stream *connect.ServerStream[transportv1alpha1.ReceiveRes
 }
 
 // Ack deletes the acknowledged messages from the queue. An id the driver does not hold is ignored; a receipt handle that SQS no longer takes
-// is ignored too (the message comes again, under a new id, and the consumer's dedup by uid makes it one record).
+// is ignored too (the message comes again, under a new id, and the consumer's dedup by id makes it one).
 func (s *Service) Ack(ctx context.Context, req *connect.Request[transportv1alpha1.AckRequest]) (*connect.Response[transportv1alpha1.AckResponse], error) {
 	ids := req.Msg.GetDeliveryIds()
 	if len(ids) > AckMax {
