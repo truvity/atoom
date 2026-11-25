@@ -1,6 +1,6 @@
 # 0021. Drivers and libraries know no deployment shapes; hosts decide
 
-Status: proposed, 2026-11-25 (owner principle of 2026-11-25; the record waits for the owner's acceptance)
+Status: accepted, 2026-11-25 (owner decision on the pull request; owner principle of 2026-11-25)
 
 ## Context
 
