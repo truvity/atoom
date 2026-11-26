@@ -86,6 +86,9 @@ type Options struct {
 	MessageMax int
 	// WaitTime is how long one pull waits for a message; zero is [DefaultWaitTime].
 	WaitTime time.Duration
+	// Logger receives every line the driver writes. nil means slog.Default(), read at each line; the host decides where the lines go,
+	// or that they go nowhere.
+	Logger *slog.Logger
 }
 
 // Host is what a program that runs the driver provides.
@@ -118,6 +121,7 @@ type Service struct {
 	identify func(ctx context.Context) (string, bool)
 	max      int
 	wait     time.Duration
+	logger   *slog.Logger
 
 	consuming atomic.Bool
 	ready     atomic.Bool // the stream was made, or found
@@ -157,7 +161,7 @@ func New(opts Options) (*Service, error) {
 		ackWait = DefaultAckWait
 	}
 	return &Service{js: opts.JetStream, stream: opts.Stream, subject: opts.Subject, consumer: opts.Consumer, create: opts.Create,
-		ackWait: ackWait, identify: identify, max: maxMsg, wait: wait, byID: map[uint64]*held{}}, nil
+		ackWait: ackWait, identify: identify, max: maxMsg, wait: wait, logger: opts.Logger, byID: map[uint64]*held{}}, nil
 }
 
 // Handler returns the Connect handler of the transport service, to mount on a server or an in-memory transport.
@@ -191,12 +195,20 @@ func Run(ctx context.Context, opts Options, host Host) error {
 	return host.Serve(ctx, path, h)
 }
 
+// log is the logger of the driver: the host's Options.Logger, or slog.Default() read now when the host gave none.
+func (s *Service) log() *slog.Logger {
+	if s.logger != nil {
+		return s.logger
+	}
+	return slog.Default()
+}
+
 // engine is the refusal of a failure of NATS: the reason only, and NATS's text in the operator's log.
-func engine(what string, err error) error {
+func (s *Service) engine(what string, err error) error {
 	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 		return err
 	}
-	slog.Error("NATS failed", "call", what, "err", err)
+	s.log().Error("NATS failed", "call", what, "err", err)
 	return refusal.New(connect.CodeUnavailable, "engine", "")
 }
 
@@ -259,13 +271,13 @@ func (s *Service) Emit(ctx context.Context, req *connect.Request[transportv1alph
 		return nil, refusal.New(connect.CodeInvalidArgument, "bound", "message")
 	}
 	if err := s.prepareStream(ctx); err != nil {
-		return nil, engine("CreateStream", err)
+		return nil, s.engine("CreateStream", err)
 	}
 	msg := natsgo.NewMsg(s.subject)
 	msg.Data = raw
 	msg.Header.Set(EmitterHeader, emitter)
 	if _, err := s.js.PublishMsg(ctx, msg, jetstream.WithMsgID(m.GetId()), jetstream.WithExpectStream(s.stream)); err != nil {
-		return nil, engine("Publish", err)
+		return nil, s.engine("Publish", err)
 	}
 	return connect.NewResponse(&transportv1alpha1.EmitResponse{}), nil
 }
@@ -300,7 +312,7 @@ func (s *Service) Receive(ctx context.Context, req *connect.Request[transportv1a
 	}
 	cons, err := s.pullConsumer(ctx)
 	if err != nil {
-		return engine("Consumer", err)
+		return s.engine("Consumer", err)
 	}
 	s.mu.Lock()
 	s.streams++
@@ -329,7 +341,7 @@ func (s *Service) Receive(ctx context.Context, req *connect.Request[transportv1a
 		// The pull is not bound to the stream: what it brings is held even when the stream ends meanwhile, and goes on the next one.
 		res, err := cons.Fetch(batch, jetstream.FetchMaxWait(s.wait))
 		if err != nil {
-			return engine("Fetch", err)
+			return s.engine("Fetch", err)
 		}
 		var msgs []jetstream.Msg
 		for m := range res.Messages() {
@@ -338,7 +350,7 @@ func (s *Service) Receive(ctx context.Context, req *connect.Request[transportv1a
 		ds := s.take(me, msgs)
 		if err := res.Error(); err != nil && !errors.Is(err, natsgo.ErrTimeout) {
 			_ = s.send(stream, ds, batch)
-			return engine("Fetch", err)
+			return s.engine("Fetch", err)
 		}
 		if err := s.send(stream, ds, batch); err != nil {
 			return err
@@ -382,7 +394,7 @@ func (s *Service) take(me uint64, msgs []jetstream.Msg) []*transportv1alpha1.Del
 			continue
 		}
 		if !ok {
-			slog.Error("NATS: a message the driver did not write is terminated", "stream_sequence", seq)
+			s.log().Error("NATS: a message the driver did not write is terminated", "stream_sequence", seq)
 			_ = m.Term()
 			continue
 		}
@@ -421,7 +433,7 @@ func (s *Service) Ack(ctx context.Context, req *connect.Request[transportv1alpha
 			continue
 		}
 		if err := m.DoubleAck(ctx); err != nil && !errors.Is(err, jetstream.ErrMsgAlreadyAckd) {
-			return nil, engine("Ack", err)
+			return nil, s.engine("Ack", err)
 		}
 		s.mu.Lock()
 		delete(s.byID, id)
