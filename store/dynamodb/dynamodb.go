@@ -81,6 +81,9 @@ type Options struct {
 	Table string
 	// Caller names the caller of a call for the journal line of a refusal; none when nil. The host knows its callers.
 	Caller func(context.Context) string
+	// Logger receives every line the driver writes. nil means slog.Default(), read at each line; the host decides where the lines go,
+	// or that they go nowhere.
+	Logger *slog.Logger
 }
 
 // Host is what a program that runs the driver provides.
@@ -97,6 +100,7 @@ type Service struct {
 	api    API
 	table  string
 	caller func(context.Context) string
+	logger *slog.Logger
 	now    func() time.Time
 }
 
@@ -112,7 +116,15 @@ func New(opts Options) (*Service, error) {
 	if err := checkTableName(table); err != nil {
 		return nil, err
 	}
-	return &Service{api: opts.DynamoDB, table: table, caller: opts.Caller, now: time.Now}, nil
+	return &Service{api: opts.DynamoDB, table: table, caller: opts.Caller, logger: opts.Logger, now: time.Now}, nil
+}
+
+// log is the logger of the driver: the host's Options.Logger, or slog.Default() read now when the host gave none.
+func (s *Service) log() *slog.Logger {
+	if s.logger != nil {
+		return s.logger
+	}
+	return slog.Default()
 }
 
 // checkTableName holds a name to what DynamoDB accepts: 3 to 255 of letters, digits, '_', '-' and '.'.
@@ -143,7 +155,7 @@ func Run(ctx context.Context, opts Options, host Host) error {
 	if err != nil {
 		return err
 	}
-	slog.Info("dynamodb item driver starting", "table", svc.table)
+	svc.log().Info("dynamodb item driver starting", "table", svc.table)
 	path, h := svc.Handler(host.HandlerOptions...)
 	return host.Serve(ctx, path, h)
 }
