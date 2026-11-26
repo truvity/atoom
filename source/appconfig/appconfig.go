@@ -83,6 +83,9 @@ type Options struct {
 	PollInterval time.Duration
 	// Now is the clock; nil is time.Now. Tests set it.
 	Now func() time.Time
+	// Logger receives every line the driver writes. nil means slog.Default(), read at each line; the host decides where the lines go,
+	// or that they go nowhere.
+	Logger *slog.Logger
 }
 
 // Host is what a program that runs the driver provides.
@@ -111,6 +114,7 @@ type Service struct {
 	profiles map[string]string
 	interval *int32 // RequiredMinimumPollIntervalInSeconds, nil = AppConfig's default
 	now      func() time.Time
+	logger   *slog.Logger
 
 	mu    sync.Mutex
 	names map[string]*entry
@@ -159,7 +163,7 @@ func New(opts Options) (*Service, error) {
 	if now == nil {
 		now = time.Now
 	}
-	return &Service{api: opts.AppConfig, app: opts.Application, env: opts.Environment, profiles: profiles, interval: poll, now: now, names: map[string]*entry{}}, nil
+	return &Service{api: opts.AppConfig, app: opts.Application, env: opts.Environment, profiles: profiles, interval: poll, now: now, logger: opts.Logger, names: map[string]*entry{}}, nil
 }
 
 // ValidName reports whether name is a kebab-case name: 1 to 63 characters of lower-case letters, digits and "-", starting with a letter
@@ -316,8 +320,16 @@ func Run(ctx context.Context, opts Options, host Host) error {
 	return host.Serve(ctx, path, h)
 }
 
+// log is the logger of the driver: the host's Options.Logger, or slog.Default() read now when the host gave none.
+func (s *Service) log() *slog.Logger {
+	if s.logger != nil {
+		return s.logger
+	}
+	return slog.Default()
+}
+
 // refuse is the Connect error of an error of a read; the field at fault is the request's name.
-func refuse(err error) error {
+func (s *Service) refuse(err error) error {
 	switch {
 	case errors.Is(err, ErrName):
 		return refusal.New(connect.CodeInvalidArgument, "schema", "name")
@@ -329,7 +341,7 @@ func refuse(err error) error {
 		return err
 	default:
 		// The message is the reason only, never AppConfig's text: that is for the operator's log.
-		slog.Error("AppConfig failed", "err", err)
+		s.log().Error("AppConfig failed", "err", err)
 		return refusal.New(connect.CodeUnavailable, "engine", "")
 	}
 }
@@ -344,7 +356,7 @@ func (s *Service) Capabilities(_ context.Context, _ *connect.Request[sourcev1alp
 func (s *Service) Read(ctx context.Context, req *connect.Request[sourcev1alpha1.ReadRequest]) (*connect.Response[sourcev1alpha1.ReadResponse], error) {
 	doc, err := s.Document(ctx, req.Msg.GetName())
 	if err != nil {
-		return nil, refuse(err)
+		return nil, s.refuse(err)
 	}
 	res := &sourcev1alpha1.ReadResponse{Version: doc.Version, PollAfter: durationpb.New(doc.PollAfter)}
 	if held := req.Msg.GetIfNoneMatch(); held != "" && held == doc.Version {
