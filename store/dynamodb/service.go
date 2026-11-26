@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"errors"
-	"log/slog"
 	"net"
 	"time"
 
@@ -258,7 +257,7 @@ func (s *Service) batchGet(ctx context.Context, keys [][]byte, consistent bool) 
 func (s *Service) refused(ctx context.Context, method string, err error) error {
 	var ce *connect.Error
 	if errors.As(err, &ce) {
-		slog.Warn("refused", "method", method, "code", ce.Code().String(), "message", ce.Message(), "caller", s.callerOf(ctx))
+		s.log().Warn("refused", "method", method, "code", ce.Code().String(), "message", ce.Message(), "caller", s.callerOf(ctx))
 	}
 	return err
 }
@@ -281,7 +280,7 @@ func (s *Service) failed(ctx context.Context, method string, err error) error {
 	case errors.As(err, &api):
 		if api.ErrorCode() == "ValidationException" {
 			// A request the engine refuses as malformed: the driver's own mistake or a limit it did not know; the journal says which.
-			slog.Error("DynamoDB refused a request as invalid", "method", method, "error", err.Error())
+			s.log().Error("DynamoDB refused a request as invalid", "method", method, "error", err.Error())
 			return refuse(connect.CodeInvalidArgument, "batch", "")
 		}
 		// Everything else (a throttle, a missing table, an access denial) is an engine that cannot answer: the contract has one word for it,
@@ -289,7 +288,7 @@ func (s *Service) failed(ctx context.Context, method string, err error) error {
 	case errors.As(err, &netErr):
 		// A network failure is the same.
 	}
-	slog.Error("DynamoDB failed", "method", method, "error", err.Error(), "caller", s.callerOf(ctx))
+	s.log().Error("DynamoDB failed", "method", method, "error", err.Error(), "caller", s.callerOf(ctx))
 	return refuse(connect.CodeUnavailable, "engine", "")
 }
 
