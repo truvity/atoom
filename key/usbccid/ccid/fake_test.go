@@ -449,6 +449,12 @@ func cardHandler(apdu func(cmd []byte) []byte) func(f *fakeDevice, m []byte) {
 // echoSW answers every command with the command bytes followed by 90 00.
 func echoSW(cmd []byte) []byte { return append(append([]byte(nil), cmd...), 0x90, 0x00) }
 
+// setSeq makes the next sequence number of the process n+1 (the counter is shared by every Reader, and random at first use).
+func setSeq(n uint8) {
+	seqs.once.Do(func() {})
+	seqs.n.Store(uint32(n))
+}
+
 // testBudget is the budget most tests give a call.
 const testBudget = 10 * time.Second
 

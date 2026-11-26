@@ -66,6 +66,7 @@ func TestOpenSendsNothing(t *testing.T) {
 }
 
 func TestPowerOnSendsOnlyGetSlotStatusAndPowerOn(t *testing.T) {
+	setSeq(0) // the numbers of the process counter are read from 1 here
 	r, f, err := openFake(Options{}, cardHandler(echoSW))
 	if err != nil {
 		t.Fatal(err)
@@ -158,8 +159,8 @@ func TestSequenceNumbersWrap(t *testing.T) {
 		}
 		prev = m[6]
 	}
-	if f.outs[255][6] != 0 { // 256th message
-		t.Errorf("sequence did not wrap at message 256: %d", f.outs[255][6])
+	if f.outs[256][6] != f.outs[0][6] { // the 257th message has the number of the first
+		t.Errorf("sequence did not wrap after 256 messages: %d and %d", f.outs[256][6], f.outs[0][6])
 	}
 }
 
@@ -171,7 +172,7 @@ func TestMessageLengthsAroundPacketBoundaries(t *testing.T) {
 			var want []byte
 			r, f := openPowered(t, Options{}, cardHandler(func([]byte) []byte { return want }))
 			f.noZLP = noZLP
-			for n := 0; n <= 261; n++ {
+			for n := 2; n <= 261; n++ { // a response ends in two status bytes
 				want = bytes.Repeat([]byte{byte(n)}, n)
 				if n >= 2 {
 					want[n-2], want[n-1] = 0x90, 0x00
@@ -193,7 +194,7 @@ func TestReadsNeverGoBeyondTheMessage(t *testing.T) {
 	var want []byte
 	r, f := openPowered(t, Options{}, cardHandler(func([]byte) []byte { return want }))
 	prevBoundary := false // the answer to reset (24 bytes with its header) is no boundary
-	for _, n := range []int{0, 5, 54, 55, 118, 119, 182, 183, 246, 247, 261, 54, 54} {
+	for _, n := range []int{2, 5, 54, 55, 118, 119, 182, 183, 246, 247, 261, 54, 54} {
 		want = bytes.Repeat([]byte{1}, n)
 		f.mu.Lock()
 		f.inLens = nil
@@ -438,7 +439,7 @@ func TestTransferTimeoutsFollowTheOptions(t *testing.T) {
 
 	// Default: ten seconds at most, and well above zero.
 	_, f = openPowered(t, Options{}, cardHandler(echoSW))
-	for _, d := range f.timeouts {
+	for _, d := range f.timeouts[1:] { // the first is the read of the drain
 		if d <= 5*time.Second || d > DefaultTransferTimeout {
 			t.Fatalf("default transfer timeout %v", d)
 		}
@@ -1150,7 +1151,7 @@ func TestOpenRefusesABadTransferTimeout(t *testing.T) {
 
 func TestOpenWithACandidate(t *testing.T) {
 	f := newFake(descSpec{second: true}, cardHandler(echoSW))
-	c := usbccid.Candidate{Interface: 3, BulkOut: 0x06, BulkIn: 0x86}
+	c := usbccid.Candidate{VendorID: 0x7777, ProductID: 1, Interface: 3, BulkOut: 0x06, BulkIn: 0x86}
 	// The fake only serves its own endpoints (2, 0x82), so only the choice of interface and the claim are looked at.
 	r, err := Open(f, Options{Candidate: &c})
 	if err != nil {
@@ -1160,7 +1161,7 @@ func TestOpenWithACandidate(t *testing.T) {
 		t.Errorf("info = %+v", info)
 	}
 	f = newFake(descSpec{}, nil)
-	bad := usbccid.Candidate{Interface: 2, BulkOut: 0x02, BulkIn: 0x84}
+	bad := usbccid.Candidate{VendorID: 0x7777, ProductID: 1, Interface: 2, BulkOut: 0x02, BulkIn: 0x84}
 	if _, err := Open(f, Options{Candidate: &bad}); !errors.Is(err, usbccid.ErrWrongDevice) || !f.closed || f.count("claim") != 0 {
 		t.Errorf("err=%v calls=%v", err, f.calls)
 	}
@@ -1799,6 +1800,7 @@ func TestChainRefusals(t *testing.T) {
 				cardHandler(echoSW)(f, m)
 				return
 			}
+			f.send(msg(rspDataBlock, m[6], stOK, 0, chainBegin, bytes.Repeat([]byte{1}, 250)))
 			f.endless = msg(rspDataBlock, m[6], stOK, 0, chainMiddle, bytes.Repeat([]byte{1}, 250))
 		}
 		r, f := openPowered(t, Options{}, h)

@@ -9,7 +9,7 @@ import (
 // FuzzAnswers feeds the reader whatever bytes a hostile or broken reader could send in answer to one command, cut into packets as the
 // data says. Whatever arrives, the reader neither panics nor loops, never returns more than MaxResponseAPDU bytes, never sends
 // a second message after an error that ends the session, and ends the session on every error but a card-level failure of the only
-// message.
+// message and a success that says the card is not active.
 func FuzzAnswers(f *testing.F) {
 	ok := msg(rspDataBlock, 3, stOK, 0, 0, []byte{0x90, 0})
 	f.Add(ok, uint8(0))
@@ -18,6 +18,7 @@ func FuzzAnswers(f *testing.F) {
 	f.Add(msg(rspDataBlock, 3, stTimeExt, 1, 0, nil), uint8(0))
 	f.Add(msg(rspDataBlock, 3, stOK, 0, chainBegin, []byte{1, 2}), uint8(1))
 	f.Add(msg(rspDataBlock, 2, stOK, 0, 0, nil), uint8(0))
+	f.Add(msg(rspDataBlock, 3, stOK|iccInact, 0, 0, []byte{0x90, 0}), uint8(0))
 	f.Add(make([]byte, 64), uint8(3))
 	f.Add([]byte{}, uint8(0))
 	f.Fuzz(func(t *testing.T, data []byte, cut uint8) {
@@ -39,6 +40,7 @@ func FuzzAnswers(f *testing.F) {
 			}
 		}
 		r, fk := openPowered(t, Options{}, h)
+		seqs.n.Store(2) // the Transmit is number 3, as the seeds say
 		outs := fk.nOut
 		resp, err := r.Transmit(apduSelect, 50*time.Millisecond)
 		if len(resp) > MaxResponseAPDU {
@@ -52,8 +54,8 @@ func FuzzAnswers(f *testing.F) {
 		}
 		var ce *CommandError
 		lost := errors.Is(err, ErrSessionLost)
-		if !lost && !errors.As(err, &ce) {
-			t.Fatalf("an error that is neither a lost session nor a card-level failure: %v", err)
+		if !lost && !errors.As(err, &ce) && !errors.Is(err, ErrNotPowered) {
+			t.Fatalf("an error that is neither a lost session, a card-level failure nor a card that is off: %v", err)
 		}
 		if fk.nOut < outs+1 {
 			t.Fatal("no message sent for the command")
