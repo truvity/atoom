@@ -41,17 +41,17 @@ type ifaceDesc struct {
 // is what a claim and a bulk call are held to: an interface that is not here, or not a CCID interface, is never claimed, and an
 // endpoint that is not a bulk endpoint of exactly one interface, which is claimed, is never used.
 //
-// A device that declares more than one configuration (bNumConfigurations other than 1) has no usable layout: the kernel knows only
-// its active configuration, and usbfs does not say which one that is, so this layer cannot know which interfaces and endpoints the
-// kernel will claim. Claim and every bulk call are refused for such a device (ErrSeveralConfigurations); the layer does not choose.
+// A layout exists only for SIMPLE descriptors: one configuration; its length and bNumInterfaces as declared; every interface at
+// alternate setting 0 only, and no number twice; as many endpoint descriptors after each interface as its bNumEndpoints says; and no
+// endpoint address twice in the configuration. This layer serves one known kind of device, so it refuses everything else at Open
+// (ErrBadDescriptors, ErrSeveralConfigurations) instead of copying the rules the kernel applies to what is left open (the active
+// configuration, which usbfs does not name; the fall back to another alternate setting; the choice among duplicates and the
+// endpoints beyond a count). With nothing left for either side to choose, the layout cannot differ from the kernel's view of who
+// owns an endpoint.
 type layout struct {
 	vendor, product uint16
-	configs         int // bNumConfigurations of the device descriptor
 	ifaces          []ifaceDesc
 }
-
-// several reports whether the layout is unusable because the device declares other than one configuration.
-func (l *layout) several() bool { return l.configs != 1 }
 
 // find returns the interface with this number, or nil.
 func (l *layout) find(n int) *ifaceDesc {
@@ -99,73 +99,88 @@ func validEndpoint(addr uint8) bool {
 
 func le16(b []byte) uint16 { return uint16(b[0]) | uint16(b[1])<<8 }
 
-// parseLayout reads the raw descriptors that a usbfs node returns: the 18-byte device descriptor, then the configuration with its
-// interfaces and endpoints. It follows the rules the kernel follows, because what matters is who owns an endpoint for the kernel:
-//   - only alternate setting 0 of an interface counts;
-//   - of several interface descriptors with the same number and alternate setting 0 in the configuration, the first counts;
-//   - of the endpoint descriptors after an interface descriptor, at most bNumEndpoints count, and the rest are ignored.
-//
-// A device with other than one configuration is not read further (see layout): the layout holds the ids and the count only. Any
-// malformed descriptor is an error, and the layout is then not to be used.
+// parseLayout reads the raw descriptors that a usbfs node returns: the 18-byte device descriptor and the one configuration with its
+// interfaces and endpoints, and accepts only simple descriptors (see layout). A refusal is an error that names the rule and holds
+// no byte of the descriptors; it is ErrSeveralConfigurations for the one case of a device that declares other than one
+// configuration, and a plain error for the rest (Open wraps it in ErrBadDescriptors). Descriptors of other types between the
+// interface and endpoint descriptors (class-specific ones such as HID and CCID, interface associations) are skipped by their length,
+// wherever they stand.
 func parseLayout(b []byte) (layout, error) {
 	var l layout
 	if len(b) < 18 || b[0] != 18 || b[1] != descDevice {
-		return l, errors.New("usbccid: descriptors do not start with a device descriptor")
+		return l, errors.New("the data does not start with a device descriptor")
 	}
-	l.vendor, l.product, l.configs = le16(b[8:]), le16(b[10:]), int(b[17])
-	if l.several() {
-		return l, nil
+	l.vendor, l.product = le16(b[8:]), le16(b[10:])
+	if b[17] != 1 {
+		return l, ErrSeveralConfigurations
 	}
-	rest := b[18:]
-	if len(rest) < 4 || rest[0] < 9 || int(rest[0]) > len(rest) || rest[1] != descConfig {
-		return l, errors.New("usbccid: malformed configuration descriptor")
+	cfg := b[18:]
+	if len(cfg) < 9 || cfg[0] < 9 || int(cfg[0]) > len(cfg) || cfg[1] != descConfig {
+		return l, errors.New("no configuration descriptor follows the device descriptor")
 	}
-	total := int(le16(rest[2:]))
-	if total < int(rest[0]) || total > len(rest) {
-		return l, errors.New("usbccid: configuration descriptor length out of range")
+	if int(le16(cfg[2:])) != len(cfg) {
+		return l, errors.New("the length of the configuration is not the number of bytes present")
 	}
-	ifs, err := parseConfig(rest[:total])
+	ifs, err := parseConfig(cfg)
+	if err != nil {
+		return l, err
+	}
+	if int(cfg[4]) != len(ifs) {
+		return l, errors.New("bNumInterfaces is not the number of interfaces listed")
+	}
 	l.ifaces = ifs
-	return l, err
+	return l, nil
 }
 
-// parseConfig reads the interfaces of one configuration descriptor with its following descriptors.
+// parseConfig reads the interfaces of one configuration descriptor and the descriptors after it, under the rules of a simple
+// configuration.
 func parseConfig(cfg []byte) ([]ifaceDesc, error) {
 	var (
-		out    []ifaceDesc
-		cur    *ifaceDesc // the interface whose endpoints are being read; nil when they are to be ignored
-		budget int        // the endpoint descriptors of cur that still count (bNumEndpoints)
+		out  []ifaceDesc
+		want []int // bNumEndpoints of each interface of out
+		seen = map[uint8]bool{}
 	)
 	for p := cfg[cfg[0]:]; len(p) > 0; {
 		n := int(p[0])
 		if n < 2 || n > len(p) {
-			return out, errors.New("usbccid: malformed descriptor inside configuration")
+			return nil, errors.New("a descriptor is shorter than its header or runs past the end")
 		}
 		d := p[:n]
 		p = p[n:]
 		switch d[1] {
 		case descInterface:
 			if n < 9 {
-				return out, errors.New("usbccid: interface descriptor too short")
+				return nil, errors.New("an interface descriptor is shorter than 9 bytes")
 			}
-			cur, budget = nil, 0
-			if d[3] != 0 { // alternate setting 0 only
-				continue
+			if d[3] != 0 {
+				return nil, errors.New("an interface has an alternate setting other than 0")
 			}
 			if slices.ContainsFunc(out, func(i ifaceDesc) bool { return i.number == int(d[2]) }) {
-				continue // the first descriptor of a number counts, as in the kernel
+				return nil, errors.New("an interface number is listed twice")
 			}
 			out = append(out, ifaceDesc{number: int(d[2]), class: d[5]})
-			cur, budget = &out[len(out)-1], int(d[4])
+			want = append(want, int(d[4]))
 		case descEndpoint:
 			if n < 7 {
-				return out, errors.New("usbccid: endpoint descriptor too short")
+				return nil, errors.New("an endpoint descriptor is shorter than 7 bytes")
 			}
-			if cur == nil || budget == 0 {
-				continue
+			if len(out) == 0 {
+				return nil, errors.New("an endpoint descriptor stands before any interface")
 			}
-			budget--
+			if !validEndpoint(d[2]) {
+				return nil, errors.New("an endpoint address is not a number 1 to 15 with the reserved bits clear")
+			}
+			if seen[d[2]] {
+				return nil, errors.New("an endpoint address is listed twice")
+			}
+			seen[d[2]] = true
+			cur := &out[len(out)-1]
 			cur.eps = append(cur.eps, endpoint{addr: d[2], attrs: d[3]})
+		}
+	}
+	for i := range out {
+		if len(out[i].eps) != want[i] {
+			return nil, errors.New("an interface has not as many endpoint descriptors as its bNumEndpoints")
 		}
 	}
 	return out, nil

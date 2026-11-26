@@ -112,7 +112,10 @@ func open(path string, usb bool) (*Device, error) {
 	lay, err := parseLayout(desc)
 	if err != nil {
 		_ = unix.Close(fd)
-		return nil, fmt.Errorf("%w: %s: %w", ErrBadDescriptors, path, err)
+		if errors.Is(err, ErrSeveralConfigurations) {
+			return nil, fmt.Errorf("%w: %s", ErrSeveralConfigurations, path)
+		}
+		return nil, fmt.Errorf("%w: %s: %v", ErrBadDescriptors, path, err) //nolint:errorlint // the rule that failed is text, not an error to match
 	}
 	return &Device{fd: fd, claimed: map[int]bool{}, desc: desc, lay: lay, ioctl: sysIoctl}, nil
 }
@@ -156,9 +159,13 @@ func openChecked(path string, check func(*unix.Stat_t) error, flags int) (int, e
 	fd, err := unix.Open(proc, flags|unix.O_CLOEXEC|unix.O_NOCTTY|unix.O_NONBLOCK, 0)
 	if err != nil {
 		if errors.Is(err, unix.ENOENT) || errors.Is(err, unix.ENOTDIR) {
-			// The node exists (it was just looked at), so this is /proc: not mounted, or hidden. The errno is not wrapped, so that the
-			// error does not read as a node that does not exist.
-			return -1, fmt.Errorf("%w: %s cannot be reopened through %s: %v", ErrNoProcSelfFd, path, proc, err) //nolint:errorlint // see above
+			// The node existed a moment ago, so either /proc/self/fd is not there, or the device went away between the two opens (the
+			// kernel answers the same). An access check tells them apart. The errno is not wrapped, so that neither error reads as a
+			// node that does not exist.
+			if unix.Access("/proc/self/fd", unix.F_OK) != nil {
+				return -1, fmt.Errorf("%w: %s cannot be reopened through %s: %v", ErrNoProcSelfFd, path, proc, err) //nolint:errorlint // see above
+			}
+			return -1, fmt.Errorf("usbccid: %s: %w: unplugged between the two opens: %v", path, ErrGone, err) //nolint:errorlint // see above
 		}
 		return -1, &os.PathError{Op: "open", Path: path, Err: err}
 	}
@@ -203,9 +210,6 @@ func (d *Device) verify(c Candidate) error {
 	}
 	if d.lay.vendor != c.VendorID || d.lay.product != c.ProductID {
 		return wrong(fmt.Sprintf("the ids are %04x:%04x, not %04x:%04x", d.lay.vendor, d.lay.product, c.VendorID, c.ProductID))
-	}
-	if d.lay.several() {
-		return fmt.Errorf("%w (node %s, port %s)", ErrSeveralConfigurations, c.NodePath, c.PortPath)
 	}
 	in := d.lay.find(c.Interface)
 	if in == nil || in.class != ClassCCID {
@@ -275,8 +279,7 @@ func (d *Device) fail(what string, e unix.Errno) error {
 
 // Claim takes interface n with USBDEVFS_CLAIMINTERFACE, for an interface that the descriptors hold and whose class is 0x0B (CCID);
 // any other number (a number outside 0 to 255 included, which no longer reaches the kernel to be refused as an invalid argument) is
-// refused before the kernel is asked, with an error that wraps ErrNoSuchInterface. A device that declares several configurations is
-// refused with ErrSeveralConfigurations. A busy interface returns an
+// refused before the kernel is asked, with an error that wraps ErrNoSuchInterface. A busy interface returns an
 // error that wraps ErrBusy (and EBUSY); the holder may also be another handle of the same process. Nothing is detached, the device
 // is not reset, and Claim never retries.
 func (d *Device) Claim(n int) error {
@@ -284,9 +287,6 @@ func (d *Device) Claim(n int) error {
 	defer d.mu.Unlock()
 	if err := d.state(); err != nil {
 		return err
-	}
-	if d.lay.several() {
-		return fmt.Errorf("usbccid: claim interface %d: %w", n, ErrSeveralConfigurations)
 	}
 	in := (*ifaceDesc)(nil)
 	if n >= 0 && n <= maxInterface {
@@ -353,9 +353,6 @@ func ms(t time.Duration) uint32 {
 // (an address that two interfaces list is refused, because usbfs would pick an interface by itself and claim it), and that interface
 // must be claimed by this handle. Otherwise it returns the error that says why. d.mu is held.
 func (d *Device) owns(ep uint8) error {
-	if d.lay.several() {
-		return ErrSeveralConfigurations
-	}
 	in, err := d.lay.bulkOwner(ep)
 	if err != nil {
 		return err

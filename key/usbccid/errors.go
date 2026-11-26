@@ -57,13 +57,16 @@ var ErrNotUSBNode = errors.New("usbccid: not a USB device node")
 // reused between the two (unplug, then another device plugged). The descriptor is closed.
 var ErrWrongDevice = errors.New("usbccid: the device at this node is not the one that was found")
 
-// ErrSeveralConfigurations is returned by Claim and by every bulk call on a device whose device descriptor declares other than one
-// configuration. The kernel knows only the active configuration, and usbfs does not say which one that is, so this layer cannot know
-// which interfaces and endpoints the kernel would claim; it does not choose between configurations and never selects one.
+// ErrSeveralConfigurations is returned by Open for a device whose device descriptor declares other than one configuration. The kernel
+// knows only the active configuration, and usbfs does not say which one that is, so this layer cannot know which interfaces and
+// endpoints the kernel would claim; it does not choose between configurations and never selects one, and nothing can be done with
+// such a device. It is raised at Open and nowhere else.
 var ErrSeveralConfigurations = errors.New("usbccid: the device declares several configurations, and this layer does not choose between them")
 
-// ErrBadDescriptors is returned by Open when the node gives no descriptors, or they do not parse (no device descriptor, a malformed
-// configuration). A device whose layout is not known is never used.
+// ErrBadDescriptors is returned by Open when the node gives no descriptors, or they are not simple: this layer accepts one
+// configuration whose length and bNumInterfaces are as declared, every interface at alternate setting 0 only and listed once, as many
+// endpoint descriptors after each interface as its bNumEndpoints, and no endpoint address twice. The error text names the rule that
+// failed and holds no byte of the descriptors. A device whose layout is not certain is never used.
 var ErrBadDescriptors = errors.New("usbccid: the descriptors of the device are missing or malformed")
 
 // ErrNoProcSelfFd is returned by Open when the node cannot be reopened through /proc/self/fd, which it needs (it opens the node first
