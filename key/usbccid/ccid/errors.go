@@ -41,10 +41,10 @@ var ErrVoltage = errors.New("ccid: the reader declares no voltage")
 
 // ErrSessionLost is wrapped by every error that ends the session of a Reader, and is what every later call of that Reader returns
 // (together with the first cause) without touching the Port. A session is lost when a transfer timed out or failed, when a message
-// of the reader broke the protocol, when the budget of an exchange ran out after the call's first Port call, when a write was short, and when a card-level failure
-// came in the middle of a chain. It cannot be repaired: this layer never resynchronises and never sends an abort. The caller closes
-// the Reader and opens again; a card whose PIN the caller verified may or may not still hold it after that, and this layer does not
-// know.
+// of the reader broke the protocol, when the budget of an exchange ran out after the call's first Port call, when a write was
+// short, and when a card-level failure came in the middle of a chain. It cannot be repaired: this layer never resynchronises and
+// never sends an abort. The caller closes the Reader and opens again; a card whose PIN the caller verified may or may not still
+// hold it after that, and this layer does not know.
 var ErrSessionLost = errors.New("ccid: the session is lost: close the reader and open again")
 
 // ErrBudgetExhausted is wrapped, together with ErrSessionLost, when the budget of an exchange ran out after the call's first Port
@@ -53,9 +53,10 @@ var ErrSessionLost = errors.New("ccid: the session is lost: close the reader and
 var ErrBudgetExhausted = errors.New("ccid: the budget of the exchange ran out")
 
 // ErrProtocol is wrapped, together with ErrSessionLost, when the reader sent something this layer cannot follow: a message of
-// another type, of a wrong length, cut short, for another slot, a chain parameter out of order (or any but 0 in a DataBlock answer at short APDU level, or in the answer to reset), too many stale answers (more than
-// MaxStaleAnswers), an empty packet where none belongs, or a status that RDR_to_PC messages do not have. The text names which and
-// holds the numbers of the header, never the data of a message.
+// another type, of a wrong length, cut short, for another slot, a chain parameter out of order (or any but 0 in a DataBlock answer
+// at short APDU level, or in the answer to reset), too many stale answers (more than MaxStaleAnswers), an empty packet where none
+// belongs, or a status that RDR_to_PC messages do not have. The text names which and holds the numbers of the header, never the
+// data of a message.
 var ErrProtocol = errors.New("ccid: protocol error")
 
 // ErrShortWrite is wrapped, together with ErrSessionLost, when BulkOut reported fewer bytes than it was given: the reader holds part

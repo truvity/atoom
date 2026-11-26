@@ -46,13 +46,14 @@
 //
 // # The lost session
 //
-// A transfer that timed out, a transfer that failed, a short write, a message that breaks the protocol, an exchange whose budget ran out after the call's first Port call,
-// a panic of the Port and a card-level failure in the middle of a chain all leave the stream between the host and the reader out of step: the layer below
-// says a late answer may arrive on the next read, and that what a timed-out read had moved is lost. This layer then marks the session
-// LOST. The error of that call wraps ErrSessionLost and the cause (a usbccid error such as ErrTimeout, ErrStalled, ErrGone or
-// ErrClosed stays reachable with errors.Is, in its own meaning, and ErrBudgetExhausted or ErrProtocol is the cause when the layer
-// found it), and every later call returns the same error without touching the port. The caller closes the Reader and opens it
-// again. The ErrStalled, ErrGone and ErrClosed of the Port end the session in the same way.
+// A transfer that timed out, a transfer that failed, a short write, a message that breaks the protocol, an exchange whose budget
+// ran out after the call's first Port call, a panic of the Port and a card-level failure in the middle of a chain all leave the
+// stream between the host and the reader out of step: the layer below says a late answer may arrive on the next read, and that what
+// a timed-out read had moved is lost. This layer then marks the session LOST. The error of that call wraps ErrSessionLost and the
+// cause (a usbccid error such as ErrTimeout, ErrStalled, ErrGone or ErrClosed stays reachable with errors.Is, in its own meaning,
+// and ErrBudgetExhausted or ErrProtocol is the cause when the layer found it), and every later call returns the same error without
+// touching the port. The caller closes the Reader and opens it again. The ErrStalled, ErrGone and ErrClosed of the Port end the
+// session in the same way.
 //
 // A budget that runs out ends the session only once the call has made a call on the Port (the first read of the drain counts). A call
 // whose budget is spent before that has sent and read nothing: it returns an error that wraps ErrBudgetExhausted and not
@@ -118,12 +119,13 @@
 //
 // # Errors and secrets
 //
-// The errors are values to test with errors.Is: the refusals of Open (ErrNoInterface, ErrBadClass, ErrExchangeLevel and the others),
-// ErrSessionLost with its causes, the argument and state errors (ErrBadBudget, a budget spent before the call's first Port call, ErrAPDUTooShort, ErrAPDUTooLong, ErrNotPowered, ErrStillActive, ErrBadATR, ErrNotOpen
-// for the zero Reader, a nil Reader and a nil Port) that leave the session as it was, and the card-level failures of the reader's answer (ErrNoCard, ErrCardMute, ErrCardParity,
-// ErrCardProtocol, ErrSlotBusy, ErrReaderFault, ErrCommandNotSupported, ErrBadParameter, all of them ErrCommandFailed), where
-// errors.As to *CommandError gives bError and bmICCStatus. The text of an error holds counts, header numbers and status bytes, and
-// never a byte of a command or of a response: a command can carry a PIN.
+// The errors are values to test with errors.Is: the refusals of Open (ErrNoInterface, ErrBadClass, ErrExchangeLevel and the
+// others), ErrSessionLost with its causes, the argument and state errors (ErrBadBudget, a budget spent before the call's first Port
+// call, ErrAPDUTooShort, ErrAPDUTooLong, ErrNotPowered, ErrStillActive, ErrBadATR, ErrNotOpen for the zero Reader, a nil Reader and
+// a nil Port) that leave the session as it was, and the card-level failures of the reader's answer (ErrNoCard, ErrCardMute,
+// ErrCardParity, ErrCardProtocol, ErrSlotBusy, ErrReaderFault, ErrCommandNotSupported, ErrBadParameter, all of them
+// ErrCommandFailed), where errors.As to *CommandError gives bError and bmICCStatus. The text of an error holds counts, header
+// numbers and status bytes, and never a byte of a command or of a response: a command can carry a PIN.
 //
 // The reader copies a command into a buffer of its own and reads every message into another, and clears both before each call
 // returns (and the reader's copy of a response that it dropped, and the array that a growing response left). It cannot clear the

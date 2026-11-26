@@ -673,15 +673,16 @@ func (r *Reader) exchange(op string, typ byte, level uint16, payload []byte, wan
 	}
 }
 
-// drain empties the IN pipe before the first message of the session is sent. An answer that an earlier session left there (it was lost
-// while the card waited for a person, and the person acted later) must not be taken for an answer of this one. It only reads, so
-// Open still sends nothing; it runs at the first exchange of the session, whichever call that is, and its time counts against that
-// call's budget. It reads whole messages into the read buffer, each read with a timeout of DrainReadTimeout (and no more than the
-// transfer timeout or what is left of the budget), discards and clears what arrives, and stops at the first read that times out: the
-// pipe is quiet. An empty packet that ended an earlier message is read and dropped here; one that arrives just after the drain is
-// consumed by the first read of the session (as after a whole-packet message). A read cut short by the budget is no proof of quiet:
-// the budget error ends the session, except before the first read, where it only refuses the call. At most MaxDrainReads reads and MaxDrainTime in all: a device that is not quiet by then keeps sending without
-// being asked, and the session is lost with ErrProtocol. On a quiet device the cost is one timed-out read, DrainReadTimeout.
+// drain empties the IN pipe before the first message of the session is sent. An answer that an earlier session left there (it was
+// lost while the card waited for a person, and the person acted later) must not be taken for an answer of this one. It only reads,
+// so Open still sends nothing; it runs at the first exchange of the session, whichever call that is, and its time counts against
+// that call's budget. It reads whole messages into the read buffer, each read with a timeout of DrainReadTimeout (and no more than
+// the transfer timeout or what is left of the budget), discards and clears what arrives, and stops at the first read that times
+// out: the pipe is quiet. An empty packet that ended an earlier message is read and dropped here; one that arrives just after the
+// drain is consumed by the first read of the session (as after a whole-packet message). A read cut short by the budget is no proof
+// of quiet: the budget error ends the session, except before the first read, where it only refuses the call. At most MaxDrainReads
+// reads and MaxDrainTime in all: a device that is not quiet by then keeps sending without being asked, and the session is lost with
+// ErrProtocol. On a quiet device the cost is one timed-out read, DrainReadTimeout.
 func (r *Reader) drain(op string, dl time.Time) error {
 	buf := r.rbuf[:min(len(r.rbuf), MaxMessageLength)]
 	start := time.Now()
