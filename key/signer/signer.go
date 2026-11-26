@@ -12,8 +12,9 @@
 //	digest := sha256.Sum256(content)
 //	sig, err := s.Sign(nil, digest[:], crypto.SHA256) // ASN.1 DER for an ES256 purpose; s.Public() is the key that checks it
 //
-// New asks the store what it serves (Capabilities), finds the purpose, which must allow "sign" and have one of the algorithms ES256,
-// ES384 and RS256, and reads its public key (PublicKey), which must fit the algorithm. Every Sign then makes one call of the port's Sign,
+// New asks the store what it serves (Capabilities), finds the purpose, which must allow purpose.Sign and have one of the algorithms
+// purpose.ES256, purpose.ES384 and purpose.RS256, and reads its public key (PublicKey), which must fit the algorithm and whose key_id
+// must end with the fingerprint of that key (keyid.Fingerprint). Every Sign then makes one call of the port's Sign,
 // checks that the key that answered is the key New saw, and verifies the signature with the public key before it returns it. A key that
 // was rotated under the Signer is therefore an error (ErrKeyChanged) and never a signature by another key: make a new Signer.
 //
@@ -44,27 +45,20 @@ import (
 	"fmt"
 	"io"
 	"slices"
+	"strings"
 	"time"
 
 	"connectrpc.com/connect"
 
 	keyv1alpha1 "github.com/truvity/atoom/key/gen/atoom/key/v1alpha1"
 	"github.com/truvity/atoom/key/gen/atoom/key/v1alpha1/keyv1alpha1connect"
-)
-
-// The algorithms the Signer knows: the signing algorithms of the port (key/docs/algorithms.md).
-const (
-	ES256 = "ES256" // ECDSA over P-256 with SHA-256
-	ES384 = "ES384" // ECDSA over P-384 with SHA-384
-	RS256 = "RS256" // RSASSA-PKCS1-v1_5 over SHA-256 with an RSA-2048 key
+	"github.com/truvity/atoom/key/keyid"
+	"github.com/truvity/atoom/key/purpose"
 )
 
 // DefaultTimeout is the deadline of each call of the port when WithTimeout is not given: two minutes. A key in hardware may wait for a
 // person to touch it, so the default is long; a host that knows its store is quick sets less.
 const DefaultTimeout = 2 * time.Minute
-
-// signOperation is the operation that a purpose must allow (PurposeInfo.operations).
-const signOperation = "sign"
 
 // The refusals of the Signer itself. A refusal of the port is not one of these: it is the Connect error of the port, wrapped, and
 // errors.As finds it (connect.Error, and with it the refusal detail of common/refusal).
@@ -75,7 +69,8 @@ var (
 	ErrOperation = errors.New("signer: the purpose does not allow sign")
 	// ErrAlgorithm is a purpose whose algorithm is not ES256, ES384 or RS256.
 	ErrAlgorithm = errors.New("signer: the algorithm of the purpose is not ES256, ES384 or RS256")
-	// ErrKey is a public key that is not one SubjectPublicKeyInfo of the algorithm: another key type, another curve or size.
+	// ErrKey is a public key that is not one SubjectPublicKeyInfo of the algorithm (another key type, another curve or size), or a key_id
+	// that does not name the public key it came with.
 	ErrKey = errors.New("signer: the public key does not fit the algorithm of the purpose")
 	// ErrTimeout is a WithTimeout that is not positive.
 	ErrTimeout = errors.New("signer: the timeout is not positive")
@@ -121,9 +116,10 @@ var _ crypto.Signer = (*Signer)(nil)
 // New asks the store for the purpose (Capabilities and PublicKey, each with the deadline of WithTimeout) and returns the Signer of its
 // key. It refuses a purpose that the store does not serve (ErrPurpose), that is declared without "sign" (ErrOperation) or whose
 // algorithm is not ES256, ES384 or RS256 (ErrAlgorithm), and a public key that does not fit the algorithm (ErrKey): P-256 for ES256,
-// P-384 for ES384, a 2048-bit RSA key for RS256. A failure of the port is returned wrapped, as it came. ctx is kept as the base of every
+// P-384 for ES384, a 2048-bit RSA key for RS256. It also checks that the key_id of the answer ends with keyid.Fingerprint of the
+// SubjectPublicKeyInfo it came with, as the contract says, and refuses an id that does not name the public key (ErrKey). A failure of the port is returned wrapped, as it came. ctx is kept as the base of every
 // later call (see the package comment).
-func New(ctx context.Context, client keyv1alpha1connect.KeyStoreServiceClient, purpose string, opts ...Option) (*Signer, error) {
+func New(ctx context.Context, client keyv1alpha1connect.KeyStoreServiceClient, name string, opts ...Option) (*Signer, error) {
 	cfg := config{timeout: DefaultTimeout}
 	for _, o := range opts {
 		o(&cfg)
@@ -134,7 +130,7 @@ func New(ctx context.Context, client keyv1alpha1connect.KeyStoreServiceClient, p
 	if ctx == nil || client == nil {
 		return nil, errors.New("signer: New needs a context and a client")
 	}
-	s := &Signer{ctx: ctx, client: client, timeout: cfg.timeout, purpose: purpose}
+	s := &Signer{ctx: ctx, client: client, timeout: cfg.timeout, purpose: name}
 
 	cctx, cancel := s.callContext()
 	caps, err := client.Capabilities(cctx, connect.NewRequest(&keyv1alpha1.CapabilitiesRequest{}))
@@ -144,7 +140,7 @@ func New(ctx context.Context, client keyv1alpha1connect.KeyStoreServiceClient, p
 	}
 	var info *keyv1alpha1.PurposeInfo
 	for _, p := range caps.Msg.GetPurposes() {
-		if p.GetName() == purpose {
+		if p.GetName() == name {
 			info = p
 			break
 		}
@@ -152,29 +148,29 @@ func New(ctx context.Context, client keyv1alpha1connect.KeyStoreServiceClient, p
 	if info == nil {
 		return nil, ErrPurpose
 	}
-	if !slices.Contains(info.GetOperations(), signOperation) {
+	if !slices.Contains(info.GetOperations(), string(purpose.Sign)) {
 		return nil, ErrOperation
 	}
 	s.algorithm = info.GetAlgorithm()
 	switch s.algorithm {
-	case ES256, RS256:
+	case purpose.ES256, purpose.RS256:
 		s.hash = crypto.SHA256
-	case ES384:
+	case purpose.ES384:
 		s.hash = crypto.SHA384
 	default:
 		return nil, ErrAlgorithm
 	}
 
 	cctx, cancel = s.callContext()
-	pk, err := client.PublicKey(cctx, connect.NewRequest(&keyv1alpha1.PublicKeyRequest{Purpose: purpose}))
+	pk, err := client.PublicKey(cctx, connect.NewRequest(&keyv1alpha1.PublicKeyRequest{Purpose: name}))
 	cancel()
 	if err != nil {
 		return nil, fmt.Errorf("signer: PublicKey: %w", err)
 	}
-	if pk.Msg.GetKeyId() == "" {
-		return nil, errors.New("signer: the store answered a public key with no key_id")
-	}
 	s.keyID = pk.Msg.GetKeyId()
+	if !strings.HasSuffix(s.keyID, keyid.Fingerprint(pk.Msg.GetSpkiDer())) {
+		return nil, fmt.Errorf("%w: the key_id does not name the public key", ErrKey)
+	}
 	if s.pub, err = parsePublic(s.algorithm, pk.Msg.GetSpkiDer()); err != nil {
 		return nil, err
 	}
@@ -189,11 +185,11 @@ func parsePublic(algorithm string, spki []byte) (crypto.PublicKey, error) {
 	}
 	switch k := key.(type) {
 	case *ecdsa.PublicKey:
-		if (algorithm == ES256 && k.Curve == elliptic.P256()) || (algorithm == ES384 && k.Curve == elliptic.P384()) {
+		if (algorithm == purpose.ES256 && k.Curve == elliptic.P256()) || (algorithm == purpose.ES384 && k.Curve == elliptic.P384()) {
 			return k, nil
 		}
 	case *rsa.PublicKey:
-		if algorithm == RS256 && k.N.BitLen() == 2048 {
+		if algorithm == purpose.RS256 && k.N.BitLen() == 2048 {
 			return k, nil
 		}
 	}
