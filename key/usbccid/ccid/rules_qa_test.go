@@ -37,7 +37,7 @@ func (c *chainByValues) handler() func(f *fakeDevice, m []byte) {
 		if i >= len(c.params) {
 			return // nothing more: a read would time out
 		}
-		d := append(bytes.Repeat(qaResp, 2), byte(i), 0x90)
+		d := append(bytes.Repeat(qaResp, 2), byte(i&0xFF), 0x90)
 		c.data = append(c.data, d)
 		f.send(msg(rspDataBlock, m[6], stOK, 0, c.params[i], d))
 	}
@@ -47,7 +47,7 @@ func TestQAChainSecondAndLaterBlockValues(t *testing.T) {
 	for _, prefix := range [][]byte{{chainBegin}, {chainBegin, chainMiddle}, {chainBegin, chainMiddle, chainMiddle, chainMiddle}} {
 		for v := range 256 {
 			t.Run(fmt.Sprintf("after %v, %#02x", prefix, v), func(t *testing.T) {
-				params := append(append([]byte(nil), prefix...), byte(v))
+				params := append(append([]byte(nil), prefix...), byte(v&0xFF))
 				if v == chainMiddle {
 					params = append(params, chainEnd) // only 0x03 continues: one more block
 				}
@@ -108,7 +108,7 @@ func TestQAShortLevelChainValueInTheAnswerOfTransmit(t *testing.T) {
 		t.Run(fmt.Sprintf("%#02x", v), func(t *testing.T) {
 			f := shortLevelFake(func(f *fakeDevice, m []byte) {
 				if m[0] == msgXfrBlock {
-					f.send(msg(rspDataBlock, m[6], stOK, 0, byte(v), append(bytes.Repeat(qaResp, 2), 0x90, 0)))
+					f.send(msg(rspDataBlock, m[6], stOK, 0, byte(v&0xFF), append(bytes.Repeat(qaResp, 2), 0x90, 0)))
 					return
 				}
 				cardHandler(echoSW)(f, m)
@@ -144,7 +144,7 @@ func TestQAShortLevelChainValueInTheAnswerToReset(t *testing.T) {
 		t.Run(fmt.Sprintf("%#02x", v), func(t *testing.T) {
 			f := shortLevelFake(func(f *fakeDevice, m []byte) {
 				if m[0] == msgIccPowerOn {
-					f.send(msg(rspDataBlock, m[6], stOK, 0, byte(v), testATR))
+					f.send(msg(rspDataBlock, m[6], stOK, 0, byte(v&0xFF), testATR))
 					return
 				}
 				cardHandler(echoSW)(f, m)
@@ -204,7 +204,7 @@ func TestQAChainByteWhereItIsNotAChainByte(t *testing.T) {
 		for v := range 256 {
 			f := newFake(descSpec{}, func(f *fakeDevice, m []byte) {
 				if m[0] == msgIccPowerOn {
-					f.send(msg(rspDataBlock, m[6], stOK, 0, byte(v), qaResp))
+					f.send(msg(rspDataBlock, m[6], stOK, 0, byte(v&0xFF), qaResp))
 					return
 				}
 				cardHandler(echoSW)(f, m)
@@ -607,9 +607,9 @@ func TestQAEveryPacketSizeOfTheBulkEndpoints(t *testing.T) {
 		for v := range 1 << 16 {
 			b := descSpec{}.build()
 			if which == "bulk IN" {
-				setBulkPacketSizes(b, 64, uint16(v)) //nolint:gosec // 16 bits
+				setBulkPacketSizes(b, 64, uint16(v))
 			} else {
-				setBulkPacketSizes(b, uint16(v), 64) //nolint:gosec // 16 bits
+				setBulkPacketSizes(b, uint16(v), 64)
 			}
 			f := newFake(descSpec{}, nil)
 			f.desc = b
