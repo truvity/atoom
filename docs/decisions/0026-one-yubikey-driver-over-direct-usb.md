@@ -45,7 +45,9 @@ Most of this is written up in [PIN, touch, delete, move and reset](../../key/yub
 
 - **The PIN is delivered by `UnlockService`, as today:** tried once, held in locked memory, never written. A host that links the driver in its own process calls the same service in-process ([0009](0009-connectrpc-in-process.md)).
 - **For a purpose whose PIN policy is `always`, a delivered PIN serves exactly one operation by default and is wiped after it:** each operation needs its own unlock. This is the default because the policy means that the person is asked each time.
-- **The host may say, in the unlock call, that the PIN is held for the session of that card instead,** until the host locks the driver, the driver stops, or the card re-enumerates. The driver then presents it before each operation of that key. That is the host's choice ([0021](0021-drivers-know-no-deployment-shapes.md)), stated per unlock and never a setting of the driver's own. A PIN policy of `once` keeps today's held PIN.
+- **The host may say, in the unlock call, that the PIN is held for the session of that card instead.** The driver then presents it before each operation of that key. That is the host's choice ([0021](0021-drivers-know-no-deployment-shapes.md)), stated per unlock and never a setting of the driver's own. A PIN policy of `once` keeps today's held PIN.
+- **The session form is allowed only for a purpose whose touch policy is also `always`,** so that a physical gesture still stands before every signature. For a purpose with PIN `always` and touch `never` the driver refuses the session form of the unlock call, with a reason of its own.
+- **A held PIN ends on the host's lock call, the driver's stop, a re-enumeration of the card, or an idle time.** The host sets the idle time, the default is 15 minutes, and it is counted from the last operation of that key.
 - **A touch is the card's business: the driver cannot see it.** For a purpose whose touch policy is `always` the call waits for the card within its deadline, and a card that gave up answers a refusal with a reason of its own, which is not `busy` either. `Capabilities` says which purposes need a touch, so that the host can ask the person before it calls. The field is additive in `v1alpha1`.
 
 ### Card administration
@@ -59,7 +61,9 @@ Most of this is written up in [PIN, touch, delete, move and reset](../../key/yub
   - make the key of a declared purpose, through `Ensure`, with the management key that the host delivers through this service and never from a file of options;
   - delete one key;
   - write and read the certificate object of a slot.
-- **When the management key needs a touch, a wrong key and a missing touch both answer `6982`.** The driver reports one reason that says the touch was not given or the management key is wrong, and it never tries the management key again on its own.
+- **The aim is two distinct reasons for `6982` under a management key: "the management key is wrong" and "the touch was not given".** The driver first reads the metadata of the management key (available from firmware 5.3, so on every card above the floor) to learn whether the key needs a touch. If it needs none, `6982` on the authentication means the key is wrong. If it needs a touch, the driver tells the two apart by which exchange of the authentication failed and when the answer came, against the card's wait for a touch (about 15 seconds): an answer that comes only when that wait has run out means no touch was given, and an answer that comes sooner means the card went on and refused the key.
+- **This method is not yet measured on a real card.** Until it is measured on a card at or above the floor, the driver reports one combined reason, "the touch was not given or the management key is wrong"; the two reasons replace it when the measurement separates them.
+- **The PIV application keeps no retry counter for the management key** (read in the vendor's documentation and library, not measured), so a wrong key does not block the card. The driver still never tries the management key again on its own.
 - **It never resets an application of the card, never writes the attestation key or its certificate (slot `f9`), and never sets a configuration lock.**
 
 ### Platforms and tests
@@ -73,7 +77,7 @@ Most of this is written up in [PIN, touch, delete, move and reset](../../key/yub
 - **Every Go executable is static.** The last cgo exception, with its two native build hosts and its glibc ceiling, goes away when `key/yubikeypiv` is deleted.
 - **The host decides policy** ([0021](0021-drivers-know-no-deployment-shapes.md)). The driver holds no PIN or touch constant that belongs to one kind of host.
 - **A strict match of attestation and declaration is as strong as a constant.** The card states the policies of each key and the driver refuses any other. Declaring them moves the choice to the host and loses nothing.
-- **The session form of an `always` PIN is offered at all** because every typed PIN is a chance to mistype, three wrong entries block the card, and a touch is still asked for each signature.
+- **The session form of an `always` PIN is offered at all** because every typed PIN is a chance to mistype and three wrong entries block the card. It is allowed only where a touch is also asked for each signature, and it ends after an idle time.
 - **Administration stays away from the host that signs unattended.** The ceremony service is off unless the host switches it on, and a host that never mounts it cannot change a PIN, a PUK or a management key.
 
 ## Consequences
@@ -99,7 +103,8 @@ Most of this is written up in [PIN, touch, delete, move and reset](../../key/yub
 These stay open, and the pull requests that build the driver settle them.
 
 - The proto of the ceremony service, with the field of the unlock call that says "one operation or the session", and the lock call (a `Lock` on `UnlockService`, in the style of `Status` and `Unlock`).
-- The names of the three new refusal reasons: the interface is busy; the card gave up waiting for a touch; the touch was not given or the management key is wrong (`6982`, a third reason of its own).
+- The names of the new refusal reasons: the interface is busy; the card gave up waiting for a touch; the management key is wrong and the touch was not given, with the combined reason "the touch was not given or the management key is wrong" as the fallback until the measurement below; and the refusal of the session form.
 - How the simulated card is shared with the fake of `key/yubikeypiv` while both exist.
 - Whether the cached touch policy is offered, beside `never` and `always`.
 - The module's final name.
+- The measurement of the management-key method above (metadata, then the timing of `6982`) on a card at or above the floor.
