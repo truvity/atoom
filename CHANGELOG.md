@@ -5,6 +5,12 @@ libraries changed. `just release-prepare X.Y.Z` writes the section.
 
 <!-- release-prepare: new sections go below this line -->
 
+## Unreleased
+
+### Added
+
+- **`Options.Logger` on the Go driver libraries `blob/s3`, `key/awskms`, `key/software`, `key/yubikeypiv`, `source/appconfig`, `source/file`, `store/dynamodb`, `transport/nats` and `transport/sqs`.** Every line a driver writes goes to the `*slog.Logger` of the host that links it in its own process, so the host decides where the lines go. `nil` is `slog.Default()`, read at each line: nothing changes for a host that sets none. The messages, levels and attributes are the same, and the thin mains are unchanged (no flag, the same output).
+
 ## 0.9.0 - 2026-11-26
 
 One version for the whole repository: every library is tagged 0.9.0, changed or not.

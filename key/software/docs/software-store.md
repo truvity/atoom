@@ -50,6 +50,7 @@ A call is refused with a reason from the port's list: `purpose`, `algorithm`, `d
 | `StateDir` | The directory of the key files. |
 | `Purposes` | The host's declaration: name, algorithm and operations of each purpose. Required; none, or one that is not a declaration, is refused before anything is opened. |
 | `Caller` | Names the caller in the journal line of a refusal, when the host knows it. |
+| `Logger` | The host's logger for the lines the driver writes; nil means `slog.Default()`. The thin main does not set it. |
 
 The thin main takes the same as `--state-dir` and `--purposes`, and the flags of the [socket guard](../../../docs/socket-guard.md).
 
