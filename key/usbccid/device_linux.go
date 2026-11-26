@@ -73,10 +73,12 @@ const (
 //
 // After Close, Release and Close return nil and every other call returns ErrClosed (ErrClosed wins over ErrGone). After the device is
 // gone, Release and Close return nil and every other call returns ErrGone. A Device that is never closed keeps its file descriptor
-// until the process ends: there is no finalizer.
+// until the process ends: there is no finalizer. The zero Device (var d Device, new(Device)) was never opened: it holds no descriptor,
+// every call returns ErrClosed except Release and Close, which return nil and touch nothing.
 type Device struct {
 	mu      sync.Mutex
 	fd      int
+	opened  bool // set only by the real open: the zero Device holds no descriptor and is closed
 	closed  bool
 	dead    error // the first fatal error; later calls return it wrapped in ErrGone
 	claimed map[int]bool
@@ -117,7 +119,7 @@ func open(path string, usb bool) (*Device, error) {
 		}
 		return nil, fmt.Errorf("%w: %s: %v", ErrBadDescriptors, path, err) //nolint:errorlint // the rule that failed is text, not an error to match
 	}
-	return &Device{fd: fd, claimed: map[int]bool{}, desc: desc, lay: lay, ioctl: sysIoctl}, nil
+	return &Device{opened: true, fd: fd, claimed: map[int]bool{}, desc: desc, lay: lay, ioctl: sysIoctl}, nil
 }
 
 // checkNode decides from the stat result of a node whether it may be opened: with usb true a character device with the major number
@@ -158,7 +160,7 @@ func openChecked(path string, check func(*unix.Stat_t) error, flags int) (int, e
 	proc := "/proc/self/fd/" + strconv.Itoa(pfd)
 	fd, err := unix.Open(proc, flags|unix.O_CLOEXEC|unix.O_NOCTTY|unix.O_NONBLOCK, 0)
 	if err != nil {
-		if errors.Is(err, unix.ENOENT) || errors.Is(err, unix.ENOTDIR) {
+		if errors.Is(err, unix.ENOENT) || errors.Is(err, unix.ENOTDIR) || errors.Is(err, unix.ENODEV) {
 			// The node existed a moment ago, so either /proc/self/fd is not there, or the device went away between the two opens (the
 			// kernel answers the same). An access check tells them apart. The errno is not wrapped, so that neither error reads as a
 			// node that does not exist.
@@ -235,7 +237,7 @@ func (d *Device) Descriptors() ([]byte, error) {
 
 // state returns the error that makes every call fail, or nil. d.mu is held.
 func (d *Device) state() error {
-	if d.closed {
+	if d.closed || !d.opened {
 		return ErrClosed
 	}
 	if d.dead != nil {
@@ -317,7 +319,7 @@ func (d *Device) Release(n int) error {
 }
 
 func (d *Device) release(n int) error {
-	if d.closed || !d.claimed[n] {
+	if d.closed || !d.opened || !d.claimed[n] {
 		return nil
 	}
 	delete(d.claimed, n)
@@ -427,7 +429,7 @@ func (d *Device) BulkIn(ep uint8, buf []byte, timeout time.Duration) (int, error
 func (d *Device) Close() error {
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	if d.closed {
+	if d.closed || !d.opened {
 		return nil
 	}
 	var first error
