@@ -13,9 +13,10 @@ The USB layer under a smart-card driver that speaks CCID over direct USB ([recor
 ## What it does and does not do
 
 - **Discovery** reads files under a directory it is given and opens nothing. A candidate has the vendor and product id, the bus and device number, the usbfs node path derived from them, the physical port path as sysfs names it, and the interface number and endpoint addresses of the CCID interface (class `0x0B`). A filter narrows by vendor id and by port path. sysfs gives no card serial: the caller reads the serial from the card after the claim and compares it before anything else.
-- **The claim is plain and exclusive.** If another holder has the interface (a PC/SC service, another program's card daemon), the claim fails with `ErrBusy`, and the library does not retry. It never detaches a kernel driver, never resets the device and never reconnects.
+- **The claim is plain and exclusive.** If another holder has the interface (a PC/SC service, another program's card daemon, another handle of the same process), the claim fails with `ErrBusy`, and the library does not retry. It never detaches a kernel driver, never resets the device and never reconnects.
+- **Only the CCID interface is ever touched.** `Open` reads the descriptors; `Claim` takes only a CCID interface (class `0x0B`) that they hold, and a bulk call goes only to a bulk endpoint of an interface this handle has claimed, in the direction of the call. The other interfaces of a card (a passkey, a one-time code) are never claimed, not even by the kernel on a first transfer. `Open` takes only a character device of the USB major number, and `Candidate.Open` checks that the device is the one `Discover` found.
 - **A gone device is final.** The first fatal error (unplugged, re-enumerated, failed) is latched; every later call fails with `ErrGone`. The program above drops its session and starts again.
-- **Each transfer has a timeout, and that is its only bound.** A blocking bulk transfer cannot be cancelled by a context once it started, so the library takes no context.
+- **Each transfer has a timeout (1 ms to ten minutes, at most 64 KiB), and that is its only bound.** A blocking bulk transfer cannot be cancelled by a context once it started, so the library takes no context. The package comment says what the layer above must not assume after a timeout.
 - `Close` releases the interface and the node, and is safe to call twice.
 
 ## Tests
