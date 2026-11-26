@@ -36,8 +36,8 @@
 //   - ErrClosed: the Device was closed. After Close, Release and Close return nil and every other call returns ErrClosed (also
 //     when the device is gone as well).
 //   - ErrNoSuchInterface (also for a number outside 0 to 255), ErrNotClaimed, ErrBadEndpoint (also an address that two interfaces
-//     list), ErrBadLength, ErrSeveralConfigurations: a call refused before the kernel was asked.
-//   - ErrNotUSBNode: Open was given a path that is not a USB device node. ErrBadDescriptors: its descriptors are missing or malformed. ErrNoProcSelfFd: /proc/self/fd is not available. ErrWrongDevice: Candidate.Open found another device at
+//     list), ErrBadLength: a call refused before the kernel was asked.
+//   - ErrNotUSBNode: Open was given a path that is not a USB device node. ErrBadDescriptors: its descriptors are missing, malformed or not simple (below). ErrSeveralConfigurations: the device declares other than one configuration. ErrNoProcSelfFd: /proc/self/fd is not available. ErrWrongDevice: Candidate.Open found another device at
 //     the node than Discover did.
 //   - ErrNotSupported: the system is not Linux on amd64 or arm64. The package still builds there, so that a program that links it
 //     compiles for macOS, and every entry point returns this error.
@@ -49,6 +49,20 @@
 // each call (and checks its context between calls). A timeout is at least 1 ms and at most ten minutes. Descriptors, Release and Close
 // wait behind a transfer in progress, so the timeout bounds that wait too. A system call that the kernel interrupted is reported,
 // not retried. A Device that is never closed keeps its file descriptor until the process ends.
+//
+// # Which devices it accepts
+//
+// This layer serves one known kind of device, and accepts only SIMPLE descriptors; Open refuses all others, with ErrBadDescriptors
+// (the text names the rule that failed and holds no byte of the descriptors) or, for the first rule, ErrSeveralConfigurations.
+// Simple means: exactly one configuration; its total length is the number of bytes present and its bNumInterfaces the number of
+// distinct interfaces listed; every interface descriptor has alternate setting 0, and no interface number is listed twice; each
+// interface is followed (before the next interface descriptor) by exactly bNumEndpoints endpoint descriptors; no endpoint address
+// appears twice in the configuration, and each is a number 1 to 15 with the reserved bits clear; every descriptor is at least as
+// long as its type needs and does not run past the end. Descriptors of other types (class-specific ones, interface associations)
+// are skipped by their length, wherever they stand. The reason is that the kernel's rules for what is left open (the active
+// configuration, which usbfs does not name; the fall back to another alternate setting; duplicates; endpoints beyond a count)
+// would otherwise have to be copied, and any difference would let usbfs claim an interface by itself. A usual composite security key
+// (HID interfaces and a CCID interface, each at alternate setting 0 only) is simple.
 //
 // # What the layer above must not assume
 //
@@ -66,8 +80,7 @@
 //   - Only alternate setting 0 of an interface is known, and the layer never selects another. The interrupt endpoint of the CCID
 //     interface is reported by Discover and never used.
 //   - The descriptors are a snapshot taken at Open. A reset of the device by another process is not noticed until a call fails.
-//   - A device that declares several configurations is refused (ErrSeveralConfigurations): the kernel knows only the active one,
-//     usbfs does not say which, and the layer does not choose.
+//   - A device whose descriptors are not simple is refused at Open (see "Which devices it accepts").
 //
 // # Safety rule for tests
 //
