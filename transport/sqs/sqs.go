@@ -100,6 +100,9 @@ type Options struct {
 	VisibilityTimeout time.Duration
 	// Now is the clock of the first delivery id; nil is time.Now.
 	Now func() time.Time
+	// Logger receives every line the driver writes. nil means slog.Default(), read at each line; the host decides where the lines go,
+	// or that they go nowhere.
+	Logger *slog.Logger
 }
 
 // Host is what a program that runs the driver provides.
@@ -133,6 +136,7 @@ type Service struct {
 	wait       int32
 	short      bool
 	visibility int32
+	logger     *slog.Logger
 
 	consuming atomic.Bool
 	// attempt is the ReceiveRequestAttemptId of the next receive. It is kept until a receive returns, so that a receive cut off by the end
@@ -191,7 +195,7 @@ func New(opts Options) (*Service, error) {
 	return &Service{
 		api: opts.SQS, queue: opts.QueueURL, identify: identify, group: group, max: maxMsg,
 		short: opts.ShortPoll, wait: int32(wait / time.Second), visibility: int32(opts.VisibilityTimeout / time.Second),
-		next: first, byID: map[uint64]*held{}, byMsgID: map[string]*held{},
+		logger: opts.Logger, next: first, byID: map[uint64]*held{}, byMsgID: map[string]*held{},
 	}, nil
 }
 
@@ -226,12 +230,20 @@ func Run(ctx context.Context, opts Options, host Host) error {
 	return host.Serve(ctx, path, h)
 }
 
+// log is the logger of the driver: the host's Options.Logger, or slog.Default() read now when the host gave none.
+func (s *Service) log() *slog.Logger {
+	if s.logger != nil {
+		return s.logger
+	}
+	return slog.Default()
+}
+
 // engine is the refusal of a failure of SQS: the reason only, and SQS's text in the operator's log.
-func engine(what string, err error) error {
+func (s *Service) engine(what string, err error) error {
 	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 		return err
 	}
-	slog.Error("SQS failed", "call", what, "err", err)
+	s.log().Error("SQS failed", "call", what, "err", err)
 	return refusal.New(connect.CodeUnavailable, "engine", "")
 }
 
@@ -276,7 +288,7 @@ func (s *Service) Emit(ctx context.Context, req *connect.Request[transportv1alph
 		},
 	})
 	if err != nil {
-		return nil, engine("SendMessage", err)
+		return nil, s.engine("SendMessage", err)
 	}
 	return connect.NewResponse(&transportv1alpha1.EmitResponse{}), nil
 }
@@ -350,7 +362,7 @@ func (s *Service) Receive(ctx context.Context, req *connect.Request[transportv1a
 		in.ReceiveRequestAttemptId = aws.String(s.attempt)
 		out, err := s.api.ReceiveMessage(ctx, in)
 		if err != nil {
-			return engine("ReceiveMessage", err)
+			return s.engine("ReceiveMessage", err)
 		}
 		s.attempt = ""
 		if err := s.send(stream, s.take(me, out.Messages), batch); err != nil {
@@ -417,7 +429,7 @@ func (s *Service) take(me uint64, msgs []types.Message) []*transportv1alpha1.Del
 		}
 		d, ok := decode(m)
 		if !ok {
-			slog.Error("SQS: a message the driver did not write is left in the queue", "message_id", msgID)
+			s.log().Error("SQS: a message the driver did not write is left in the queue", "message_id", msgID)
 			continue
 		}
 		d.DeliveryId = s.next
@@ -470,7 +482,7 @@ func (s *Service) Ack(ctx context.Context, req *connect.Request[transportv1alpha
 		s.mu.Unlock()
 		out, err := s.api.DeleteMessageBatch(ctx, &awssqs.DeleteMessageBatchInput{QueueUrl: aws.String(s.queue), Entries: entries})
 		if err != nil {
-			return nil, engine("DeleteMessageBatch", err)
+			return nil, s.engine("DeleteMessageBatch", err)
 		}
 		failed := map[string]string{}
 		for _, f := range out.Failed {
@@ -489,7 +501,7 @@ func (s *Service) Ack(ctx context.Context, req *connect.Request[transportv1alpha
 		}
 		s.mu.Unlock()
 		if bad != nil {
-			return nil, engine("DeleteMessageBatch", bad)
+			return nil, s.engine("DeleteMessageBatch", bad)
 		}
 	}
 	return connect.NewResponse(&transportv1alpha1.AckResponse{}), nil
