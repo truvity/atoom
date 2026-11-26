@@ -96,6 +96,9 @@ type Options struct {
 	CreateKeys bool
 	// Caller names the caller of a call for the journal line of a refusal; none when nil. The host knows its callers.
 	Caller func(context.Context) string
+	// Logger receives every line the driver writes. nil means slog.Default(), read at each line; the host decides where the lines go,
+	// or that they go nowhere.
+	Logger *slog.Logger
 }
 
 // Host is what a program that runs the driver provides.
@@ -115,6 +118,7 @@ type Service struct {
 	ids      map[string]string
 	create   bool
 	caller   func(context.Context) string
+	logger   *slog.Logger
 
 	mu   sync.Mutex
 	keys map[string]*key // by purpose; a key's identifier, public key and time never change
@@ -155,7 +159,7 @@ func New(opts Options) (*Service, error) {
 		}
 		ids[name] = id
 	}
-	return &Service{api: opts.KMS, purposes: set, prefix: prefix, ids: ids, create: opts.CreateKeys, caller: opts.Caller, keys: map[string]*key{}}, nil
+	return &Service{api: opts.KMS, purposes: set, prefix: prefix, ids: ids, create: opts.CreateKeys, caller: opts.Caller, logger: opts.Logger, keys: map[string]*key{}}, nil
 }
 
 // Handler returns the Connect handler of the key-store service, to mount on a server or an in-memory transport.
@@ -172,9 +176,17 @@ func Run(ctx context.Context, opts Options, host Host) error {
 	if err != nil {
 		return err
 	}
-	slog.Info("aws kms key driver starting", "alias_prefix", svc.prefix, "create_keys", svc.create, "purposes", svc.purposes.Names())
+	svc.log().Info("aws kms key driver starting", "alias_prefix", svc.prefix, "create_keys", svc.create, "purposes", svc.purposes.Names())
 	path, h := svc.Handler(host.HandlerOptions...)
 	return host.Serve(ctx, path, h)
+}
+
+// log is the logger of the driver: the host's Options.Logger, or slog.Default() read now when the host gave none.
+func (s *Service) log() *slog.Logger {
+	if s.logger != nil {
+		return s.logger
+	}
+	return slog.Default()
 }
 
 // Alias returns the alias name of the key of a purpose under the driver's prefix, as alias/<prefix>/<purpose>.

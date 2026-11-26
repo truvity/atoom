@@ -5,7 +5,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log/slog"
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/service/kms"
@@ -175,7 +174,7 @@ func (s *Service) makeKey(ctx context.Context, name, algorithm string) (meta *ty
 		return err
 	})
 	if err == nil {
-		slog.Info("key made", "purpose", name, "algorithm", algorithm, "alias", alias)
+		s.log().Info("key made", "purpose", name, "algorithm", algorithm, "alias", alias)
 		return created.KeyMetadata, true, nil
 	}
 	// The key that was just made has no alias, so nothing can reach it: it goes whatever happened.
@@ -184,7 +183,7 @@ func (s *Service) makeKey(ctx context.Context, name, algorithm string) (meta *ty
 	if !errors.As(err, &exists) {
 		return nil, false, err
 	}
-	slog.Info("another caller made the key first; keeping its key", "purpose", name, "alias", alias)
+	s.log().Info("another caller made the key first; keeping its key", "purpose", name, "alias", alias)
 	meta, err = s.describe(ctx, alias)
 	return meta, false, err
 }
@@ -197,7 +196,7 @@ func (s *Service) discard(ctx context.Context, id string) {
 	defer cancel()
 	days := int32(pendingWindowDays)
 	if _, err := s.api.ScheduleKeyDeletion(dctx, &kms.ScheduleKeyDeletionInput{KeyId: &id, PendingWindowInDays: &days}); err != nil {
-		slog.Warn("a key without an alias could not be scheduled for deletion", "key", id, "error", err.Error())
+		s.log().Warn("a key without an alias could not be scheduled for deletion", "key", id, "error", err.Error())
 	}
 }
 
