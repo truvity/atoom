@@ -22,19 +22,28 @@
 // of crypto/ecdsa's Sign and of the port, RFC 3279; a JWS wants the raw r||s that key/signature.DERToRaw makes), and the plain
 // RSASSA-PKCS1-v1_5 signature for an RSA key (RFC 8017, section 8.2.1).
 //
+// What it proves. Every signature is by the key that the store named at New, and the public key verified it. It does not prove that this
+// is the key the caller meant: a caller that must sign with a known key compares Public() or KeyID() with its own record after New.
+// The key that Public() returns is shared: the caller must not change it.
+//
 // The context and the deadline. crypto.Signer's Sign has no context, so the Signer keeps the context given to New and makes every call
 // of the port with it, narrowed by a deadline of its own (WithTimeout; the default is DefaultTimeout). A correlation id in that context
 // goes with every call if the client was made with call.ClientOptions() (docs/call-context.md), and the Signer stops when that context
 // is cancelled or its deadline passes: give New a context that lives as long as the Signer, not the context of the request that happened
-// to build it. A Signer is safe for concurrent use.
+// to build it. A host that signs inside a request uses WithContext(requestCtx).Sign. A Signer is safe for concurrent use.
+//
+// When a call ends early. A deadline that passes shows as the Connect code deadline_exceeded (connect.CodeOf(err)); errors.Is(err,
+// context.DeadlineExceeded) is not reliable for Sign. A cancelled context shows as context.Canceled and the code canceled. After a
+// deadline the store may still finish a signature that the caller never sees; a key in hardware may ask its holder again on a retry.
 //
 // The limits. The Signer signs a digest and nothing else: a message is hashed by the caller (crypto.Signer's contract), and the digest
-// must be the hash of the purpose's algorithm. It knows ES256 (SHA-256), ES384 (SHA-384) and RS256 (SHA-256, PKCS#1 v1.5, RSA-2048); RSA-PSS
-// is refused. It does not decrypt, agree on keys (the port's Ecdh), make keys (Ensure), attest or close anything, and it keeps nothing
-// but the public key and the key_id.
+// must be the hash of the purpose's algorithm. It knows ES256 (SHA-256), ES384 (SHA-384) and RS256 (SHA-256, PKCS#1 v1.5, RSA-2048,
+// exponent 65537); RSA-PSS is refused. It does not decrypt, agree on keys (the port's Ecdh), make keys (Ensure), attest or close anything,
+// and it keeps nothing but the public key and the key_id.
 package signer
 
 import (
+	"bytes"
 	"context"
 	"crypto"
 	"crypto/ecdsa"
@@ -114,15 +123,17 @@ type Signer struct {
 var _ crypto.Signer = (*Signer)(nil)
 
 // New asks the store for the purpose (Capabilities and PublicKey, each with the deadline of WithTimeout) and returns the Signer of its
-// key. It refuses a purpose that the store does not serve (ErrPurpose), that is declared without "sign" (ErrOperation) or whose
+// key. A nil Option is ignored. It refuses a purpose that the store does not serve (ErrPurpose), that is declared without "sign" (ErrOperation) or whose
 // algorithm is not ES256, ES384 or RS256 (ErrAlgorithm), and a public key that does not fit the algorithm (ErrKey): P-256 for ES256,
-// P-384 for ES384, a 2048-bit RSA key for RS256. It also checks that the key_id of the answer ends with keyid.Fingerprint of the
-// SubjectPublicKeyInfo it came with, as the contract says, and refuses an id that does not name the public key (ErrKey). A failure of the port is returned wrapped, as it came. ctx is kept as the base of every
-// later call (see the package comment).
+// P-384 for ES384, a 2048-bit RSA key with the exponent 65537 for RS256. It also checks that the key_id of the answer ends with keyid.Fingerprint of the
+// SubjectPublicKeyInfo it came with, as the contract says, and refuses an id that does not name the public key (ErrKey). A failure of the port is returned wrapped,
+// as it came. ctx is kept as the base of every later call (see the package comment, and WithContext).
 func New(ctx context.Context, client keyv1alpha1connect.KeyStoreServiceClient, name string, opts ...Option) (*Signer, error) {
 	cfg := config{timeout: DefaultTimeout}
 	for _, o := range opts {
-		o(&cfg)
+		if o != nil {
+			o(&cfg)
+		}
 	}
 	if cfg.timeout <= 0 {
 		return nil, ErrTimeout
@@ -189,7 +200,7 @@ func parsePublic(algorithm string, spki []byte) (crypto.PublicKey, error) {
 			return k, nil
 		}
 	case *rsa.PublicKey:
-		if algorithm == purpose.RS256 && k.N.BitLen() == 2048 {
+		if algorithm == purpose.RS256 && k.N.BitLen() == 2048 && k.E == 65537 {
 			return k, nil
 		}
 	}
@@ -201,7 +212,22 @@ func (s *Signer) callContext() (context.Context, context.CancelFunc) {
 	return context.WithTimeout(s.ctx, s.timeout)
 }
 
+// WithContext returns a copy of the Signer whose calls of the port use ctx as the base in place of the context given to New, with the
+// same timeout, key and checks. crypto.Signer has no context, so a host that signs inside a request uses s.WithContext(requestCtx).Sign:
+// the call then carries that request's deadline and correlation id and never outlives it (docs/call-context.md: every call carries a
+// deadline and a correlation id, and a callee never extends its caller's deadline). It makes no call of the port. A nil ctx panics, as
+// http.Request.WithContext does.
+func (s *Signer) WithContext(ctx context.Context) *Signer {
+	if ctx == nil {
+		panic("signer: nil context")
+	}
+	c := *s
+	c.ctx = ctx
+	return &c
+}
+
 // Public returns the public key of the purpose, read once by New: an *ecdsa.PublicKey for ES256 and ES384, an *rsa.PublicKey for RS256.
+// It is shared: the caller must not change it.
 func (s *Signer) Public() crypto.PublicKey { return s.pub }
 
 // Algorithm returns the algorithm of the purpose: ES256, ES384 or RS256.
@@ -216,11 +242,15 @@ func (s *Signer) KeyID() string { return s.keyID }
 //
 // rand is ignored: the key store makes its own randomness (and an ECDSA nonce is the driver's business). opts says which hash made the
 // digest and must be that of the algorithm, crypto.SHA256 for ES256 and RS256 and crypto.SHA384 for ES384 (ErrHash otherwise, and for
-// nil opts); an *rsa.PSSOptions is refused (ErrPSS). The digest must have the length of that hash (ErrDigest).
+// nil opts); an *rsa.PSSOptions is refused (ErrPSS), and any other options value is asked only for its HashFunc, as the standard
+// library's signers do. opts is the caller's word about the digest: a digest of the right length made by another hash cannot be told
+// apart. The digest must have the length of that hash (ErrDigest).
 //
-// The signature is returned only after the key's answer is checked: it must name the key that New saw (ErrKeyChanged) and the public key
-// must verify the signature (ErrVerify). A refusal of the port is returned wrapped, as it came, and errors.As finds the connect.Error in
-// it. The call has the deadline of WithTimeout and ends when the context given to New does.
+// The signature is returned only after the key's answer is checked: it must name the key that New saw (ErrKeyChanged, with no text from
+// the store; KeyID has the id) and the public key must verify the signature (ErrVerify). A refusal of the port is returned wrapped, as
+// it came, and errors.As finds the connect.Error in it. The call has the deadline of WithTimeout and ends when the context of the
+// Signer does (the one given to New, or to WithContext). A deadline that passes is the code deadline_exceeded; after it the store may
+// still finish a signature that the caller never sees.
 func (s *Signer) Sign(_ io.Reader, digest []byte, opts crypto.SignerOpts) ([]byte, error) {
 	if opts == nil {
 		return nil, ErrHash
@@ -235,14 +265,17 @@ func (s *Signer) Sign(_ io.Reader, digest []byte, opts crypto.SignerOpts) ([]byt
 		return nil, ErrDigest
 	}
 
+	// The store signs the copy, and the adapter verifies the copy: a caller that changes its slice meanwhile changes neither.
+	digest = bytes.Clone(digest)
+
 	cctx, cancel := s.callContext()
 	defer cancel()
 	res, err := s.client.Sign(cctx, connect.NewRequest(&keyv1alpha1.SignRequest{Purpose: s.purpose, Digest: digest, Algorithm: s.algorithm}))
 	if err != nil {
 		return nil, fmt.Errorf("signer: Sign: %w", err)
 	}
-	if got := res.Msg.GetKeyId(); got != s.keyID {
-		return nil, fmt.Errorf("%w: it was %q and the signature names %q", ErrKeyChanged, s.keyID, got)
+	if res.Msg.GetKeyId() != s.keyID {
+		return nil, ErrKeyChanged
 	}
 	sig := res.Msg.GetSignatureDer()
 	if !s.verify(digest, sig) {
