@@ -24,10 +24,10 @@ type refusedMark struct {
 // probeFile is written and removed at start, to show that the state directory takes the stop.
 const probeFile = "write.probe"
 
-// restore reads the mark at start. Any file under the name is a stop: the mark fails closed, and a person who knows
+// restore reads the mark at start; log is the logger of the driver. Any file under the name is a stop: the mark fails closed, and a person who knows
 // why removes it by unlocking the board. A state directory that cannot be written stops the start: a stop that could
 // not be saved would be forgotten by the next restart.
-func (m *refusedMark) restore() error {
+func (m *refusedMark) restore(log *slog.Logger) error {
 	if m.dir == "" {
 		return nil
 	}
@@ -35,7 +35,7 @@ func (m *refusedMark) restore() error {
 	switch {
 	case err == nil:
 		m.set = true
-		slog.Warn("a released PIN was refused by the card before: no PIN release until the board is unlocked with sluis node unlock")
+		log.Warn("a released PIN was refused by the card before: no PIN release until the board is unlocked with sluis node unlock")
 	case !errors.Is(err, os.ErrNotExist):
 		return fmt.Errorf("the PIN release stop cannot be read: %w", err)
 	}
@@ -62,8 +62,8 @@ func (m *refusedMark) mark() error {
 	return nil
 }
 
-// clear removes the stop after a person unlocked the board.
-func (m *refusedMark) clear() {
+// clear removes the stop after a person unlocked the board; log is the logger of the driver.
+func (m *refusedMark) clear(log *slog.Logger) {
 	if !m.set {
 		return
 	}
@@ -72,7 +72,7 @@ func (m *refusedMark) clear() {
 		return
 	}
 	if err := os.Remove(filepath.Join(m.dir, refusedMarkFile)); err != nil && !errors.Is(err, os.ErrNotExist) {
-		slog.Error("the PIN release stop cannot be removed: it holds again after a restart", "error", err.Error())
+		log.Error("the PIN release stop cannot be removed: it holds again after a restart", "error", err.Error())
 		return
 	}
 	if d, err := os.Open(m.dir); err == nil {

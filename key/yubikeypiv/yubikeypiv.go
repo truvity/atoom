@@ -126,6 +126,9 @@ type Options struct {
 	RSAQueue int
 	// Caller names the caller of a call for the journal line of a refusal; none when nil. The host knows its callers.
 	Caller func(context.Context) string
+	// Logger receives every line the driver writes. nil means slog.Default(), read at each line; the host decides where the lines go,
+	// or that they go nowhere.
+	Logger *slog.Logger
 }
 
 // RSAQueueDefault is the default of Options.RSAQueue (exported so that a host can hold its own limit to it): the burst of the caller's bucket for the RS256 purpose on a card (sluis's key service
@@ -158,6 +161,7 @@ type Service struct {
 	domains  pinrelease.Domains
 	peers    PeerKeys
 	caller   func(context.Context) string
+	logger   *slog.Logger
 	// refused is set when the card refused a released PIN: the driver then tries no released PIN until a person
 	// unlocks it on the admin socket (refused.go). The caller holds mu.
 	refused refusedMark
@@ -221,8 +225,8 @@ func New(opts Options) (*Service, error) {
 	s := &Service{factory: opts.AllowFactoryDefaults, node: opts.Node, mgmtKey: opts.ManagementKey, plan: plan, infos: planInfos(plan), card: c,
 		keys: map[string]*slotKey{}, dead: make(chan struct{}),
 		rsaTickets: make(chan struct{}, queue),
-		boundary:   opts.Boundary, domains: opts.PinReleaseDomains, peers: opts.PeerKeys, caller: opts.Caller, refused: refusedMark{dir: opts.StateDir}}
-	if err := s.refused.restore(); err != nil {
+		boundary:   opts.Boundary, domains: opts.PinReleaseDomains, peers: opts.PeerKeys, caller: opts.Caller, logger: opts.Logger, refused: refusedMark{dir: opts.StateDir}}
+	if err := s.refused.restore(s.log()); err != nil {
 		_ = c.Close()
 		return nil, err
 	}
@@ -254,12 +258,12 @@ func (s *Service) freshSession() error {
 		if errors.Is(err, card.ErrSharing) {
 			word = "held_elsewhere"
 		}
-		slog.Error("the card session cannot be reset at start", "where", resetStart, "card", was, "error", err.Error())
+		s.log().Error("the card session cannot be reset at start", "where", resetStart, "card", was, "error", err.Error())
 		return &Problems{[]string{"card.session: " + word}}
 	}
 	s.logReset(resetStart, was, false)
 	if _, err := s.card.PINRetries(); errors.Is(err, card.ErrVerified) {
-		slog.Error("the card is still PIN-verified after a reset of its session")
+		s.log().Error("the card is still PIN-verified after a reset of its session")
 		return &Problems{[]string{"card.session: still_verified"}}
 	}
 	return nil
@@ -294,16 +298,24 @@ func (s *Service) loginState() string {
 	}
 }
 
+// log is the logger of the driver: the host's Options.Logger, or slog.Default() read now when the host gave none.
+func (s *Service) log() *slog.Logger {
+	if s.logger != nil {
+		return s.logger
+	}
+	return slog.Default()
+}
+
 // logReset writes the one journal line of a reset of the card session: where it was made (resetStart, resetUnlock,
 // resetStatus, resetExit) and whether the card was logged in before it. A card that was found logged in while the driver
 // held no PIN is a warning, as it is a security event: something logged it in, or an earlier driver ended without a reset.
 // The line holds no PIN and nothing derived from it, and says whether the driver holds one only as a fact (held).
-func (*Service) logReset(where, was string, held bool) {
+func (s *Service) logReset(where, was string, held bool) {
 	if was == cardLoggedIn && !held {
-		slog.Warn("card session reset: the card was found PIN-verified and the driver held no PIN", "where", where, "card", was, "driver_holds_pin", held)
+		s.log().Warn("card session reset: the card was found PIN-verified and the driver held no PIN", "where", where, "card", was, "driver_holds_pin", held)
 		return
 	}
-	slog.Info("card session reset", "where", where, "card", was, "driver_holds_pin", held)
+	s.log().Info("card session reset", "where", where, "card", was, "driver_holds_pin", held)
 }
 
 func (s *Service) start(wantSerial uint32) error {
@@ -337,7 +349,7 @@ func (s *Service) start(wantSerial uint32) error {
 			// The RS256 key is the one of a purpose that only some installations use: a card with a key in its slot that is
 			// not the plan's does not stop the driver from serving the other keys. The purpose stays absent (Sign and
 			// PublicKey answer absent, and Ensure never replaces a key), and the journal says why.
-			slog.Warn("the key in the slot of an optional purpose is not the plan's: the purpose is left absent", "purpose", e.purpose, "slot", e.slot.String(), "reason", err.Error())
+			s.log().Warn("the key in the slot of an optional purpose is not the plan's: the purpose is left absent", "purpose", e.purpose, "slot", e.slot.String(), "reason", err.Error())
 			continue
 		case err != nil:
 			problems = append(problems, fmt.Sprintf("slots.%s.attestation: %v", e.slot, err))
@@ -363,7 +375,7 @@ func (s *Service) Close() error {
 	s.oneTime = nil
 	err := s.card.Close()
 	if err != nil {
-		slog.Error("the card session cannot be reset at exit", "where", resetExit, "card", was, "driver_holds_pin", held, "error", err.Error())
+		s.log().Error("the card session cannot be reset at exit", "where", resetExit, "card", was, "driver_holds_pin", held, "error", err.Error())
 		return err
 	}
 	// held was read before the PIN was wiped: a card that the driver itself logged in is logged out here, as expected.
@@ -403,7 +415,7 @@ func (s *Service) adopt(e entry) (*slotKey, error) {
 	a, err := s.card.VerifyAttestation(s.attCert, cert)
 	if err != nil {
 		// The reason is the x509 error, which names a certificate and never a key; the refusal itself names none.
-		slog.Warn("attestation refused", "slot", e.slot.String(), "error", err.Error())
+		s.log().Warn("attestation refused", "slot", e.slot.String(), "error", err.Error())
 		return nil, attestationError("chain: the attestation does not chain to the Yubico root")
 	}
 	switch {
@@ -484,7 +496,7 @@ func (s *Service) refuseAt(ctx context.Context, level slog.Level, method string,
 	if s.caller != nil {
 		caller = s.caller(ctx)
 	}
-	slog.Log(ctx, level, "refused", "method", method, "code", code.String(), "reason", reason, "field", field, "caller", caller)
+	s.log().Log(ctx, level, "refused", "method", method, "code", code.String(), "reason", reason, "field", field, "caller", caller)
 	return refusal.New(code, reason, field)
 }
 
@@ -533,11 +545,11 @@ func (s *Service) Ensure(ctx context.Context, req *connect.Request[keyv1alpha1.E
 	}
 	k, err := s.generate(e)
 	if err != nil {
-		slog.Error("key generation failed", "purpose", purpose, "error", err.Error())
+		s.log().Error("key generation failed", "purpose", purpose, "error", err.Error())
 		return nil, s.refuse(ctx, "Ensure", connect.CodeFailedPrecondition, reasonCard, "purpose")
 	}
 	s.keys[purpose] = k
-	slog.Info("key made on the card", "purpose", purpose, "slot", e.slot.String(), "algorithm", e.algorithm)
+	s.log().Info("key made on the card", "purpose", purpose, "slot", e.slot.String(), "algorithm", e.algorithm)
 	return connect.NewResponse(&keyv1alpha1.EnsureResponse{SpkiDer: k.spki, Created: true}), nil
 }
 
@@ -606,7 +618,7 @@ func (s *Service) failed(ctx context.Context, method string, err error) *connect
 	var pe *card.PINError
 	if errors.As(err, &pe) {
 		s.pin.wipe()
-		slog.Error("the card refused the held PIN: locked again; it is not tried again", "method", method, "retries", pe.Retries)
+		s.log().Error("the card refused the held PIN: locked again; it is not tried again", "method", method, "retries", pe.Retries)
 		return s.refuse(ctx, method, connect.CodeFailedPrecondition, reasonLocked, "")
 	}
 	if errors.Is(err, errLocked) {
@@ -616,7 +628,7 @@ func (s *Service) failed(ctx context.Context, method string, err error) *connect
 		s.cardGone(method)
 		return s.refuse(ctx, method, connect.CodeUnavailable, reasonCard, "")
 	}
-	slog.Error("card failed", "method", method, "error", err.Error())
+	s.log().Error("card failed", "method", method, "error", err.Error())
 	return refusal.New(connect.CodeInternal, reasonStore, "")
 }
 
@@ -626,7 +638,7 @@ func (s *Service) failed(ctx context.Context, method string, err error) *connect
 // expected to.
 func (s *Service) cardGone(method string) {
 	s.pin.wipe()
-	slog.Error("the card is gone: the PIN is wiped and the driver exits", "method", method)
+	s.log().Error("the card is gone: the PIN is wiped and the driver exits", "method", method)
 	s.exit(errors.New("the card is gone (removed, reset or powered off): exiting to be started again locked"))
 }
 
@@ -680,10 +692,10 @@ func (s *Service) Sign(ctx context.Context, req *connect.Request[keyv1alpha1.Sig
 	if err != nil {
 		return nil, s.failed(ctx, "Sign", err)
 	}
-	slog.Debug("signed on the card", "purpose", purpose, "ms", time.Since(start).Milliseconds())
+	s.log().Debug("signed on the card", "purpose", purpose, "ms", time.Since(start).Milliseconds())
 	// A card that signs wrongly is caught here, before the signature leaves the driver.
 	if !ecdsa.VerifyASN1(k.pub, digest, sig) {
-		slog.Error("the card's signature does not verify with its public key", "purpose", purpose)
+		s.log().Error("the card's signature does not verify with its public key", "purpose", purpose)
 		return nil, refusal.New(connect.CodeInternal, reasonStore, "")
 	}
 	return connect.NewResponse(&keyv1alpha1.SignResponse{SignatureDer: sig, KeyId: keyid.Card(k.slot.String(), k.spki)}), nil
@@ -701,7 +713,7 @@ func (s *Service) busy() *connect.Error {
 	}
 	s.busyMu.Unlock()
 	if log {
-		slog.Warn("RSA signatures are refused as busy: the card is doing the one it admits", "refused_since_last_line", held)
+		s.log().Warn("RSA signatures are refused as busy: the card is doing the one it admits", "refused_since_last_line", held)
 	}
 	return refusal.New(connect.CodeResourceExhausted, reasonBusy, "")
 }
@@ -745,10 +757,10 @@ func (s *Service) signRS256(ctx context.Context, purpose string, digest []byte) 
 	if err != nil {
 		return nil, s.failed(ctx, "Sign", err)
 	}
-	slog.Info("signed on the card", "purpose", purpose, "algorithm", RS256, "ms", time.Since(start).Milliseconds())
+	s.log().Info("signed on the card", "purpose", purpose, "algorithm", RS256, "ms", time.Since(start).Milliseconds())
 	// A card that signs wrongly is caught here, before the signature leaves the driver.
 	if len(sig) != 256 || rsa.VerifyPKCS1v15(k.rsaPub, crypto.SHA256, digest, sig) != nil {
-		slog.Error("the card's RSA signature does not verify with its public key", "purpose", purpose)
+		s.log().Error("the card's RSA signature does not verify with its public key", "purpose", purpose)
 		return nil, refusal.New(connect.CodeInternal, reasonStore, "")
 	}
 	return connect.NewResponse(&keyv1alpha1.SignResponse{SignatureDer: sig, KeyId: keyid.Card(k.slot.String(), k.spki)}), nil
@@ -808,7 +820,7 @@ func Run(ctx context.Context, opts Options, host Host, admin AdminConfig) error 
 		return err
 	}
 	defer func() { _ = svc.Close() }()
-	slog.Info("yubikey-piv key driver starting, locked", "factory_defaults", opts.AllowFactoryDefaults, "boundary", opts.Boundary,
+	svc.log().Info("yubikey-piv key driver starting, locked", "factory_defaults", opts.AllowFactoryDefaults, "boundary", opts.Boundary,
 		"purposes", svc.Present())
 	path, h := svc.Handler(host.HandlerOptions...)
 	ctx, cancel := context.WithCancel(ctx)
@@ -845,6 +857,6 @@ func Check(opts Options) error {
 		return err
 	}
 	defer func() { _ = svc.Close() }()
-	slog.Info("card checked", "purposes", svc.Present())
+	svc.log().Info("card checked", "purposes", svc.Present())
 	return nil
 }

@@ -5,7 +5,6 @@ import (
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"errors"
-	"log/slog"
 
 	"github.com/truvity/atoom/key/pinrelease"
 )
@@ -41,10 +40,10 @@ func verifySigned(pub *ecdsa.PublicKey, text, sig []byte) bool {
 }
 
 // logPeerRefusal writes the journal line of a refused peer: its word, and never a value.
-func logPeerRefusal(method string, err error, node string) {
+func (s *Service) logPeerRefusal(method string, err error, node string) {
 	if errors.Is(err, ErrUnlisted) {
-		slog.Warn("a PIN release refused: not a listed peer", "call", method, "node", node)
+		s.log().Warn("a PIN release refused: not a listed peer", "call", method, "node", node)
 		return
 	}
-	slog.Warn("a PIN release refused: the KeyPlan", "call", method, "why", err.Error())
+	s.log().Warn("a PIN release refused: the KeyPlan", "call", method, "why", err.Error())
 }
