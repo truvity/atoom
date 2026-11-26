@@ -462,9 +462,10 @@ func TestQABudgetFailureAfterAPortCallLosesTheSession(t *testing.T) {
 	for _, op := range []opCase{qaOps[0], qaOps[1], qaOps[3]} {
 		t.Run("one drain read, then the budget is gone: "+op.name, func(t *testing.T) {
 			f := newFake(descSpec{}, cardHandler(echoSW))
+			f.send(msg(rspDataBlock, 77, stOK, 0, 0, qaResp)) // the first read returns bytes, and takes longer than the budget
 			f.onIn = func(*fakeDevice) { time.Sleep(60 * time.Millisecond) }
 			r, _ := Open(f, Options{})
-			err := op.call(r, DrainReadTimeout+20*time.Millisecond)
+			err := op.call(r, 2*DrainReadTimeout+5*time.Millisecond)
 			lost(t, r, f, err)
 			if f.nOut != 0 || f.nIn != 1 {
 				t.Errorf("%d writes, %d reads", f.nOut, f.nIn)
