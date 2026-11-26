@@ -43,6 +43,9 @@ type Options struct {
 	Purposes []purpose.Declaration
 	// Caller names the caller of a call for the journal line of a refusal; none when nil. The host knows its callers.
 	Caller func(context.Context) string
+	// Logger receives every line the driver writes. nil means slog.Default(), read at each line; the host decides where the lines go,
+	// or that they go nowhere.
+	Logger *slog.Logger
 }
 
 // Host is what a program that runs the driver provides.
@@ -63,7 +66,7 @@ func New(opts Options) (*Service, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Service{store: st, purposes: set, caller: opts.Caller}, nil
+	return &Service{store: st, purposes: set, caller: opts.Caller, logger: opts.Logger}, nil
 }
 
 // Handler returns the Connect handler of the key-store service, to mount on a server or an in-memory transport.
@@ -83,7 +86,7 @@ func Run(ctx context.Context, opts Options, host Host) error {
 	if err != nil {
 		return err
 	}
-	slog.Info("software key driver starting", "purposes", svc.Present())
+	svc.log().Info("software key driver starting", "purposes", svc.Present())
 	path, h := svc.Handler(host.HandlerOptions...)
 	return host.Serve(ctx, path, h)
 }
@@ -107,6 +110,15 @@ type Service struct {
 	store    *keystore.Store
 	purposes *purpose.Set
 	caller   func(context.Context) string
+	logger   *slog.Logger
+}
+
+// log is the logger of the driver: the host's Options.Logger, or slog.Default() read now when the host gave none.
+func (s *Service) log() *slog.Logger {
+	if s.logger != nil {
+		return s.logger
+	}
+	return slog.Default()
 }
 
 // The reasons of the refusals of the port (a closed list).
@@ -121,7 +133,7 @@ const (
 
 // refuse logs a refusal, with the method and the reason and no value, and returns it.
 func (s *Service) refuse(ctx context.Context, method string, code connect.Code, reason, field string) *connect.Error {
-	slog.Warn("refused", "method", method, "code", code.String(), "reason", reason, "field", field, "caller", s.callerOf(ctx))
+	s.log().Warn("refused", "method", method, "code", code.String(), "reason", reason, "field", field, "caller", s.callerOf(ctx))
 	return refusal.New(code, reason, field)
 }
 
@@ -152,7 +164,7 @@ func (s *Service) Ensure(ctx context.Context, req *connect.Request[keyv1alpha1.E
 		return nil, s.failed(ctx, "Ensure", err)
 	}
 	if created {
-		slog.Info("key made", "purpose", name, "algorithm", algorithm)
+		s.log().Info("key made", "purpose", name, "algorithm", algorithm)
 	}
 	res := &keyv1alpha1.EnsureResponse{SpkiDer: spki, Created: created}
 	if at, err := s.store.CreatedAt(name); err == nil {
@@ -231,7 +243,7 @@ func (s *Service) failed(ctx context.Context, method string, err error) *connect
 	case errors.Is(err, keystore.ErrPeer):
 		return s.refuse(ctx, method, connect.CodeInvalidArgument, reasonPeer, "peer_public")
 	}
-	slog.Error("store failed", "method", method, "error", err.Error())
+	s.log().Error("store failed", "method", method, "error", err.Error())
 	return refusal.New(connect.CodeInternal, reasonStore, "")
 }
 
