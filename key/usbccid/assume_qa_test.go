@@ -441,3 +441,45 @@ func TestQAReadBufferSizeIsNotMatchedToAPacketSize(t *testing.T) {
 		}
 	}
 }
+
+// "A read whose buffer is exactly as long as the message ends before the empty packet, and the next read returns it as zero bytes; a
+// read with a longer buffer ends on the empty packet in the same call": the layer passes the counts the kernel gives and makes one
+// kernel call for each read, whatever the buffer; it neither waits for the empty packet nor reads it on its own.
+func TestQAMessageOfAWholeNumberOfPacketsAndTheEmptyPacket(t *testing.T) {
+	// The kernel's answers for a 64-byte message on an endpoint of 64-byte packets: with a buffer of 64 the read ends when the buffer is
+	// full, and the empty packet is left for the next read; with a larger buffer the read ends on the empty packet, in the same call.
+	k := &qaKernel{answer: func(c kcall) (uintptr, unix.Errno) {
+		if c.req != reqBulk {
+			return 0, 0
+		}
+		return 64, 0
+	}}
+	d, _ := qaDevice(t, nil, k)
+	qaClaim(t, d)
+	base := k.count()
+	if n, err := d.BulkIn(qaIn, make([]byte, 512), time.Second); err != nil || n != 64 {
+		t.Fatalf("a read with a longer buffer: %d %v", n, err)
+	}
+	if k.count()-base != 1 {
+		t.Errorf("%d kernel calls for one read: the layer waits for or reads the empty packet by itself", k.count()-base)
+	}
+	empty := false
+	k.mu.Lock()
+	k.answer = func(c kcall) (uintptr, unix.Errno) {
+		if c.req != reqBulk {
+			return 0, 0
+		}
+		if !empty {
+			empty = true
+			return 64, 0
+		}
+		return 0, 0
+	}
+	k.mu.Unlock()
+	if n, err := d.BulkIn(qaIn, make([]byte, 64), time.Second); err != nil || n != 64 {
+		t.Fatalf("a read with a buffer as long as the message: %d %v", n, err)
+	}
+	if n, err := d.BulkIn(qaIn, make([]byte, 64), time.Second); err != nil || n != 0 {
+		t.Fatalf("the next read: %d %v, want the empty packet as zero bytes", n, err)
+	}
+}

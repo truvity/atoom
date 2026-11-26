@@ -69,17 +69,14 @@ func (f *fakePort) check(ep uint8, n int, in bool) error {
 	if (ep&0x80 != 0) != in {
 		return ErrBadEndpoint
 	}
-	owner := false
-	for i := range f.lay.ifaces {
-		if f.lay.ifaces[i].has(ep) {
-			if f.claimed[f.lay.ifaces[i].number] {
-				owner = true
-			} else if f.lay.ifaces[i].class == ClassCCID {
-				return ErrNotClaimed
-			}
-		}
+	owner, err := f.lay.bulkOwner(ep)
+	if err != nil {
+		return ErrBadEndpoint
 	}
-	if !owner {
+	if !f.claimed[owner.number] {
+		if owner.class == ClassCCID {
+			return ErrNotClaimed
+		}
 		return ErrBadEndpoint
 	}
 	if n > maxTransfer || (in && n == 0) {

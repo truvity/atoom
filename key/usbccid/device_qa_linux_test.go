@@ -859,23 +859,27 @@ func TestQANodeIsOpenedOnceAndNeverReopened(t *testing.T) {
 	}
 }
 
-// Descriptors are read once at Open (at most 64 KiB), whatever the node holds afterwards.
-func TestQADescriptorsReadOnceAndBounded(t *testing.T) {
+// Descriptors are read once at Open, whatever the node holds afterwards (the read at most 64 KiB is held in TestQALargeDescriptors).
+func TestQADescriptorsReadOnce(t *testing.T) {
 	k := &qaKernel{}
-	d, path := qaDevice(t, make([]byte, 70000), k)
+	d, path := qaDevice(t, nil, k)
 	b, err := d.Descriptors()
-	if err != nil || len(b) != maxDescriptorBytes {
-		t.Fatalf("descriptors of a 70000-byte node: %d bytes, %v", len(b), err)
+	if err != nil || len(b) != len(qaDefaultDesc()) {
+		t.Fatalf("descriptors: %d bytes, %v", len(b), err)
 	}
 	if err := os.WriteFile(path, []byte{1, 2, 3}, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if again, _ := d.Descriptors(); len(again) != maxDescriptorBytes {
+	if again, _ := d.Descriptors(); len(again) != len(b) {
 		t.Errorf("descriptors read again: %d bytes", len(again))
 	}
-	empty, _ := qaDevice(t, []byte{}, k)
-	if b, err := empty.Descriptors(); err != nil || len(b) != 0 {
-		t.Errorf("empty node: %v %v", b, err)
+	// A node that gives nothing is no device.
+	empty := filepath.Join(t.TempDir(), "empty")
+	if err := os.WriteFile(empty, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if d, err := open(empty, false); !errors.Is(err, ErrBadDescriptors) || d != nil {
+		t.Errorf("empty node: %v %v", d, err)
 	}
 }
 
