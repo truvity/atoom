@@ -76,6 +76,9 @@ type Options struct {
 	Pointers []string
 	// ObjectMax bounds the bytes of one object; zero is [ObjectMax].
 	ObjectMax int
+	// Logger receives every line the driver writes. nil means slog.Default(), read at each line; the host decides where the lines go,
+	// or that they go nowhere.
+	Logger *slog.Logger
 }
 
 // Host is what a program that runs the driver provides.
@@ -97,6 +100,7 @@ type Service struct {
 	prefix   string
 	pointers []string
 	max      int
+	logger   *slog.Logger
 }
 
 var _ blobv1alpha1connect.BlobServiceHandler = (*Service)(nil)
@@ -125,7 +129,7 @@ func New(opts Options) (*Service, error) {
 	if maxObj == 0 {
 		maxObj = ObjectMax
 	}
-	return &Service{api: opts.S3, bucket: opts.Bucket, prefix: opts.Prefix, pointers: pointers, max: maxObj}, nil
+	return &Service{api: opts.S3, bucket: opts.Bucket, prefix: opts.Prefix, pointers: pointers, max: maxObj, logger: opts.Logger}, nil
 }
 
 // Pointers are the declared pointer names, sorted.
@@ -177,12 +181,20 @@ func (s *Service) isPointer(path string) bool {
 	return found
 }
 
+// log is the logger of the driver: the host's Options.Logger, or slog.Default() read now when the host gave none.
+func (s *Service) log() *slog.Logger {
+	if s.logger != nil {
+		return s.logger
+	}
+	return slog.Default()
+}
+
 // engine is the refusal of a failure of S3: the reason only, and S3's text in the operator's log.
-func engine(what string, err error) error {
+func (s *Service) engine(what string, err error) error {
 	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 		return err
 	}
-	slog.Error("S3 failed", "call", what, "err", err)
+	s.log().Error("S3 failed", "call", what, "err", err)
 	return refusal.New(connect.CodeUnavailable, "engine", "")
 }
 
@@ -236,15 +248,15 @@ func (s *Service) read(ctx context.Context, key string) (data []byte, etag strin
 		if absent(err) {
 			return nil, "", false, nil
 		}
-		return nil, "", false, engine("GetObject", err)
+		return nil, "", false, s.engine("GetObject", err)
 	}
 	defer func() { _ = out.Body.Close() }()
 	data, err = io.ReadAll(io.LimitReader(out.Body, int64(s.max)+1))
 	if err != nil {
-		return nil, "", false, engine("GetObject", err)
+		return nil, "", false, s.engine("GetObject", err)
 	}
 	if len(data) > s.max {
-		slog.Error("S3 object over the bound", "bound", s.max)
+		s.log().Error("S3 object over the bound", "bound", s.max)
 		return nil, "", false, refusal.New(connect.CodeUnavailable, "engine", "")
 	}
 	return data, aws.ToString(out.ETag), true, nil
@@ -263,7 +275,7 @@ func (s *Service) Create(ctx context.Context, req *connect.Request[blobv1alpha1.
 		if precondition(err) {
 			return nil, refusal.New(connect.CodeAlreadyExists, "taken", "path")
 		}
-		return nil, engine("PutObject", err)
+		return nil, s.engine("PutObject", err)
 	}
 	return connect.NewResponse(&blobv1alpha1.CreateResponse{Etag: Tag(data)}), nil
 }
@@ -287,7 +299,7 @@ func (s *Service) Put(ctx context.Context, req *connect.Request[blobv1alpha1.Put
 			if precondition(err) {
 				return nil, version
 			}
-			return nil, engine("PutObject", err)
+			return nil, s.engine("PutObject", err)
 		}
 		return connect.NewResponse(&blobv1alpha1.PutResponse{Etag: Tag(data)}), nil
 	}
@@ -302,7 +314,7 @@ func (s *Service) Put(ctx context.Context, req *connect.Request[blobv1alpha1.Put
 		if precondition(err) || absent(err) {
 			return nil, version
 		}
-		return nil, engine("PutObject", err)
+		return nil, s.engine("PutObject", err)
 	}
 	return connect.NewResponse(&blobv1alpha1.PutResponse{Etag: Tag(data)}), nil
 }
@@ -348,7 +360,7 @@ func (s *Service) List(ctx context.Context, req *connect.Request[blobv1alpha1.Bl
 		in.MaxKeys = aws.Int32(min(size+1-n, 1000))
 		out, err := s.api.ListObjectsV2(ctx, in)
 		if err != nil {
-			return nil, engine("ListObjectsV2", err)
+			return nil, s.engine("ListObjectsV2", err)
 		}
 		for _, o := range out.Contents {
 			p := strings.TrimPrefix(aws.ToString(o.Key), s.prefix)
