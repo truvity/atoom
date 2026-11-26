@@ -9,9 +9,9 @@ require (
 	github.com/aws/aws-sdk-go-v2 v1.48.0
 	github.com/aws/aws-sdk-go-v2/config v1.33.20
 	github.com/aws/aws-sdk-go-v2/service/sqs v1.53.0
-	github.com/truvity/atoom/common v0.10.0
-	github.com/truvity/atoom/socket v0.10.0
-	github.com/truvity/atoom/transport v0.10.0
+	github.com/truvity/atoom/common v0.11.0
+	github.com/truvity/atoom/socket v0.11.0
+	github.com/truvity/atoom/transport v0.11.0
 	google.golang.org/protobuf v1.36.12
 )
 

@@ -5,7 +5,13 @@ libraries changed. `just release-prepare X.Y.Z` writes the section.
 
 <!-- release-prepare: new sections go below this line -->
 
-## Unreleased
+## 0.11.0 - 2026-11-26
+
+One version for the whole repository: every library is tagged 0.11.0, changed or not.
+
+Libraries that changed since v0.10.0:
+- `key`
+- `key/usbccid`
 
 ### Added
 
