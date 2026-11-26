@@ -10,7 +10,7 @@ libraries changed. `just release-prepare X.Y.Z` writes the section.
 ### Added
 
 - **`key/signer`**, in the module `key`: a `crypto.Signer` over a client of the key port, for code that takes a `crypto.Signer` and a key that stays in the store. It signs a digest for `ES256`, `ES384` and `RS256` and checks each answer against the key it read at the start ([the key port](key/docs/key-port.md#a-cryptosigner)).
-- **`Options.Logger` on the Go driver libraries `blob/s3`, `key/awskms`, `key/software`, `key/yubikeypiv`, `source/appconfig`, `source/file`, `store/dynamodb`, `transport/nats` and `transport/sqs`.** Every line a driver writes goes to the `*slog.Logger` of the host that links it in its own process, so the host decides where the lines go. `nil` is `slog.Default()`, read at each line: nothing changes for a host that sets none. The messages, levels and attributes are the same, and the thin mains are unchanged (no flag, the same output).
+- **`Options.Logger` on the Go driver libraries `blob/s3`, `key/awskms`, `key/software`, `key/yubikeypiv`, `source/appconfig`, `source/file`, `store/dynamodb`, `transport/nats` and `transport/sqs`.** Every line a driver writes goes to the `*slog.Logger` of the host that links it in its own process, so the host decides where the lines go. `nil` is `slog.Default()`, read at each line: nothing changes for a host that sets none. The messages, levels and attributes are the same, and the thin mains are unchanged (no flag, the same output). The guard of the module `socket` still writes its "call refused" line to the default logger when a host serves a real socket with `socket.Serve` (`socket/guard.go`); a logger for the socket may follow.
 
 ## 0.9.0 - 2026-11-26
 
