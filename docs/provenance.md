@@ -142,6 +142,21 @@ From sluis `3f0afea`.
 
 sluis's Rust loader of its signed key plan reads the same `slotplan/testdata/vectors.json`; since step B13 the `card` column of the vectors refuses only an algorithm that a card does not hold (the card driver serves any purpose a host declares), and `CardServed` holds the fourteen rows whose algorithm a card holds. What stayed in sluis: `kits/go/pinrelease/slotmap.go` (it reads the slot map of a signed key plan).
 
+### key/usbccid
+
+<a id="key-usbccid"></a>
+
+The first half of the USB and CCID transport of the card driver of [record 0026](decisions/0026-one-yubikey-driver-over-direct-usb.md), published as a library of its own so that a second card application can be built on it. The USB layer is ported from a consumer's private measurement spike, whose maintainer agreed to publish it; no commit of sluis is behind it.
+
+| Here | From | Changed |
+| --- | --- | --- |
+| `device_linux.go` | the spike's `internal/usbfs` | the package is `usbccid`; the same three ioctls (bulk, claim, release), the same plain claim with no detach and no reset; `ErrBusy`, `ErrTimeout` and `ErrClosed` are values of the package and wrap the errno; the first fatal error is `ErrGone` (it was the bare errno behind "device failed earlier"); `Fatal` is unexported; an interface number outside 0 to 255 and a transfer over 16 MiB are refused before the kernel is asked; the system call is a field, so that a test scripts the kernel's answers; the comments no longer name the spike's plan and scripts |
+| `device_linux_test.go` | the spike's `usbfs_test.go` | the tests ran against `/dev/null`; they run against a regular file under `t.TempDir()`; the tests of the latch, of busy and of close are new |
+| `port.go` | the `Port` interface of `internal/usbfs` | the doc comments say that a transfer cannot be cancelled and what a timeout of zero means |
+| `device_other.go`, `discover_linux.go`, `candidate.go`, `errors.go`, `doc.go`, `*_test.go` besides the above | new | discovery from sysfs, the `Candidate` and the `Filter`, `ErrNotSupported` and the build of every other system |
+
+The descriptor parser of the spike (`internal/ccid/desc.go`) is not here: discovery reads sysfs, and the parser comes with the CCID reader, which is the next pull request.
+
 ## store
 
 <a id="store"></a>
