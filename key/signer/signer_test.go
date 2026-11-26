@@ -800,10 +800,303 @@ func TestManyGoroutinesSignThroughOneSigner(t *testing.T) {
 	}
 }
 
-func TestNewIgnoresANilOptionAndDoesNotPanic(t *testing.T) {
-	t.Skip("BUG: New calls every Option without a nil check (signer.go:125), so a nil Option panics")
+func TestNewIgnoresANilOptionAndAppliesTheOthers(t *testing.T) {
+	// The real options on both sides of the nil one apply, in order: the last timeout is the one that holds.
+	t.Run("only nil options", func(t *testing.T) {
+		f, _ := newFake(t, purpose.ES256)
+		if _, err := signer.New(t.Context(), start(t, f), purposeName, nil, nil); err != nil {
+			t.Fatalf("New: %v", err)
+		}
+	})
+	t.Run("the timeout after the nil option applies", func(t *testing.T) {
+		f, _ := newFake(t, purpose.ES256)
+		s, err := signer.New(t.Context(), start(t, f), purposeName, signer.WithTimeout(-time.Second), nil, signer.WithTimeout(50*time.Millisecond))
+		if err != nil {
+			t.Fatalf("New: %v", err)
+		}
+		f.blockSign()
+		begin := time.Now()
+		sig, err := s.Sign(nil, digestOf(purpose.ES256, "m"), crypto.SHA256)
+		if elapsed := time.Since(begin); elapsed > 5*time.Second {
+			t.Fatalf("Sign took %v: the timeout of 50ms was not applied", elapsed)
+		}
+		if sig != nil || !isDeadline(err) {
+			t.Fatalf("sig %x, err %v: not a deadline", sig, err)
+		}
+	})
+	t.Run("the timeout before the nil option applies", func(t *testing.T) {
+		f, _ := newFake(t, purpose.ES256)
+		s, err := signer.New(t.Context(), start(t, f), purposeName, signer.WithTimeout(time.Minute), nil, signer.WithTimeout(0))
+		if s != nil {
+			t.Fatal("New returned a Signer")
+		}
+		refused(t, nil, err, signer.ErrTimeout)
+	})
+}
+
+func TestRS256RefusesAnExponentThatIsNot65537(t *testing.T) {
+	base := &rsaKey(t, 2048, 0).PublicKey
+	for _, e := range []int{3, 17, 257, 65539} {
+		t.Run(fmt.Sprint("E=", e), func(t *testing.T) {
+			f, _ := newFake(t, purpose.RS256)
+			spki, err := x509.MarshalPKIXPublicKey(&rsa.PublicKey{N: base.N, E: e})
+			if err != nil {
+				t.Fatal(err)
+			}
+			// The id names this very SPKI, so the exponent is the only reason to refuse.
+			f.spki, f.keyID = spki, keyid.Software(spki)
+			s, err := signer.New(t.Context(), start(t, f), purposeName)
+			if s != nil {
+				t.Fatal("New returned a Signer")
+			}
+			refused(t, nil, err, signer.ErrKey)
+		})
+	}
+	t.Run("65537 is taken", func(t *testing.T) {
+		f, _ := newFake(t, purpose.RS256)
+		if base.E != 65537 {
+			t.Fatalf("the test key has the exponent %d", base.E)
+		}
+		if s := newSigner(t, f); s.Public().(*rsa.PublicKey).E != 65537 {
+			t.Fatal("the exponent is not 65537")
+		}
+	})
+}
+
+// Sign copies the digest.
+
+func TestSignCopiesTheDigest(t *testing.T) {
+	for _, alg := range algorithms {
+		t.Run(alg, func(t *testing.T) {
+			f, k := newFake(t, alg)
+			s := newSigner(t, f)
+			digest := digestOf(alg, "m")
+			given := append([]byte(nil), digest...)
+			_, err := s.Sign(nil, digest, hashOf(alg))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !bytes.Equal(digest, given) {
+				t.Error("Sign changed the slice of the caller")
+			}
+			if got := f.requests()[0].GetDigest(); !bytes.Equal(got, given) {
+				t.Errorf("the store got %x, the caller gave %x", got, given)
+			}
+
+			// The caller changes its slice while the store works: it still gets a valid signature of the first value. The fake
+			// signals that it has the request, the test changes the slice, and only then the fake answers.
+			proceed := make(chan struct{})
+			f.setSign(func(_ context.Context, req *keyv1alpha1.SignRequest) (*keyv1alpha1.SignResponse, error) {
+				<-proceed
+				return honest(t, k)(nil, req)
+			})
+			for len(f.entered) > 0 {
+				<-f.entered
+			}
+			type result struct {
+				sig []byte
+				err error
+			}
+			done := make(chan result, 1)
+			go func() {
+				sig, err := s.Sign(nil, digest, hashOf(alg))
+				done <- result{sig, err}
+			}()
+			select {
+			case <-f.entered:
+			case <-time.After(5 * time.Second):
+				t.Fatal("the store was not reached")
+			}
+			for i := range digest {
+				digest[i] ^= 0xff
+			}
+			close(proceed)
+			r := <-done
+			if r.err != nil {
+				t.Fatalf("Sign with a slice that changed meanwhile: %v", r.err)
+			}
+			if !verifies(t, alg, s.Public(), given, r.sig) {
+				t.Fatal("the signature is not a valid signature of the value at the time of the call")
+			}
+		})
+	}
+}
+
+// ErrKeyChanged carries no text from the store.
+
+func TestKeyChangedCarriesNoIdOfTheStore(t *testing.T) {
+	f, k := newFake(t, purpose.ES256)
+	oldID, newID := "OLD-SLOT-MARKER:"+k.id, "NEW-SLOT-MARKER:"+newKey(t, purpose.ES256, 0).id
+	f.keyID = oldID
+	f.answer(k.sign(t, digestOf(purpose.ES256, "m")), newID)
+	s := newSigner(t, f)
+	if s.KeyID() != oldID {
+		t.Fatalf("KeyID() = %q", s.KeyID())
+	}
+	sig, err := s.Sign(nil, digestOf(purpose.ES256, "m"), crypto.SHA256)
+	refused(t, sig, err, signer.ErrKeyChanged)
+	for _, text := range []string{"OLD-SLOT-MARKER", "NEW-SLOT-MARKER", k.id, newID, oldID} {
+		if strings.Contains(err.Error(), text) {
+			t.Errorf("the error %q names %q", err, text)
+		}
+	}
+}
+
+// WithContext.
+
+func TestWithContextMakesNoCallAndKeepsTheKey(t *testing.T) {
+	f, _ := newFake(t, purpose.ES384)
+	s := newSigner(t, f)
+	caps, pubs, signs := f.capsCount(), f.pubCount(), f.signCount()
+	c := s.WithContext(t.Context())
+	if c == s {
+		t.Fatal("WithContext returned the Signer itself")
+	}
+	if f.capsCount() != caps || f.pubCount() != pubs || f.signCount() != signs {
+		t.Fatal("WithContext called the port")
+	}
+	if c.Public() != s.Public() || c.KeyID() != s.KeyID() || c.Algorithm() != s.Algorithm() {
+		t.Fatal("the copy has another key, id or algorithm")
+	}
+	digest := digestOf(purpose.ES384, "m")
+	sig, err := c.Sign(nil, digest, crypto.SHA384)
+	if err != nil || !verifies(t, purpose.ES384, c.Public(), digest, sig) {
+		t.Fatalf("Sign of the copy: %v", err)
+	}
+}
+
+func TestWithContextCallsCarryTheNewContext(t *testing.T) {
+	var mu sync.Mutex
+	var values []any
+	ic := connect.UnaryInterceptorFunc(func(next connect.UnaryFunc) connect.UnaryFunc {
+		return func(ctx context.Context, req connect.AnyRequest) (connect.AnyResponse, error) {
+			if req.Spec().Procedure == "/atoom.key.v1alpha1.KeyStoreService/Sign" {
+				mu.Lock()
+				values = append(values, ctx.Value(ctxKey{}))
+				mu.Unlock()
+			}
+			return next(ctx, req)
+		}
+	})
 	f, _ := newFake(t, purpose.ES256)
-	if _, err := signer.New(t.Context(), start(t, f), purposeName, nil); err != nil {
-		t.Fatalf("New: %v", err)
+	s, err := signer.New(context.WithValue(t.Context(), ctxKey{}, "original"), start(t, f, connect.WithInterceptors(ic)), purposeName)
+	if err != nil {
+		t.Fatal(err)
+	}
+	digest := digestOf(purpose.ES256, "m")
+	if _, err := s.WithContext(context.WithValue(t.Context(), ctxKey{}, "request")).Sign(nil, digest, crypto.SHA256); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Sign(nil, digest, crypto.SHA256); err != nil {
+		t.Fatal(err)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if len(values) != 2 || values[0] != "request" || values[1] != "original" {
+		t.Fatalf("the values that reached the port: %v, want [request original]", values)
+	}
+}
+
+func TestWithContextDeadlineWinsWhenSoonerThanTheTimeout(t *testing.T) {
+	f, _ := newFake(t, purpose.ES256)
+	s := newSigner(t, f, signer.WithTimeout(time.Hour))
+	ctx, cancel := context.WithTimeout(t.Context(), 300*time.Millisecond)
+	defer cancel()
+	f.blockSign()
+	begin := time.Now()
+	sig, err := s.WithContext(ctx).Sign(nil, digestOf(purpose.ES256, "m"), crypto.SHA256)
+	if elapsed := time.Since(begin); elapsed > 10*time.Second {
+		t.Fatalf("Sign took %v: the deadline of the new context did not win", elapsed)
+	}
+	if sig != nil || !isDeadline(err) {
+		t.Fatalf("sig %x, err %v: not a deadline", sig, err)
+	}
+}
+
+func TestWithContextCancellationsAreIndependent(t *testing.T) {
+	digest := digestOf(purpose.ES256, "m")
+	sign := func(s *signer.Signer) ([]byte, error) { return s.Sign(nil, digest, crypto.SHA256) }
+
+	t.Run("cancelling the copy stops the copy and not the original", func(t *testing.T) {
+		f, _ := newFake(t, purpose.ES256)
+		s := newSigner(t, f)
+		ctx, cancel := context.WithCancel(t.Context())
+		c := s.WithContext(ctx)
+		cancel()
+		if sig, err := sign(c); sig != nil || !isCanceled(err) {
+			t.Fatalf("copy: sig %x, err %v: not a cancellation", sig, err)
+		}
+		if _, err := sign(s); err != nil {
+			t.Fatalf("the original after the copy was cancelled: %v", err)
+		}
+	})
+	t.Run("cancelling the original does not stop the copy", func(t *testing.T) {
+		f, _ := newFake(t, purpose.ES256)
+		ctx, cancel := context.WithCancel(t.Context())
+		s, err := signer.New(ctx, start(t, f), purposeName)
+		if err != nil {
+			t.Fatal(err)
+		}
+		c := s.WithContext(t.Context())
+		cancel()
+		if sig, err := sign(s); sig != nil || !isCanceled(err) {
+			t.Fatalf("original: sig %x, err %v: not a cancellation", sig, err)
+		}
+		if sig, err := sign(c); err != nil || !verifies(t, purpose.ES256, c.Public(), digest, sig) {
+			t.Fatalf("the copy after the original was cancelled: %v", err)
+		}
+	})
+}
+
+func TestWithContextOfNilPanicsAndSaysWhy(t *testing.T) {
+	f, _ := newFake(t, purpose.ES256)
+	s := newSigner(t, f)
+	var nilCtx context.Context
+	defer func() {
+		r := recover()
+		if r == nil {
+			t.Fatal("WithContext(nil) did not panic")
+		}
+		if msg := fmt.Sprint(r); !strings.Contains(msg, "nil context") {
+			t.Fatalf("the panic says %q, want it to name the nil context", msg)
+		}
+	}()
+	s.WithContext(nilCtx)
+}
+
+func TestCopiesAndTheOriginalSignTogether(t *testing.T) {
+	const goroutines, each = 8, 8
+	for _, alg := range []string{purpose.ES256, purpose.RS256} {
+		t.Run(alg, func(t *testing.T) {
+			f, _ := newFake(t, alg)
+			s := newSigner(t, f)
+			var wg sync.WaitGroup
+			for g := range goroutines {
+				// Half of the goroutines sign through the original, the others each through a copy of their own, and some copy a copy.
+				sg := s
+				if g%2 == 1 {
+					sg = s.WithContext(context.WithValue(t.Context(), ctxKey{}, g))
+					if g%4 == 3 {
+						sg = sg.WithContext(t.Context())
+					}
+				}
+				wg.Add(1)
+				go func() {
+					defer wg.Done()
+					for i := range each {
+						digest := digestOf(alg, fmt.Sprintf("goroutine %d, message %d", g, i))
+						sig, err := sg.Sign(nil, digest, hashOf(alg))
+						if err != nil || !verifies(t, alg, sg.Public(), digest, sig) {
+							t.Errorf("goroutine %d, message %d: %v", g, i, err)
+							return
+						}
+					}
+				}()
+			}
+			wg.Wait()
+			if got := f.signCount(); got != goroutines*each {
+				t.Errorf("%d calls of the port, want %d", got, goroutines*each)
+			}
+		})
 	}
 }
