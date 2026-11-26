@@ -172,6 +172,9 @@ type Options struct {
 	Dir *Dir
 	// WatchEvery is how often Watch looks at a document again; zero is [WatchEvery].
 	WatchEvery time.Duration
+	// Logger receives every line the driver writes. nil means slog.Default(), read at each line; the host decides where the lines go,
+	// or that they go nowhere.
+	Logger *slog.Logger
 }
 
 // Host is what a program that runs the driver provides.
@@ -185,8 +188,9 @@ type Host struct {
 // Service is the config source of one directory: the SourceService.
 type Service struct {
 	sourcev1alpha1connect.UnimplementedSourceServiceHandler
-	dir   *Dir
-	every time.Duration
+	dir    *Dir
+	every  time.Duration
+	logger *slog.Logger
 }
 
 var _ sourcev1alpha1connect.SourceServiceHandler = (*Service)(nil)
@@ -200,7 +204,7 @@ func New(opts Options) (*Service, error) {
 	if every <= 0 {
 		every = WatchEvery
 	}
-	return &Service{dir: opts.Dir, every: every}, nil
+	return &Service{dir: opts.Dir, every: every, logger: opts.Logger}, nil
 }
 
 // Handler returns the Connect handler of the source service, to mount on a server or an in-memory transport.
@@ -237,8 +241,16 @@ func Run(ctx context.Context, opts Options, host Host) error {
 	return host.Serve(ctx, path, h)
 }
 
+// log is the logger of the driver: the host's Options.Logger, or slog.Default() read now when the host gave none.
+func (s *Service) log() *slog.Logger {
+	if s.logger != nil {
+		return s.logger
+	}
+	return slog.Default()
+}
+
 // refuse is the Connect error of an error of the directory; the field at fault is the request's name.
-func refuse(err error) error {
+func (s *Service) refuse(err error) error {
 	switch {
 	case errors.Is(err, ErrName):
 		return refusal.New(connect.CodeInvalidArgument, "schema", "name")
@@ -250,7 +262,7 @@ func refuse(err error) error {
 		return err
 	default:
 		// The message is the reason only, never the text of the filesystem: that is for the operator's log.
-		slog.Error("config directory failed", "err", err)
+		s.log().Error("config directory failed", "err", err)
 		return refusal.New(connect.CodeUnavailable, "engine", "")
 	}
 }
@@ -264,7 +276,7 @@ func (s *Service) Capabilities(_ context.Context, _ *connect.Request[sourcev1alp
 func (s *Service) Read(_ context.Context, req *connect.Request[sourcev1alpha1.ReadRequest]) (*connect.Response[sourcev1alpha1.ReadResponse], error) {
 	doc, err := s.dir.Read(req.Msg.GetName())
 	if err != nil {
-		return nil, refuse(err)
+		return nil, s.refuse(err)
 	}
 	if held := req.Msg.GetIfNoneMatch(); held != "" && held == doc.Version {
 		return connect.NewResponse(&sourcev1alpha1.ReadResponse{Unchanged: true, Version: doc.Version}), nil
@@ -278,11 +290,11 @@ func (s *Service) Read(_ context.Context, req *connect.Request[sourcev1alpha1.Re
 func (s *Service) Watch(ctx context.Context, req *connect.Request[sourcev1alpha1.SourceWatchRequest], stream *connect.ServerStream[sourcev1alpha1.SourceWatchResponse]) error {
 	name := req.Msg.GetName()
 	if !ValidName(name) {
-		return refuse(ErrName)
+		return s.refuse(ErrName)
 	}
 	seen, held, err := s.dir.Version(name)
 	if err != nil {
-		return refuse(err)
+		return s.refuse(err)
 	}
 	openStream(ctx)
 	tick := time.NewTicker(s.every)
@@ -295,7 +307,7 @@ func (s *Service) Watch(ctx context.Context, req *connect.Request[sourcev1alpha1
 		}
 		now, there, err := s.dir.Version(name)
 		if err != nil {
-			return refuse(err)
+			return s.refuse(err)
 		}
 		if now == seen && there == held {
 			continue
