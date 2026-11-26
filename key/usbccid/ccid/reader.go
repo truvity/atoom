@@ -690,7 +690,8 @@ func (r *Reader) exchange(op string, typ byte, level uint16, payload []byte, wan
 // whether more follows. A read that returns bytes (an empty packet too) starts the count again. An empty packet that ended an earlier message
 // is read and dropped here; one that arrives just after the drain is consumed by the first read of the session (as after a
 // whole-packet message). A read cut short by the budget is no proof of quiet: the budget error ends the session, except before the
-// first read, where it only refuses the call. A read cut short by MaxDrainTime proves nothing either and is not counted. At most
+// first read, where the budget must hold two whole windows (40 ms with the defaults), the least a quiet pipe takes, and else only
+// refuses the call. A read cut short by MaxDrainTime proves nothing either and is not counted. At most
 // MaxDrainReads reads and MaxDrainTime in all: a device that is not quiet by then keeps sending without being asked, and the session
 // is lost with ErrProtocol. On a quiet device the cost is two timed-out reads, 2 x DrainReadTimeout.
 func (r *Reader) drain(op string, dl time.Time) error {
@@ -705,12 +706,17 @@ func (r *Reader) drain(op string, dl time.Time) error {
 			return r.lose(fmt.Errorf("%w: %s: the IN pipe is not quiet after %d reads (MaxDrainReads, MaxDrainTime): the device sends without being asked", ErrProtocol, op, reads))
 		}
 		// A read that the budget cut short proves nothing about the pipe: unless the budget leaves room for one whole drain read
-		// (DrainReadTimeout, or the transfer timeout when that is shorter), the drain is not marked done. Before its first read
-		// that only refuses the call (nothing was read, the session is kept); later it ends the session.
+		// (DrainReadTimeout, or the transfer timeout when that is shorter), the drain is not marked done. Before its first read the
+		// budget must hold the two windows that a quiet pipe takes, and else only the call is refused (nothing was read, the session
+		// is kept); later it ends the session.
 		window := min(DrainReadTimeout, r.xfer)
 		to := min(window, left)
-		if time.Until(dl) < to {
-			err := fmt.Errorf("ccid: %s: drain: %w: not enough left for one whole read of %v", op, ErrBudgetExhausted, to)
+		need := to
+		if !r.touched {
+			need = 2 * to
+		}
+		if time.Until(dl) < need {
+			err := fmt.Errorf("ccid: %s: drain: %w: not enough left for %v of reads", op, ErrBudgetExhausted, need)
 			if r.touched {
 				err = r.lose(err)
 			}

@@ -77,7 +77,9 @@
 //     starts clean. It makes at most MaxDrainReads (8) reads and takes at most MaxDrainTime (250 ms); a device that is not quiet by then
 //     keeps sending without being asked, and the session is lost with ErrProtocol; no read waits longer than what is left of MaxDrainTime.
 //     ErrStalled, ErrGone and ErrClosed in the drain end the session as everywhere. On a quiet device it costs two timed-out reads
-//     (2 x DrainReadTimeout, 40 ms), and its time counts against the budget of that call. The drain only reads, so Open itself still sends and reads nothing: it runs at the first exchange.
+//     (2 x DrainReadTimeout, 40 ms), and its time counts against the budget of that call: a call that begins with the drain and has
+//     less than those two windows of budget (twice the TransferTimeout when that is shorter) is refused before its first read, with
+//     ErrBudgetExhausted, and keeps the session. The drain only reads, so Open itself still sends and reads nothing: it runs at the first exchange.
 //
 // A late answer of an earlier session cannot match until the counter has gone round, which is 256 messages of the process later.
 // What remains is an answer that arrives after the drain with the number and the type of the pending command, which only a device
@@ -144,7 +146,10 @@
 //     (GET RESPONSE) or 6Cxx: those, and every card application, belong to the layer above, which also splits an application command
 //     that is longer than MaxCommandAPDU.
 //   - One Port serves one Reader. A second Open on a Port that a Reader holds fails with usbccid.ErrAlreadyClaimed (the Port's claim is
-//     the first Reader's), and leaves the Port and that Reader as they were: Open does not close that Port.
+//     the first Reader's), and leaves the Port and that Reader as they were: Open does not close that Port. A second Open that fails
+//     BEFORE the claim (a wrong TransferTimeout, a Candidate that does not match, bad descriptors) closes the Port, as every failed
+//     Open does, and the first Reader then loses its session at its next call. A Port that a Reader holds is never handed to
+//     another Open.
 //   - A lost session cannot be repaired. After ErrSessionLost nothing is sent until the caller closes the Reader and opens it again
 //     (a new Port from the usbccid layer, a new claim, a new PowerOn). The layer above treats whatever it held of the card (a
 //     selected application, a verified PIN, a secure channel) as gone.
