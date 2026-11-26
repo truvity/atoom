@@ -5,6 +5,7 @@ The USB layer under a smart-card driver that speaks CCID over direct USB ([recor
 | | |
 | --- | --- |
 | Go module | `github.com/truvity/atoom/key/usbccid` (requires `golang.org/x/sys` and no atoom module) |
+| Packages | `usbccid` (the USB layer, this page) and `usbccid/ccid` (the CCID reader on a `Port`, below) |
 | API | `Discover`, `DiscoverHost` (`Candidate`, `Filter`) read a sysfs tree; `Open` gives a `Device`, which is a `Port`: `Descriptors`, `Claim`, `Release`, `BulkOut`, `BulkIn`, `Close`; the errors `ErrBusy`, `ErrGone`, `ErrTimeout`, `ErrStalled`, `ErrClosed`, `ErrNotSupported` |
 | Platforms | Linux (amd64 and arm64). On any other system the module builds and every entry point returns `ErrNotSupported` (`Release` and `Close` return nil) |
 | Documentation | the package comment (`go doc`), the doc comment of each name |
@@ -19,6 +20,23 @@ The USB layer under a smart-card driver that speaks CCID over direct USB ([recor
 - **Each transfer has a timeout (1 ms to ten minutes, at most 64 KiB), and that is its only bound.** A blocking bulk transfer cannot be cancelled by a context once it started, so the library takes no context. The package comment says what the layer above must not assume after a timeout.
 - `Close` releases the interface and the node, and is safe to call twice.
 
+## The CCID reader: `usbccid/ccid`
+
+A reader that sends **one command APDU** to the card and returns its **response APDU**, over the bulk endpoints of a CCID interface that a `Port` has claimed (import path `github.com/truvity/atoom/key/usbccid/ccid`). It is a package of this module, not a module of its own: it adds no dependency, and it has no system call and no build constraint, because every byte goes through a `Port`, so it builds on every system and a test drives it with a fake `Port`. It knows no card application, no status word and no `61xx` continuation; those belong to the layer above.
+
+| | |
+| --- | --- |
+| API | `Open(port, Options)` gives a `Reader`: `SlotStatus`, `PowerOn` (returns the answer to reset), `PowerOff`, `Transmit(apdu, budget)`, `Close`, `Info` |
+| Accepts | exactly one slot; short APDU or extended APDU exchange level (character and TPDU level are refused); automatic parameter configuration from the ATR; a declared voltage; a class descriptor of the 54-byte form that agrees with the interface. Anything else is refused by name (`ErrSeveralSlots`, `ErrExchangeLevel`, `ErrParameters`, `ErrVoltage`, `ErrBadClass`, `ErrNoInterface`, `ErrSeveralInterfaces`) |
+| Budget | each call takes the total time of the exchange, time-extension messages (a card waiting for a touch) included, at most `MaxBudget` (90 s); no context is taken, because a blocking transfer cannot be cancelled |
+| Lost session | a timeout, a failed transfer, a short write, a protocol error, a budget that ran out, or a stall, a gone device or a closed port of the `Port` ends the session: `ErrSessionLost` wraps the cause, every later call returns it without touching the port, and the caller closes and opens again. It never aborts, resynchronises, retries or sends a control transfer |
+| Limits | `MaxShortCommandAPDU` 261, `MaxCommandAPDU` 65544, `MaxResponseAPDU` 65538, `MaxStaleAnswers` 3, `MaxATR` 33, `MaxBudget` 90 s, `MinMessageLength` 271, `MaxMessageLength` 65536; each refusal names its limit |
+| Card-level failures | a mute card, a parity or protocol error, no card, a command the reader does not support and the rest are `*CommandError` (the status bytes, never a byte of an APDU), each matching a named error with `errors.Is` |
+| Secrets | commands and responses pass through two buffers of the reader that are cleared before each call returns; the caller's slices, the `Port`'s and the kernel's copies are not the reader's to clear |
+| Not known | whether a power cycle ends a verified PIN state on a given card: that is measured on a real card, and nothing here claims it |
+
+The package comment (`go doc`) holds the rules and the section "What the layer above must not assume".
+
 ## Tests
 
-A test never opens a node under `/dev/bus/usb` and never reads the real `/sys/bus/usb`: `Discover` takes a made-up tree under `t.TempDir()`, `Open` is given only paths under it, and the layers above use a fake `Port`.
+A test never opens a node under `/dev/bus/usb` and never reads the real `/sys/bus/usb`: `Discover` takes a made-up tree under `t.TempDir()`, `Open` is given only paths under it, and the layers above use a fake `Port`; the tests of `ccid` run against one, byte for byte, with no device.
