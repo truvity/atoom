@@ -312,6 +312,10 @@ func (r *Reader) PowerOn(budget time.Duration) ([]byte, error) {
 		// The failure answers the only message sent, so the stream is in order.
 		return nil, ce
 	}
+	if a.chain != chainWhole {
+		// The answer to reset is one whole block at every level.
+		return nil, r.lose(fmt.Errorf("%w: IccPowerOn: bChainParameter 0x%02X in the answer to reset, which is never a chain", ErrProtocol, a.chain))
+	}
 	if a.state != 0 {
 		// A success that says the card is not active is no power-on: the answer to reset is not returned.
 		return nil, fmt.Errorf("ccid: IccPowerOn: the answer says %s: %w", SlotState(a.state), ErrNotPowered)
@@ -365,8 +369,10 @@ func (r *Reader) PowerOff(budget time.Duration) error {
 // started, so a call returns at most about one scheduling delay after the budget, and a context is not taken.
 //
 // A card-level failure that the reader reports (a *CommandError: a mute card, a parity error, no card, and the rest) answers the
-// only message of a command and leaves the session in order; the same failure inside a chain ends the session. Every other error ends
-// the session. The text of an error never holds a byte of a command or of a response.
+// only message of a command and leaves the session in order; the same failure inside a chain ends the session. The session is also
+// left as it was by an ErrNotPowered from an answer that ends the command, by an argument or state error (ErrBadBudget,
+// ErrAPDUTooShort, ErrAPDUTooLong, ErrNotPowered, ErrNotOpen, usbccid.ErrClosed) and by a budget refusal before the first Port call;
+// every other error ends it. The text of an error never holds a byte of a command or of a response.
 //
 // After ANY error, not only a lost session (also a *CommandError such as a mute card or an aborted command), the card may have
 // carried out the command: a PIN verification or a signature is never to be assumed not to have happened. Success means only that a
@@ -651,11 +657,11 @@ func (r *Reader) exchange(op string, typ byte, level uint16, payload []byte, wan
 		if h[7]&3 == 3 && h[7]>>6 < 2 {
 			return answer{}, nil, r.lose(fmt.Errorf("%w: %s: bmICCStatus 3 is reserved", ErrProtocol, op))
 		}
+		if want == rspDataBlock && h[9] != chainWhole && !r.lay.class.extended() {
+			return answer{}, nil, r.lose(fmt.Errorf("%w: %s: bChainParameter 0x%02X at short APDU level, where an answer has no chain", ErrProtocol, op, h[9]))
+		}
 		switch h[7] >> 6 { // bmCommandStatus
 		case 0:
-			if want == rspDataBlock && h[9] != chainWhole && !r.lay.class.extended() {
-				return answer{}, nil, r.lose(fmt.Errorf("%w: %s: bChainParameter 0x%02X at short APDU level, where a response has no chain", ErrProtocol, op, h[9]))
-			}
 			return answer{state: h[7] & 3, chain: h[9], data: r.rbuf[headerLen:total]}, nil, nil
 		case 1:
 			return answer{}, &CommandError{Op: op, Code: h[8], ICCStatus: h[7] & 3}, nil
