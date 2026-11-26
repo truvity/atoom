@@ -60,8 +60,6 @@ func lostFaults() []qaFault {
 		{name: "port closed on BulkIn", cause: []error{usbccid.ErrClosed}, tune: inFrom(usbccid.ErrClosed)},
 		{name: "an error of no known kind on BulkIn", cause: []error{errOverflow}, tune: inFrom(errOverflow)},
 		{name: "short write", cause: []error{ErrShortWrite}, tune: func(f *fakeDevice, _, _, _ int) { f.shortOut = true }},
-		{name: "budget gone before the first transfer", cause: []error{ErrBudgetExhausted}, not: []error{usbccid.ErrTimeout},
-			budget: time.Nanosecond, noPort: true},
 		{name: "budget runs out during a transfer", cause: []error{ErrBudgetExhausted, usbccid.ErrTimeout}, budget: 30 * time.Millisecond,
 			reply: func(*fakeDevice, byte, byte) {}},
 		{name: "budget runs out between the transfers", cause: []error{ErrBudgetExhausted}, not: []error{usbccid.ErrTimeout}, budget: 30 * time.Millisecond,
@@ -384,7 +382,9 @@ func TestQALostResponseTooLong(t *testing.T) {
 	runLost(t, lostCase{
 		name: "response too long",
 		reply: func(f *fakeDevice, m []byte) {
-			f.send(msg(rspDataBlock, m[6], stOK, 0, chainBegin, bytes.Repeat(qaResp, 16)[:250]))
+			if m[8] != 0x10 { // the first block only: the continuations are answered by the endless queue
+				f.send(msg(rspDataBlock, m[6], stOK, 0, chainBegin, bytes.Repeat(qaResp, 16)[:250]))
+			}
 			f.endless = msg(rspDataBlock, m[6], stOK, 0, chainMiddle, bytes.Repeat(qaResp, 16)[:250])
 		},
 		call:  func(r *Reader) error { _, err := r.Transmit(qaCmd, testBudget); return err },

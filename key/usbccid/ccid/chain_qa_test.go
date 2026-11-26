@@ -134,32 +134,28 @@ func TestQAChainParameterValues(t *testing.T) {
 		name   string
 		params []byte
 		ok     bool
-		bug    string // the code accepts it and the doc says a chain parameter out of order ends the session
 	}
 	cases := []chainCase{
-		{"whole", []byte{whole}, true, ""},
-		{"begin, end", []byte{begin, end}, true, ""},
-		{"begin, middle, end", []byte{begin, middle, end}, true, ""},
-		{"begin, four middles, end", []byte{begin, middle, middle, middle, middle, end}, true, ""},
-		{"an acknowledgement as the whole response", []byte{ack}, false, ""},
-		{"0x04", []byte{0x04}, false, ""},
-		{"0x11", []byte{0x11}, false, ""},
-		{"0x80", []byte{0x80}, false, ""},
-		{"0xFF", []byte{0xFF}, false, ""},
-		{"begin, then an acknowledgement", []byte{begin, ack}, false, ""},
-		{"begin, then 0x04", []byte{begin, 0x04}, false, ""},
-		{"begin, middle, then 0xFF", []byte{begin, middle, 0xFF}, false, ""},
-		{"begin, then whole", []byte{begin, whole}, false, "a block that begins and ends in itself inside a chain"},
-		{"begin, then begin, end", []byte{begin, begin, end}, false, "a second begin inside a chain"},
-		{"end as the first block", []byte{end}, false, ""},
-		{"middle as the first block, then end", []byte{middle, end}, false, ""},
-		{"middle, middle, whole", []byte{middle, middle, whole}, false, ""},
+		{"whole", []byte{whole}, true},
+		{"begin, end", []byte{begin, end}, true},
+		{"begin, middle, end", []byte{begin, middle, end}, true},
+		{"begin, four middles, end", []byte{begin, middle, middle, middle, middle, end}, true},
+		{"an acknowledgement as the whole response", []byte{ack}, false},
+		{"0x04", []byte{0x04}, false},
+		{"0x11", []byte{0x11}, false},
+		{"0x80", []byte{0x80}, false},
+		{"0xFF", []byte{0xFF}, false},
+		{"begin, then an acknowledgement", []byte{begin, ack}, false},
+		{"begin, then 0x04", []byte{begin, 0x04}, false},
+		{"begin, middle, then 0xFF", []byte{begin, middle, 0xFF}, false},
+		{"begin, then whole", []byte{begin, whole}, false},
+		{"begin, then begin, end", []byte{begin, begin, end}, false},
+		{"end as the first block", []byte{end}, false},
+		{"middle as the first block, then end", []byte{middle, end}, false},
+		{"middle, middle, whole", []byte{middle, middle, whole}, false},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			if c.bug != "" {
-				knownBug(t, "reader.go (the loop of the response chain) takes "+c.bug+" for a response; doc.go and errors.go say a chain parameter out of order ends the session")
-			}
 			i := 0
 			var want []byte
 			r, f := openPowered(t, Options{}, func(f *fakeDevice, m []byte) {
@@ -290,7 +286,6 @@ func TestQAShortLevelRefusesALongCommand(t *testing.T) {
 
 // A reader at short APDU level has no chains, in either direction: a block that says "begin" is not for it.
 func TestQAShortLevelHasNoResponseChain(t *testing.T) {
-	knownBug(t, "reader.go:430 continues a response chain (sends wLevelParameter 0x0010) for a reader at short APDU level, where bChainParameter and wLevelParameter are 0 (CCID 1.1, 6.1.4 and 6.2.1)")
 	continued := false
 	f := newFake(descSpec{features: featuresShort}, func(f *fakeDevice, m []byte) {
 		if m[0] == msgXfrBlock {
