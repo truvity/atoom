@@ -148,7 +148,6 @@ func runLost(t *testing.T, c lostCase) {
 		c.tune(f, baseIn, baseOut)
 	}
 	armed.Store(true)
-	mark := f.mark()
 	err = c.call(r)
 	if err == nil {
 		t.Fatal("the call succeeded")
@@ -170,7 +169,7 @@ func runLost(t *testing.T, c lostCase) {
 	assertWiped(t, r, "after the loss")
 
 	// Every later call: the same error, and not one call on the port. The checks of the arguments come after the latch.
-	mark = f.mark()
+	mark := f.mark()
 	for i := range 2 {
 		check := func(op string, e error) {
 			t.Helper()
