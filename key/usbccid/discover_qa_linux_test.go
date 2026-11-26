@@ -857,7 +857,23 @@ func TestQAAttributeFilesAreReadWithCare(t *testing.T) {
 	mk("edge64", func(p string) { _ = os.WriteFile(p, append([]byte("12"), bytes.Repeat([]byte(" "), 62)...), 0o600) })
 	mk("edge65", func(p string) { _ = os.WriteFile(p, append([]byte("12"), bytes.Repeat([]byte(" "), 63)...), 0o600) })
 	mk("padded-in-front", func(p string) { _ = os.WriteFile(p, append(bytes.Repeat([]byte(" "), 100), []byte("12")...), 0o600) })
+	// A FIFO that has a writer and holds "12": it reads like a file, and is still no attribute (an attribute is a regular file).
+	fed := filepath.Join(root, "fed")
+	if err := unix.Mkfifo(fed, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	w, err := unix.Open(fed, unix.O_RDWR|unix.O_NONBLOCK, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = unix.Close(w) }()
+	if _, err := unix.Write(w, []byte("12\n")); err != nil {
+		t.Fatal(err)
+	}
 	within(t, "reading attributes", func() {
+		if v, ok := attr(root, "fed", 16, 16); ok {
+			t.Errorf("a FIFO that holds data was read: %#x", v)
+		}
 		for name, ok := range map[string]bool{"real": true, "edge63": true, "fifo": false, "link": false, "dirlink": false, "dir": false, "big": false,
 			"edge64": false, "edge65": false, "padded-in-front": false, "missing": false} {
 			v, got := attr(root, name, 16, 16)
