@@ -335,3 +335,59 @@ func TestQATheTestRuleOfOpenIsUnreachable(t *testing.T) {
 		t.Errorf("a Device is built in %v, want only in open", literals)
 	}
 }
+
+// Candidate.Open closes the descriptor when verify refuses. A real node is needed to run it end to end (Open takes only a character
+// device of the USB major number), so what is held is the source: in openCandidate, the branch that handles the error of verify
+// calls Close before it returns, and the error is returned as it is (it wraps ErrWrongDevice), and verify is held by TestQAVerify.
+func TestQACandidateOpenClosesWhenVerifyRefuses(t *testing.T) {
+	fset := token.NewFileSet()
+	f, err := parser.ParseFile(fset, "device_linux.go", nil, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, decl := range f.Decls {
+		fd, ok := decl.(*ast.FuncDecl)
+		if !ok || fd.Name.Name != "openCandidate" {
+			continue
+		}
+		ast.Inspect(fd, func(n ast.Node) bool {
+			ifs, ok := n.(*ast.IfStmt)
+			if !ok {
+				return true
+			}
+			call, ok := ifs.Init.(*ast.AssignStmt)
+			if !ok || len(call.Rhs) != 1 {
+				return true
+			}
+			ce, ok := call.Rhs[0].(*ast.CallExpr)
+			if !ok {
+				return true
+			}
+			if sel, ok := ce.Fun.(*ast.SelectorExpr); !ok || sel.Sel.Name != "verify" {
+				return true
+			}
+			closes, returnsErr := false, false
+			ast.Inspect(ifs.Body, func(m ast.Node) bool {
+				switch x := m.(type) {
+				case *ast.CallExpr:
+					if sel, ok := x.Fun.(*ast.SelectorExpr); ok && sel.Sel.Name == "Close" {
+						closes = true
+					}
+				case *ast.ReturnStmt:
+					if len(x.Results) == 2 {
+						if id, ok := x.Results[1].(*ast.Ident); ok && id.Name == "err" {
+							returnsErr = true
+						}
+					}
+				}
+				return true
+			})
+			found = closes && returnsErr
+			return true
+		})
+	}
+	if !found {
+		t.Error("openCandidate does not close the device and return the error when verify refuses it")
+	}
+}
