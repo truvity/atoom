@@ -17,8 +17,8 @@ func (*Device) Descriptors() ([]byte, error) { return nil, ErrNotSupported }
 // Claim returns ErrNotSupported.
 func (*Device) Claim(_ int) error { return ErrNotSupported }
 
-// Release returns ErrNotSupported.
-func (*Device) Release(_ int) error { return ErrNotSupported }
+// Release returns nil: a Device of this system holds nothing to release.
+func (*Device) Release(_ int) error { return nil }
 
 // BulkOut returns ErrNotSupported.
 func (*Device) BulkOut(_ uint8, _ []byte, _ time.Duration) (int, error) {
@@ -30,8 +30,8 @@ func (*Device) BulkIn(_ uint8, _ []byte, _ time.Duration) (int, error) {
 	return 0, ErrNotSupported
 }
 
-// Close returns ErrNotSupported.
-func (*Device) Close() error { return ErrNotSupported }
+// Close returns nil: a Device of this system holds nothing to close.
+func (*Device) Close() error { return nil }
 
 var _ Port = (*Device)(nil)
 

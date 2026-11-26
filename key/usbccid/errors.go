@@ -18,15 +18,24 @@ var ErrBusy = errors.New("usbccid: the interface is busy: another process holds 
 // that wraps ErrGone also wraps the cause. A reset of the device by another process is not noticed.
 var ErrGone = errors.New("usbccid: the device is gone (unplugged, re-enumerated or failed): drop the session and start again")
 
-// ErrTimeout is what a bulk transfer returns when its timeout ran out. The error also wraps the errno (ETIMEDOUT on Linux). The
-// device stays usable. A timeout does not say whether the device did the work: for a transfer to a card, the caller above decides
-// what a late answer means.
+// ErrTimeout is what a bulk transfer returns when its timeout ran out. The error also wraps the errno (ETIMEDOUT on Linux).
+// The handle can still be called, but the stream of that endpoint is out of step: usbfs copies a read to the caller only when the
+// transfer succeeds, so what had already arrived is lost. The layer above must treat its session as lost and close and open again;
+// this layer never aborts or resynchronises for it. A timeout does not say whether the device did the work: for a transfer to a
+// card, the caller above decides what a late answer means.
 var ErrTimeout = errors.New("usbccid: the transfer timed out")
+
+// ErrStalled is returned by a bulk call when the endpoint stalled (the kernel answered EPIPE), and by every later bulk call of the same
+// handle without asking the kernel: the first stall is latched for the handle. This layer never clears a halt, so a stalled endpoint
+// would answer a bare EPIPE for ever; a stall ends the use of the handle: close it and open again. Release and Close still return nil,
+// ErrGone wins if the device then goes, and ErrClosed wins after Close. The error also wraps the errno (EPIPE on Linux).
+var ErrStalled = errors.New("usbccid: the endpoint stalled, and this layer never clears a halt: close the handle and open again")
 
 // ErrClosed is returned by every call after Close, except Release and Close, which return nil.
 var ErrClosed = errors.New("usbccid: the device is closed")
 
-// ErrNotSupported is returned by every entry point on a system that is not Linux on amd64 or arm64. The package builds on every
+// ErrNotSupported is returned by every entry point on a system that is not Linux on amd64 or arm64, except Release and Close of a Device, which return
+// nil there as on a Device that was never opened. The package builds on every
 // system so that a program that links it compiles everywhere, but only Linux has usbfs and sysfs.
 var ErrNotSupported = errors.New("usbccid: not supported on this system: direct USB access needs Linux (usbfs) on amd64 or arm64")
 
@@ -65,7 +74,8 @@ var ErrSeveralConfigurations = errors.New("usbccid: the device declares several 
 
 // ErrBadDescriptors is returned by Open when the node gives no descriptors, or they are not simple: this layer accepts one
 // configuration whose length and bNumInterfaces are as declared, every interface at alternate setting 0 only and listed once, as many
-// endpoint descriptors after each interface as its bNumEndpoints, and no endpoint address twice. The error text names the rule that
+// endpoint descriptors after each interface as its bNumEndpoints, no endpoint address twice, at most 32 interfaces and no interface
+// number of 64 or more (usbfs keeps its claims in a 64-bit mask). The error text names the rule that
 // failed and holds no byte of the descriptors. A device whose layout is not certain is never used.
 var ErrBadDescriptors = errors.New("usbccid: the descriptors of the device are missing or malformed")
 

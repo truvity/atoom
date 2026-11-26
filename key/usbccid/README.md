@@ -5,8 +5,8 @@ The USB layer under a smart-card driver that speaks CCID over direct USB ([recor
 | | |
 | --- | --- |
 | Go module | `github.com/truvity/atoom/key/usbccid` (requires `golang.org/x/sys` and no atoom module) |
-| API | `Discover`, `DiscoverHost` (`Candidate`, `Filter`) read a sysfs tree; `Open` gives a `Device`, which is a `Port`: `Descriptors`, `Claim`, `Release`, `BulkOut`, `BulkIn`, `Close`; the errors `ErrBusy`, `ErrGone`, `ErrTimeout`, `ErrClosed`, `ErrNotSupported` |
-| Platforms | Linux (amd64 and arm64). On any other system the module builds and every entry point returns `ErrNotSupported` |
+| API | `Discover`, `DiscoverHost` (`Candidate`, `Filter`) read a sysfs tree; `Open` gives a `Device`, which is a `Port`: `Descriptors`, `Claim`, `Release`, `BulkOut`, `BulkIn`, `Close`; the errors `ErrBusy`, `ErrGone`, `ErrTimeout`, `ErrStalled`, `ErrClosed`, `ErrNotSupported` |
+| Platforms | Linux (amd64 and arm64). On any other system the module builds and every entry point returns `ErrNotSupported` (`Release` and `Close` return nil) |
 | Documentation | the package comment (`go doc`), the doc comment of each name |
 | Where it came from | [provenance](../../docs/provenance.md#key-usbccid) |
 

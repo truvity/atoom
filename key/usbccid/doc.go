@@ -32,7 +32,9 @@
 //     later call except Release and Close returns an error that wraps ErrGone without touching the kernel; Release and Close return
 //     nil. The handle never reconnects: the program above drops everything it knew of the card (its session, a PIN it held) and
 //     starts again with Discover and Open.
-//   - ErrTimeout: a transfer's timeout ran out. The device stays usable.
+//   - ErrTimeout: a transfer's timeout ran out. The handle can still be called, but the stream of that endpoint is out of step: treat
+//     the session as lost.
+//   - ErrStalled: a bulk endpoint stalled; latched for the handle (every later bulk call returns it, without asking the kernel).
 //   - ErrClosed: the Device was closed. After Close, Release and Close return nil and every other call returns ErrClosed (also
 //     when the device is gone as well).
 //   - ErrNoSuchInterface (also for a number outside 0 to 255), ErrNotClaimed, ErrBadEndpoint (also an address that two interfaces
@@ -40,7 +42,7 @@
 //   - ErrNotUSBNode: Open was given a path that is not a USB device node. ErrBadDescriptors: its descriptors are missing, malformed or not simple (below). ErrSeveralConfigurations: the device declares other than one configuration. ErrNoProcSelfFd: /proc/self/fd is not available. ErrWrongDevice: Candidate.Open found another device at
 //     the node than Discover did.
 //   - ErrNotSupported: the system is not Linux on amd64 or arm64. The package still builds there, so that a program that links it
-//     compiles for macOS, and every entry point returns this error.
+//     compiles for macOS, and every entry point returns this error (Release and Close of a Device return nil: there is nothing to release).
 //
 // # Deadlines
 //
@@ -57,7 +59,8 @@
 // Simple means: exactly one configuration; its total length is the number of bytes present and its bNumInterfaces the number of
 // distinct interfaces listed; every interface descriptor has alternate setting 0, and no interface number is listed twice; each
 // interface is followed (before the next interface descriptor) by exactly bNumEndpoints endpoint descriptors; no endpoint address
-// appears twice in the configuration, and each is a number 1 to 15 with the reserved bits clear; every descriptor is at least as
+// appears twice in the configuration, and each is a number 1 to 15 with the reserved bits clear; there are at most 32 interfaces and no
+// interface number is 64 or more (usbfs keeps its claims in a 64-bit mask, and a larger number would fail later with a kernel error); every descriptor is at least as
 // long as its type needs and does not run past the end. Descriptors of other types (class-specific ones, interface associations)
 // are skipped by their length, wherever they stand. The reason is that the kernel's rules for what is left open (the active
 // configuration, which usbfs does not name; the fall back to another alternate setting; duplicates; endpoints beyond a count)
@@ -66,12 +69,16 @@
 //
 // # What the layer above must not assume
 //
-//   - A transfer that timed out is abandoned, and what it had already moved is lost. A late answer may arrive on the next read, so
-//     the layer above matches the sequence number of its own messages, and should treat its session as lost after a timeout.
+//   - A transfer that timed out is abandoned, and what it had already moved is lost. The handle can still be called, but the stream
+//     of that endpoint is out of step: usbfs copies a read to the caller only when the transfer succeeds, so what had already
+//     arrived is lost. The layer above must treat its session as lost and close and open again; this layer never aborts or
+//     resynchronises for it. A late answer may arrive on the next read, so the layer above matches the sequence number of its own
+//     messages.
 //   - A BulkOut that timed out may have sent part of a message: the stream is out of step, and the session is to be treated as lost.
 //     BulkOut returns a count, which the caller must compare with the length it gave.
-//   - The overflow error (a message longer than the read buffer) and the stall error are ordinary errors: they do not latch, and the
-//     layer never clears a halt, so a stalled endpoint stays stalled.
+//   - The overflow error (a message longer than the read buffer) is an ordinary error and does not latch. A stall (EPIPE) latches
+//     ErrStalled for the handle: this layer never clears a halt, so a stall ends the handle's use, and the layer above closes and
+//     opens again.
 //   - A read buffer must hold the largest message expected: a larger one is lost with an overflow error. The maximum packet size of
 //     an endpoint is not read here.
 //   - When a message is an exact multiple of the packet size it is followed by an empty packet. A read whose buffer is exactly as
