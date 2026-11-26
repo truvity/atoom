@@ -352,8 +352,12 @@ func TestQAReleaseSemantics(t *testing.T) {
 	if err := d.Claim(1); err != nil {
 		t.Fatal(err)
 	}
-	if err := d.Claim(1); err != nil { // a second claim of the same interface by the same handle goes to the kernel again
-		t.Fatal(err)
+	// A second claim of the same interface by the same handle is refused before the kernel is asked, and the claim stays.
+	if err := d.Claim(1); !errors.Is(err, ErrAlreadyClaimed) || errors.Is(err, ErrBusy) {
+		t.Fatalf("second claim: %v, want ErrAlreadyClaimed", err)
+	}
+	if got := k.countReq(reqClaim); got != 1 {
+		t.Fatalf("%d claim ioctls, want 1", got)
 	}
 	if err := d.Release(1); err != nil {
 		t.Fatal(err)
@@ -541,11 +545,12 @@ func TestQAErrorChains(t *testing.T) {
 		name string
 		do   func(d *Device) error
 		want string // text the message must carry
+		held bool   // the handle holds the interface already (a claim of a held interface is refused before the kernel)
 	}
 	ops := []op{
-		{"claim", func(d *Device) error { return d.Claim(qaCCID) }, "claim interface 1"},
-		{"bulk out", func(d *Device) error { _, err := d.BulkOut(qaOut, []byte{1}, time.Second); return err }, "0x02"},
-		{"bulk in", func(d *Device) error { _, err := d.BulkIn(qaIn, make([]byte, 1), time.Second); return err }, "0x82"},
+		{"claim", func(d *Device) error { return d.Claim(qaCCID) }, "claim interface 1", false},
+		{"bulk out", func(d *Device) error { _, err := d.BulkOut(qaOut, []byte{1}, time.Second); return err }, "0x02", true},
+		{"bulk in", func(d *Device) error { _, err := d.BulkIn(qaIn, make([]byte, 1), time.Second); return err }, "0x82", true},
 	}
 	cases := []struct {
 		e                  unix.Errno
@@ -559,7 +564,9 @@ func TestQAErrorChains(t *testing.T) {
 			t.Run(o.name+"/"+c.e.Error(), func(t *testing.T) {
 				k := &qaKernel{answer: func(kcall) (uintptr, unix.Errno) { return 0, c.e }}
 				d, _ := qaDevice(t, nil, k)
-				d.claimed[qaCCID] = true // as if a claim had succeeded earlier: the transfers are then asked of the kernel
+				if o.held {
+					d.claimed[qaCCID] = true // as if a claim had succeeded earlier: the transfers are then asked of the kernel
+				}
 				err := o.do(d)
 				if err == nil {
 					t.Fatal("no error")
@@ -602,7 +609,9 @@ func TestQAGoneLatchesFromEveryMethod(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			k := &qaKernel{answer: func(kcall) (uintptr, unix.Errno) { return 0, unix.ENODEV }}
 			d, _ := qaDevice(t, nil, k)
-			d.claimed[qaCCID] = true // as if a claim had succeeded earlier
+			if name != "claim" { // a claim of a held interface would be refused before the kernel is asked
+				d.claimed[qaCCID] = true // as if a claim had succeeded earlier
+			}
 			if err := do(d); !errors.Is(err, ErrGone) || !errors.Is(err, unix.ENODEV) {
 				t.Fatalf("first: %v", err)
 			}
@@ -1003,8 +1012,9 @@ func TestQAConcurrentUseWhileClosing(t *testing.T) {
 		var wg sync.WaitGroup
 		var bad atomic.Int32
 		check := func(err error) {
-			// Another goroutine may have released the interface: ErrNotClaimed is then the answer, and the refusals of the guards.
-			if err != nil && !errors.Is(err, ErrClosed) && !errors.Is(err, ErrNotClaimed) {
+			// Another goroutine may have released the interface: ErrNotClaimed is then the answer, and the refusals of the guards;
+			// a claim of an interface that another goroutine claimed is ErrAlreadyClaimed.
+			if err != nil && !errors.Is(err, ErrClosed) && !errors.Is(err, ErrNotClaimed) && !errors.Is(err, ErrAlreadyClaimed) {
 				bad.Add(1)
 				t.Errorf("round %d: %v", round, err)
 			}
