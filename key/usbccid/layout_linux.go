@@ -1,4 +1,4 @@
-//go:build linux && (amd64 || arm64)
+//go:build linux && !android && (amd64 || arm64)
 
 package usbccid
 
@@ -61,6 +61,21 @@ func (l *layout) find(n int) *ifaceDesc {
 		}
 	}
 	return nil
+}
+
+// bothBulk reports whether the interface has a bulk OUT and a bulk IN endpoint with addresses a CCID interface can have.
+func (i *ifaceDesc) bothBulk() bool {
+	var out, in bool
+	for _, e := range i.eps {
+		if e.bulk() {
+			if e.addr&0x80 != 0 {
+				in = true
+			} else {
+				out = true
+			}
+		}
+	}
+	return out && in
 }
 
 // bulkOwner returns the one interface that owns addr as a bulk endpoint. The address must be listed exactly once among the

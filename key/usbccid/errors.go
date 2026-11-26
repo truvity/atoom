@@ -33,7 +33,7 @@ var ErrNotSupported = errors.New("usbccid: not supported on this system: direct 
 // The refusals below are errors of the arguments: the kernel was not asked, nothing was latched, and none of them is ErrBusy.
 
 // ErrNoSuchInterface is returned by Claim for an interface number that the descriptors of the device do not hold, or that is not a
-// CCID interface (class 0x0B). Only the CCID interface of a card is ever claimed; its other interfaces (a passkey or a one-time-code
+// CCID interface (class 0x0B) with both a bulk OUT and a bulk IN endpoint. Only the CCID interface of a card is ever claimed; its other interfaces (a passkey or a one-time-code
 // interface) are never touched.
 var ErrNoSuchInterface = errors.New("usbccid: the device has no CCID interface with this number")
 

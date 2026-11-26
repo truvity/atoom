@@ -1,4 +1,4 @@
-//go:build linux && (amd64 || arm64)
+//go:build linux && !android && (amd64 || arm64)
 
 package usbccid
 
@@ -46,6 +46,11 @@ var (
 	reqClaim   = ioc(iocRead, 'U', 15, 4)
 	reqRelease = ioc(iocRead, 'U', 16, 4)
 )
+
+// procFdDir is the per-process directory of descriptors that openChecked reopens a node through. It is "/proc/self/fd" and is set only
+// by this package's tests (nothing exported reaches it), which point it at a missing directory, to see ErrNoProcSelfFd, and at a
+// directory that exists, to see ErrGone.
+var procFdDir = "/proc/self/fd"
 
 const (
 	maxDescriptorBytes = 64 * 1024
@@ -157,14 +162,14 @@ func openChecked(path string, check func(*unix.Stat_t) error, flags int) (int, e
 	if err := check(&st); err != nil {
 		return -1, err
 	}
-	proc := "/proc/self/fd/" + strconv.Itoa(pfd)
+	proc := procFdDir + "/" + strconv.Itoa(pfd)
 	fd, err := unix.Open(proc, flags|unix.O_CLOEXEC|unix.O_NOCTTY|unix.O_NONBLOCK, 0)
 	if err != nil {
 		if errors.Is(err, unix.ENOENT) || errors.Is(err, unix.ENOTDIR) || errors.Is(err, unix.ENODEV) {
 			// The node existed a moment ago, so either /proc/self/fd is not there, or the device went away between the two opens (the
 			// kernel answers the same). An access check tells them apart. The errno is not wrapped, so that neither error reads as a
 			// node that does not exist.
-			if unix.Access("/proc/self/fd", unix.F_OK) != nil {
+			if unix.Access(procFdDir, unix.F_OK) != nil {
 				return -1, fmt.Errorf("%w: %s cannot be reopened through %s: %v", ErrNoProcSelfFd, path, proc, err) //nolint:errorlint // see above
 			}
 			return -1, fmt.Errorf("usbccid: %s: %w: unplugged between the two opens: %v", path, ErrGone, err) //nolint:errorlint // see above
@@ -279,7 +284,7 @@ func (d *Device) fail(what string, e unix.Errno) error {
 	return fmt.Errorf("usbccid: %s: %w", what, e)
 }
 
-// Claim takes interface n with USBDEVFS_CLAIMINTERFACE, for an interface that the descriptors hold and whose class is 0x0B (CCID);
+// Claim takes interface n with USBDEVFS_CLAIMINTERFACE, for an interface that the descriptors hold, whose class is 0x0B (CCID) and that has both a bulk OUT and a bulk IN endpoint (this layer uses a CCID interface only through both, as Discover requires of a candidate);
 // any other number (a number outside 0 to 255 included, which no longer reaches the kernel to be refused as an invalid argument) is
 // refused before the kernel is asked, with an error that wraps ErrNoSuchInterface. A busy interface returns an
 // error that wraps ErrBusy (and EBUSY); the holder may also be another handle of the same process. Nothing is detached, the device
@@ -294,7 +299,7 @@ func (d *Device) Claim(n int) error {
 	if n >= 0 && n <= maxInterface {
 		in = d.lay.find(n)
 	}
-	if in == nil || in.class != ClassCCID {
+	if in == nil || in.class != ClassCCID || !in.bothBulk() {
 		return fmt.Errorf("usbccid: claim interface %d: %w", n, ErrNoSuchInterface)
 	}
 	v := uint32(n)                                      //nolint:gosec // n is the number of an interface of the descriptors: 0 to 255
