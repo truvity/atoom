@@ -171,7 +171,7 @@ func TestQAChainParameterValues(t *testing.T) {
 					t.Errorf("a block was asked for after the last one (level %#x)", m[8])
 					return
 				}
-				data := []byte{byte(i), byte(i), 0x90}
+				data := []byte{byte(i & 0xFF), byte(i & 0xFF), 0x90}
 				want = append(want, data...)
 				f.send(msg(rspDataBlock, m[6], stOK, 0, c.params[i], data))
 				i++

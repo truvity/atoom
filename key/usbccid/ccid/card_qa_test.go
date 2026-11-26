@@ -72,8 +72,9 @@ func TestQAEveryErrorCodeThroughEveryCall(t *testing.T) {
 					}
 					want := wantSentinel(code)
 					for _, s := range allSentinels {
-						if errors.Is(err, s) != (s == want) {
-							t.Errorf("code %#x: errors.Is(%v) = %v", code, s, !(s == want))
+						isWant := want != nil && errors.Is(s, want)
+						if errors.Is(err, s) != isWant {
+							t.Errorf("code %#x: errors.Is(%v) = %v", code, s, !isWant)
 						}
 					}
 					text := err.Error()
@@ -291,14 +292,14 @@ func TestQAConcurrentCallsTakeTurns(t *testing.T) {
 				case 0:
 					_, err = r.SlotStatus(testBudget)
 				case 1:
-					cmd := bytes.Repeat([]byte{byte(g)}, 8+i)
+					cmd := bytes.Repeat([]byte{byte(g & 0xFF)}, 8+i)
 					var got []byte
 					got, err = r.Transmit(cmd, testBudget)
 					if err == nil && !bytes.Equal(got[:len(cmd)], cmd) {
 						err = fmt.Errorf("goroutine %d got another goroutine's answer: %x", g, got)
 					}
 				case 2:
-					long := bytes.Repeat([]byte{byte(g)}, 300)
+					long := bytes.Repeat([]byte{byte(g & 0xFF)}, 300)
 					var got []byte
 					got, err = r.Transmit(long, testBudget) // chained: three messages that nobody may break into
 					_ = got
@@ -345,10 +346,10 @@ func TestQACloseWaitsForTheCallInProgress(t *testing.T) {
 	go func() { closed <- r.Close() }()
 	go func() { _, err := r.Transmit(apduSelect, testBudget); second <- err }()
 	select {
-	case <-closed:
-		t.Fatal("Close returned while a call was in progress")
-	case <-second:
-		t.Fatal("a second call ran while a call was in progress")
+	case e := <-closed:
+		t.Fatalf("Close returned while a call was in progress: %v", e)
+	case e := <-second:
+		t.Fatalf("a second call ran while a call was in progress: %v", e)
 	case <-time.After(150 * time.Millisecond):
 	}
 	close(gate)

@@ -16,17 +16,18 @@ import (
 func pattern(n, salt int) []byte {
 	b := make([]byte, n)
 	for i := range b {
-		b[i] = byte(i*7 + salt*13 + i>>8)
+		b[i] = byte((i*7 + salt*13 + i>>8) & 0xFF)
 	}
 	return b
 }
 
 func TestQAEmptyPacketAtEveryBoundary(t *testing.T) {
-	for _, mps := range []int{8, 16, 64, 512} {
+	for _, mps16 := range []uint16{8, 16, 64, 512} {
+		mps := int(mps16)
 		for _, zlp := range []bool{true, false} {
 			t.Run(fmt.Sprintf("packet %d, empty packet sent %v", mps, zlp), func(t *testing.T) {
 				var want []byte
-				f := newFake(descSpec{mpsIn: uint16(mps), mpsOut: uint16(mps), maxMsg: 2300}, cardHandler(func([]byte) []byte { return want }))
+				f := newFake(descSpec{mpsIn: mps16, mpsOut: mps16, maxMsg: 2300}, cardHandler(func([]byte) []byte { return want }))
 				r, err := Open(f, Options{})
 				if err != nil {
 					t.Fatal(err)
@@ -68,7 +69,8 @@ func TestQAEmptyPacketAtEveryBoundary(t *testing.T) {
 
 // The device sends the empty packet or not, answer by answer, and the lengths wander over the boundaries: every response is exact.
 func TestQAEmptyPacketComesAndGoes(t *testing.T) {
-	for _, mps := range []int{8, 64, 512} {
+	for _, mps16 := range []uint16{8, 64, 512} {
+		mps := int(mps16)
 		t.Run(fmt.Sprint(mps), func(t *testing.T) {
 			rng := rand.New(rand.NewPCG(uint64(mps), 7)) //nolint:gosec // a fixed seed, for a repeatable test
 			var want []byte
@@ -83,7 +85,7 @@ func TestQAEmptyPacketComesAndGoes(t *testing.T) {
 				}
 				cardHandler(echoSW)(f, m)
 			}
-			f := newFake(descSpec{mpsIn: uint16(mps), mpsOut: uint16(mps), maxMsg: 2300}, h)
+			f := newFake(descSpec{mpsIn: mps16, mpsOut: mps16, maxMsg: 2300}, h)
 			r, err := Open(f, Options{})
 			if err != nil {
 				t.Fatal(err)
