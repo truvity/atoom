@@ -1,5 +1,5 @@
 # Libraries that several drivers of one port may use: they are libraries, not drivers (docs/archive/extraction-plan.md, section 5). One directory per
-# line. Step 2 adds key/slotplan and key/pinrelease here; step 5 adds blob/fsdir.
+# line. Step 2 adds key/slotplan and key/pinrelease here; step 5 adds blob/fsdir; key/usbccid follows record 0026.
 #
 # A library at the first level that is listed here is plumbing and not a port, so the rule "a port requires only the runtimes" does not
 # apply to it.
@@ -9,6 +9,10 @@
 socket
 key/slotplan
 key/pinrelease
+
+# The USB layer of the card drivers: discovery by sysfs, one usbfs node, one claimed interface, bulk transfers (record 0026). The card driver that
+# speaks CCID over direct USB links it, and so may a consumer's second card application; it requires no atoom module.
+key/usbccid
 
 # The directory behind the fs blob drivers: the write-once create, the pointer put and openat2 for every path. blob/fs (writes) and
 # blob/fsreadonly (reads the same directory) both need it, and neither may require the other.

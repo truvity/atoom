@@ -18,6 +18,7 @@ use (
 	./key/pinrelease
 	./key/slotplan
 	./key/software
+	./key/usbccid
 	./key/yubikeypiv
 	./policy
 	./socket
@@ -57,6 +58,8 @@ replace github.com/truvity/atoom/key/pinrelease v0.10.0 => ./key/pinrelease
 replace github.com/truvity/atoom/key/slotplan v0.10.0 => ./key/slotplan
 
 replace github.com/truvity/atoom/key/software v0.10.0 => ./key/software
+
+replace github.com/truvity/atoom/key/usbccid v0.10.0 => ./key/usbccid
 
 replace github.com/truvity/atoom/key/yubikeypiv v0.10.0 => ./key/yubikeypiv
 
