@@ -1,7 +1,8 @@
 // Package usbccid is the USB layer under a smart-card driver that speaks CCID over direct USB: it finds the devices that have a
 // CCID interface, opens one usbfs node, claims one interface and moves bulk transfers, each with a timeout. It is pure Go (cgo off,
 // the standard library and golang.org/x/sys only) and knows nothing of CCID messages, of APDUs or of any card application. The
-// CCID reader and the card applications are built on it (record 0026).
+// CCID reader is the package ccid (github.com/truvity/atoom/key/usbccid/ccid), which builds on the Port of this package and has no
+// system call of its own, and the card applications are built on that (record 0026).
 //
 // # What it offers
 //

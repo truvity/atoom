@@ -156,7 +156,21 @@ The first half of the USB and CCID transport of the card driver of [record 0026]
 | `port.go` | the `Port` interface of `internal/usbfs` | the doc comments say that a transfer cannot be cancelled and what a timeout of zero means |
 | `device_other.go`, `discover_linux.go`, `candidate.go`, `errors.go`, `doc.go`, `*_test.go` besides the above | new | discovery from sysfs, the `Candidate` and the `Filter`, `ErrNotSupported` and the build of every other system |
 
-The class descriptor, the exchange level and the rest of the spike's `internal/ccid/desc.go` are not here: they come with the CCID reader, which is the next pull request. Discovery reads sysfs.
+The class descriptor, the exchange level and the rest of the spike's `internal/ccid/desc.go` are in the package `ccid`, below. Discovery reads sysfs.
+
+### key/usbccid/ccid
+
+<a id="key-usbccid-ccid"></a>
+
+The second half: the CCID reader, a package of the same module. Ported from the same spike, whose maintainer agreed to publish it.
+
+| Here | From | Changed |
+| --- | --- | --- |
+| `desc.go` | the spike's `internal/ccid/desc.go` | the parser is unexported and strict: one configuration whose length is the bytes present, alternate setting 0 only, exactly one bulk OUT and one bulk IN, packet sizes 8 to 1024; the interface is chosen by a `usbccid.Candidate` or is the only one (`ErrSeveralInterfaces`); the class descriptor must be exactly the 54-byte form, of version 1, and is checked by named rules (one slot, short or extended APDU level, automatic parameters, a declared voltage, T=0 or T=1, a message length of at least 271); the spike took the first match, any class descriptor of 54 bytes or more, and checked the level only; the report string and the exported types are gone |
+| `reader.go` | the spike's `internal/ccid/ccid.go` | sits on `usbccid.Port`; `Open` claims and sends nothing, `PowerOn` (slot status, then power on), `PowerOff` and `SlotStatus` are separate calls; every call takes the total budget of the exchange (at most 90 s, the spike's command ceiling) instead of options for a command timeout; a failure of the port ends the session (`ErrSessionLost`, with the cause reachable), where the spike latched the first error for everything but a card-level failure; a short write is `ErrShortWrite`; a message above `dwMaxCCIDMessageLength` is refused where the spike tolerated one packet more, and a message cut short by a short packet ends at once where the spike waited for a timeout; the empty packet after a message of whole packets is consumed once, at the start of the next message, and an empty read elsewhere is a protocol error (the spike skipped up to four); the answer's slot must be 0; chaining of a command is for extended APDU level only (the spike chained at short level too); a command is limited by `MaxCommandAPDU`, a response over its blocks by `MaxResponseAPDU` (the spike by 1 MiB), the answer to reset by `MaxATR`; the buffers are cleared after each call; the error for a failed command is `CommandError` with named values; the claim-only entry, the path-based open and the report are gone |
+| `errors.go`, `doc.go` | new | |
+| `fake_test.go`, `desc_test.go`, `reader_test.go` | the spike's `fake_test.go`, `desc_test.go`, `ccid_test.go` and `regress_test.go` | the fake is a `usbccid.Port` with made-up ids and a made-up answer to reset, and holds the limits of the Port; the tests that depended on the spike's tolerances changed with the rules above; the tests of the path-based open went; the lost session, the budget, the secrets, the limits and the error names are new |
+| `fuzz_test.go` | new | answers of a hostile reader, and descriptors |
 
 ## store
 
