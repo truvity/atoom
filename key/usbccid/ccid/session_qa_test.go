@@ -12,7 +12,7 @@ import (
 )
 
 // The rules of one session against the late answers of an earlier one: the process-wide sequence counter and the drain of the IN pipe at
-// the first exchange. The implementer's session_test.go holds the basic cases; these are the edges.
+// the first exchange. session_test.go holds the basic cases; these are the edges.
 
 // staleKinds are late answers of an earlier session, one for each of the first three messages of a new session (GetSlotStatus, then
 // IccPowerOn, then the first XfrBlock), each with the number that message gets when the counter is pinned with setSeq(0). If one of

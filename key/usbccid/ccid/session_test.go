@@ -11,7 +11,7 @@ import (
 	"github.com/truvity/atoom/key/usbccid"
 )
 
-// Tests of the session rules added after the security read: the shared sequence counter, the drain of the IN pipe, the checks of the
+// Tests of the session rules: the shared sequence counter, the drain of the IN pipe, the checks of the
 // answer's status, the zero values and a panic of the port.
 
 // ---- the sequence counter ----
