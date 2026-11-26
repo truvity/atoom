@@ -53,7 +53,7 @@ var ErrSessionLost = errors.New("ccid: the session is lost: close the reader and
 var ErrBudgetExhausted = errors.New("ccid: the budget of the exchange ran out")
 
 // ErrProtocol is wrapped, together with ErrSessionLost, when the reader sent something this layer cannot follow: a message of
-// another type, of a wrong length, cut short, for another slot, a chain parameter out of order (or any but 0 at short APDU level), too many stale answers (more than
+// another type, of a wrong length, cut short, for another slot, a chain parameter out of order (or any but 0 in a DataBlock answer at short APDU level, or in the answer to reset), too many stale answers (more than
 // MaxStaleAnswers), an empty packet where none belongs, or a status that RDR_to_PC messages do not have. The text names which and
 // holds the numbers of the header, never the data of a message.
 var ErrProtocol = errors.New("ccid: protocol error")

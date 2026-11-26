@@ -1999,3 +1999,48 @@ func TestSpentBudgetBeforeTheFirstPortCallKeepsTheSession(t *testing.T) {
 		}
 	}
 }
+
+// At short APDU level a failed DataBlock answer with a chain parameter ends the session too, and at either level the answer to reset
+// is never a chain.
+func TestChainParameterInAFailedShortAnswerAndInTheATR(t *testing.T) {
+	t.Run("failed answer at short level", func(t *testing.T) {
+		f := newFake(descSpec{features: featuresShort}, func(f *fakeDevice, m []byte) {
+			if m[0] == msgXfrBlock {
+				f.send(msg(rspDataBlock, m[6], stFailed|0x01, 0xFE, chainBegin, nil))
+				return
+			}
+			cardHandler(echoSW)(f, m)
+		})
+		r, err := Open(f, Options{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := r.PowerOn(testBudget); err != nil {
+			t.Fatal(err)
+		}
+		_, err = r.Transmit(apduSelect, testBudget)
+		lostWith(t, err, ErrProtocol)
+		untouched(t, r, f, err)
+	})
+	for name, feat := range map[string]uint32{"short": featuresShort, "extended": featuresExt} {
+		t.Run("ATR with a chain, "+name, func(t *testing.T) {
+			f := newFake(descSpec{features: feat}, func(f *fakeDevice, m []byte) {
+				if m[0] == msgIccPowerOn {
+					f.send(msg(rspDataBlock, m[6], stOK, 0, chainBegin, testATR))
+					return
+				}
+				cardHandler(echoSW)(f, m)
+			})
+			r, err := Open(f, Options{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			atr, err := r.PowerOn(testBudget)
+			lostWith(t, err, ErrProtocol)
+			if atr != nil || strings.Contains(err.Error(), fmt.Sprintf("%x", testATR)) {
+				t.Errorf("atr %x, err %v", atr, err)
+			}
+			untouched(t, r, f, err)
+		})
+	}
+}

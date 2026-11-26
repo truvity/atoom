@@ -46,7 +46,7 @@
 //
 // # The lost session
 //
-// A transfer that timed out, a transfer that failed, a short write, a message that breaks the protocol, an exchange whose budget ran out,
+// A transfer that timed out, a transfer that failed, a short write, a message that breaks the protocol, an exchange whose budget ran out after the call's first Port call,
 // a panic of the Port and a card-level failure in the middle of a chain all leave the stream between the host and the reader out of step: the layer below
 // says a late answer may arrive on the next read, and that what a timed-out read had moved is lost. This layer then marks the session
 // LOST. The error of that call wraps ErrSessionLost and the cause (a usbccid error such as ErrTimeout, ErrStalled, ErrGone or
@@ -95,7 +95,9 @@
 // A command that does not fit one CCID message (extended APDU level only) is sent in blocks (wLevelParameter begin, middle, end), each
 // answered by an empty block that asks for the next, and a response that comes in blocks is collected by empty continuation blocks.
 // A response is whole, or it is a begin block, then middle blocks, then an end block; a chain parameter in any other order ends the
-// session. At short APDU level there is no chain: any chain parameter but 0 in an answer ends the session.
+// session. At short APDU level there is no chain: any chain parameter but 0 in any DataBlock answer, failed or not, ends the session.
+// The answer to reset is one whole block at every level: a chain parameter but 0 in it ends the session. A reader that sends empty
+// middle blocks without an end is bounded by the budget, not by MaxResponseAPDU (as with time extensions).
 // The messages are as large as the reader's dwMaxCCIDMessageLength, held to MaxMessageLength (the 64 KiB of one transfer of the Port).
 //
 // Reads are sized from the same length: the buffer holds the largest message and one packet. The reader asks for the first packet of
