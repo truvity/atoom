@@ -37,7 +37,7 @@ wait_for() { # description socket pid
 key_pid=$!
 pids+=("$key_pid")
 wait_for "key/software" "$tmp/k" "$key_pid"
-target/debug/store-memory --socket "$tmp/s" &
+"${CARGO_TARGET_DIR:-$PWD/target}/debug/store-memory" --socket "$tmp/s" &
 store_pid=$!
 pids+=("$store_pid")
 wait_for "store/memory" "$tmp/s" "$store_pid"
