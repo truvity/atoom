@@ -384,6 +384,7 @@ func TestQALostResponseTooLong(t *testing.T) {
 	runLost(t, lostCase{
 		name: "response too long",
 		reply: func(f *fakeDevice, m []byte) {
+			f.send(msg(rspDataBlock, m[6], stOK, 0, chainBegin, bytes.Repeat(qaResp, 16)[:250]))
 			f.endless = msg(rspDataBlock, m[6], stOK, 0, chainMiddle, bytes.Repeat(qaResp, 16)[:250])
 		},
 		call:  func(r *Reader) error { _, err := r.Transmit(qaCmd, testBudget); return err },
