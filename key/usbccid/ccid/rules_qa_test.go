@@ -200,11 +200,11 @@ func TestQAChainByteWhereItIsNotAChainByte(t *testing.T) {
 			}
 		})
 	}
-	t.Run("extended level takes an answer to reset with any chain byte", func(t *testing.T) {
+	t.Run("an answer to reset is one whole block at the extended level too", func(t *testing.T) {
 		for v := range 256 {
 			f := newFake(descSpec{}, func(f *fakeDevice, m []byte) {
 				if m[0] == msgIccPowerOn {
-					f.send(msg(rspDataBlock, m[6], stOK, 0, byte(v), testATR))
+					f.send(msg(rspDataBlock, m[6], stOK, 0, byte(v), qaResp))
 					return
 				}
 				cardHandler(echoSW)(f, m)
@@ -213,9 +213,20 @@ func TestQAChainByteWhereItIsNotAChainByte(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if atr, err := r.PowerOn(testBudget); err != nil || !bytes.Equal(atr, testATR) {
-				t.Fatalf("chain byte %#x: %x %v", v, atr, err)
+			atr, err := r.PowerOn(testBudget)
+			if v == 0 {
+				if err != nil || !bytes.Equal(atr, qaResp) {
+					t.Fatalf("%x %v", atr, err)
+				}
+				continue
 			}
+			lostWith(t, err, ErrProtocol)
+			if atr != nil || len(f.outs) != 2 {
+				t.Fatalf("chain byte %#x: answer %v, %d messages (none after IccPowerOn)", v, atr != nil, len(f.outs))
+			}
+			assertNoLeak(t, "answer to reset", err, qaResp)
+			assertWiped(t, r, "after the refusal")
+			untouched(t, r, f, err)
 		}
 	})
 	t.Run("extended level still chains", func(t *testing.T) {
@@ -227,28 +238,68 @@ func TestQAChainByteWhereItIsNotAChainByte(t *testing.T) {
 	})
 }
 
-// A FAILED answer (command status 1) at short level with a chain byte other than 0 is not looked at: the *CommandError is returned and the
-// session goes on. Pinned as it is today. It is not wrong: a failed answer carries no response, so its chain byte means nothing, and the
-// reader reads bError and bmICCStatus only. A time extension is treated the same.
-func TestQAShortLevelFailedAnswerWithAChainByteIsNotChecked(t *testing.T) {
-	f := shortLevelFake(func(f *fakeDevice, m []byte) {
-		if m[0] == msgXfrBlock {
-			f.send(msg(rspDataBlock, m[6], stTimeExt, 1, 0x77, nil))
-			f.send(msg(rspDataBlock, m[6], stFailed, 0xFE, 0x55, nil))
-			return
+// At short level ANY DataBlock answer with a chain byte other than 0 ends the session: an accepted one, a FAILED one (command status 1)
+// and a time extension, for Transmit and for PowerOn. With the value 0 a failed answer is a *CommandError and the session goes on.
+func TestQAShortLevelChainByteInFailedAnswersAndTimeExtensions(t *testing.T) {
+	type kind struct {
+		name  string
+		frame func(seq, chain byte) []byte
+	}
+	kinds := []kind{
+		{"failed", func(seq, chain byte) []byte { return msg(rspDataBlock, seq, stFailed, 0xFE, chain, nil) }},
+		{"failed, card gone", func(seq, chain byte) []byte { return msg(rspDataBlock, seq, stFailed|iccNone, 0xFB, chain, nil) }},
+		{"time extension", func(seq, chain byte) []byte { return msg(rspDataBlock, seq, stTimeExt, 1, chain, nil) }},
+	}
+	for _, k := range kinds {
+		for _, op := range []opCase{qaOps[2], qaOps[4]} { // IccPowerOn, XfrBlock
+			for _, v := range []byte{0, 1, 2, 3, 0x10, 0x55, 0xFF} {
+				t.Run(fmt.Sprintf("%s/%s/%#02x", k.name, op.name, v), func(t *testing.T) {
+					armed := false
+					f := shortLevelFake(func(f *fakeDevice, m []byte) {
+						if armed && m[0] == op.typ {
+							f.send(k.frame(m[6], v))
+							if k.name == "time extension" {
+								cardHandler(echoSW)(f, m) // then the real answer
+							}
+							return
+						}
+						cardHandler(echoSW)(f, m)
+					})
+					r, err := Open(f, Options{})
+					if err != nil {
+						t.Fatal(err)
+					}
+					if op.typ == msgXfrBlock {
+						if _, err := r.PowerOn(testBudget); err != nil {
+							t.Fatal(err)
+						}
+					}
+					armed = true
+					outs := len(f.outs)
+					err = op.call(r, testBudget)
+					if v == 0 {
+						var ce *CommandError
+						if k.name == "time extension" {
+							if err != nil {
+								t.Fatalf("a time extension with chain byte 0: %v", err)
+							}
+						} else if !errors.As(err, &ce) || errors.Is(err, ErrSessionLost) {
+							t.Fatalf("a failed answer with chain byte 0: %v", err)
+						}
+						return
+					}
+					lostWith(t, err, ErrProtocol)
+					want := 1
+					if op.typ == msgIccPowerOn {
+						want = 2
+					}
+					if sent := len(f.outs) - outs; sent != want {
+						t.Errorf("%d messages sent, want %d", sent, want)
+					}
+					untouched(t, r, f, err)
+				})
+			}
 		}
-		cardHandler(echoSW)(f, m)
-	})
-	r, err := Open(f, Options{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := r.PowerOn(testBudget); err != nil {
-		t.Fatal(err)
-	}
-	_, err = r.Transmit(apduSelect, testBudget)
-	if !errors.Is(err, ErrCardMute) || errors.Is(err, ErrSessionLost) {
-		t.Fatalf("err = %v", err)
 	}
 }
 
