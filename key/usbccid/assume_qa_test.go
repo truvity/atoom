@@ -194,8 +194,9 @@ func TestQANoFinalizerNoRetryLoop(t *testing.T) {
 
 // 8. What the layer above must not assume.
 
-// "A transfer that timed out is abandoned, and what it had already moved is lost. A late answer may arrive on the next read": the
-// layer asks the kernel for nothing between the two calls (no flush, no drain, no reset) and hands the late bytes to the next read.
+// "A transfer that timed out is abandoned, and what it had already moved is lost. The handle can still be called, but the stream of
+// that endpoint is out of step: the layer above must treat its session as lost and close and open again. A late answer may arrive on
+// the next read": the layer asks the kernel for nothing between the two calls (no flush, no drain, no reset) and hands the late bytes to the next read.
 func TestQAAfterATimeoutTheNextReadMayReturnALateAnswer(t *testing.T) {
 	var reads atomic.Int32
 	k := &qaKernel{
@@ -234,38 +235,154 @@ func TestQAAfterATimeoutTheNextReadMayReturnALateAnswer(t *testing.T) {
 	}
 }
 
-// "A stall is final for this handle": the layer never clears a halt. A stalled endpoint's error is passed through (EPIPE) on every
-// call, the handle is not latched, and the only requests the layer ever makes are the three it has.
-func TestQAAStallIsNeverCleared(t *testing.T) {
-	stalled := true
-	k := &qaKernel{answer: func(c kcall) (uintptr, unix.Errno) {
-		if c.req == reqBulk && stalled {
-			return 0, unix.EPIPE
-		}
-		return uintptr(c.bt.Len), 0
-	}}
-	d, _ := qaDevice(t, nil, k)
-	qaClaim(t, d)
-	for range 3 {
-		_, err := d.BulkIn(qaIn, make([]byte, 8), time.Second)
-		if !errors.Is(err, unix.EPIPE) || errors.Is(err, ErrGone) || errors.Is(err, ErrTimeout) {
-			t.Fatalf("a stalled endpoint: %v", err)
-		}
-		_, err = d.BulkOut(qaOut, []byte{1}, time.Second)
-		if !errors.Is(err, unix.EPIPE) {
-			t.Fatalf("a stalled endpoint: %v", err)
-		}
+// "A stall (EPIPE) latches ErrStalled for the handle: this layer never clears a halt." The first EPIPE on a bulk call returns
+// ErrStalled (wrapping the errno), and every later bulk call of the handle, on either endpoint, in either direction, with any
+// arguments, returns ErrStalled without a kernel call: the latch is per handle (a stall on the IN endpoint ends the OUT endpoint
+// too), and it is checked before the arguments. The only requests the layer ever makes are still the three it has, and none clears a
+// halt. Claim and Descriptors are not bulk calls and still work after a stall; Release and Close return nil.
+func TestQAStallLatchesForTheHandle(t *testing.T) {
+	for _, first := range []string{"BulkIn", "BulkOut"} {
+		t.Run(first, func(t *testing.T) {
+			stalled := true
+			k := &qaKernel{answer: func(c kcall) (uintptr, unix.Errno) {
+				if c.req == reqBulk && stalled {
+					return 0, unix.EPIPE
+				}
+				return uintptr(c.bt.Len), 0
+			}}
+			d, _ := qaDevice(t, nil, k)
+			qaClaim(t, d)
+			var err error
+			if first == "BulkIn" {
+				_, err = d.BulkIn(qaIn, make([]byte, 8), time.Second)
+			} else {
+				_, err = d.BulkOut(qaOut, []byte{1}, time.Second)
+			}
+			if !errors.Is(err, ErrStalled) || !errors.Is(err, unix.EPIPE) || errors.Is(err, ErrGone) || errors.Is(err, ErrTimeout) || errors.Is(err, ErrClosed) {
+				t.Fatalf("the first stall: %v", err)
+			}
+			base := k.count()
+			stalled = false // the device lets go: the handle does not look
+			buf := make([]byte, 8)
+			for name, call := range map[string]func() error{
+				"the same endpoint again":            func() error { _, e := d.BulkIn(qaIn, buf, time.Second); return e },
+				"the OUT endpoint":                   func() error { _, e := d.BulkOut(qaOut, []byte{1}, time.Second); return e },
+				"the other CCID interface (claimed)": func() error { _, e := d.BulkOut(qaOut2, []byte{1}, time.Second); return e },
+				"an endpoint that is not held":       func() error { _, e := d.BulkIn(0x8F, buf, time.Second); return e },
+				"an empty read":                      func() error { _, e := d.BulkIn(qaIn, nil, time.Second); return e },
+				"a write that is too long":           func() error { _, e := d.BulkOut(qaOut, make([]byte, maxTransfer+1), time.Second); return e },
+				"a wrong direction":                  func() error { _, e := d.BulkOut(qaIn, buf, time.Second); return e },
+				"after a release of the interface":   func() error { _ = d.Release(qaCCID); _, e := d.BulkIn(qaIn, buf, time.Second); return e },
+			} {
+				if err := call(); !errors.Is(err, ErrStalled) || !errors.Is(err, unix.EPIPE) {
+					t.Errorf("%s: %v, want ErrStalled", name, err)
+				}
+			}
+			// The only kernel call after the latch is the release that one of the calls above asked for.
+			if k.countReq(reqBulk) != 1 || k.countReq(reqRelease) != 1 || k.count()-base != 1 {
+				t.Errorf("%d bulk requests, %d releases, %d calls after the latch", k.countReq(reqBulk), k.countReq(reqRelease), k.count()-base)
+			}
+			for _, c := range k.snapshot() {
+				if c.req != reqBulk && c.req != reqClaim && c.req != reqRelease {
+					t.Errorf("a request that is not one of the three: %#x (nothing clears the halt)", c.req)
+				}
+			}
+			// Not bulk calls: they go on.
+			if _, err := d.Descriptors(); err != nil {
+				t.Errorf("Descriptors after a stall: %v", err)
+			}
+			if err := d.Claim(qaCCID2); err != nil {
+				t.Errorf("Claim after a stall: %v", err)
+			}
+			if err := d.Release(qaCCID2); err != nil {
+				t.Errorf("Release: %v", err)
+			}
+			if err := d.Close(); err != nil {
+				t.Errorf("Close: %v", err)
+			}
+		})
 	}
-	if got := k.countReq(reqBulk); got != 6 {
-		t.Errorf("%d bulk requests for 6 calls (no retry)", got)
+}
+
+// The precedence of ErrStalled, ErrGone and ErrClosed: ErrClosed wins after Close; ErrGone wins when the device goes after the stall (a
+// call that meets the errno latches it, and the state is looked at before the stall); ErrStalled holds otherwise; Release and Close
+// return nil in every state.
+func TestQAStalledGoneClosedPrecedence(t *testing.T) {
+	cases := []struct {
+		name                string
+		stall, gone, closed bool
+		want                error // the sentinel of every bulk call at the end, nil for none
+	}{
+		{"healthy", false, false, false, nil},
+		{"stalled", true, false, false, ErrStalled},
+		{"stalled, then gone", true, true, false, ErrGone},
+		{"stalled, then closed", true, false, true, ErrClosed},
+		{"stalled, then gone, then closed", true, true, true, ErrClosed},
+		{"gone", false, true, false, ErrGone},
+		{"gone, then closed", false, true, true, ErrClosed},
+		{"closed", false, false, true, ErrClosed},
 	}
-	if k.countReq(reqBulk)+k.countReq(reqClaim) != k.count() {
-		t.Error("the layer made a request that clears the halt")
-	}
-	// The handle is not marked dead: the layer does nothing about the stall, and the endpoint works again only if the device lets it.
-	stalled = false
-	if _, err := d.BulkIn(qaIn, make([]byte, 8), time.Second); err != nil {
-		t.Errorf("after the device let go: %v", err)
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			var stalled, goneNow bool
+			k := &qaKernel{answer: func(r kcall) (uintptr, unix.Errno) {
+				switch {
+				case r.req == reqClaim && goneNow:
+					return 0, unix.ENODEV
+				case r.req == reqBulk && stalled:
+					return 0, unix.EPIPE
+				}
+				return uintptr(r.bt.Len), 0
+			}}
+			d, _ := qaDevice(t, nil, k)
+			qaClaim(t, d)
+			if c.stall {
+				stalled = true
+				if _, err := d.BulkIn(qaIn, make([]byte, 4), time.Second); !errors.Is(err, ErrStalled) {
+					t.Fatalf("the stall: %v", err)
+				}
+				stalled = false
+			}
+			if c.gone { // the device goes: the kernel answers a claim of the other CCID interface with ENODEV
+				goneNow = true
+				if err := d.Claim(qaCCID2); !errors.Is(err, ErrGone) {
+					t.Fatalf("the unplug: %v", err)
+				}
+			}
+			if c.closed {
+				if err := d.Close(); err != nil {
+					t.Fatal(err)
+				}
+			}
+			base := k.count()
+			_, errIn := d.BulkIn(qaIn, make([]byte, 4), time.Second)
+			_, errOut := d.BulkOut(qaOut, []byte{1}, time.Second)
+			if c.want == nil {
+				if errIn != nil || errOut != nil {
+					t.Errorf("no failure yet: %v %v", errIn, errOut)
+				}
+			} else {
+				for _, err := range []error{errIn, errOut} {
+					if !errors.Is(err, c.want) {
+						t.Errorf("want %v: %v", c.want, err)
+					}
+					for _, other := range []error{ErrStalled, ErrGone, ErrClosed} {
+						if !errors.Is(c.want, other) && errors.Is(err, other) {
+							t.Errorf("want %v only, the error is also %v: %v", c.want, other, err)
+						}
+					}
+				}
+				if k.count() != base {
+					t.Errorf("%d kernel calls for calls that the latch answers", k.count()-base)
+				}
+			}
+			if err := d.Release(qaCCID); err != nil {
+				t.Errorf("Release: %v", err)
+			}
+			if err := d.Close(); err != nil {
+				t.Errorf("Close: %v", err)
+			}
+		})
 	}
 }
 
@@ -359,7 +476,8 @@ func TestQAABulkOutCountIsForTheCallerToCompare(t *testing.T) {
 	}
 }
 
-// "The overflow and stall errors do not latch": covered above for each; here every errno that is not fatal, once, then a good call.
+// "The overflow error does not latch": nor does any errno that is neither fatal nor a stall (EPIPE is the one that latches, and is held
+// by TestQAStallLatchesForTheHandle): each once, then a good call.
 func TestQANonFatalErrorsDoNotLatch(t *testing.T) {
 	next := unix.Errno(0)
 	k := &qaKernel{answer: func(c kcall) (uintptr, unix.Errno) {
@@ -370,7 +488,7 @@ func TestQANonFatalErrorsDoNotLatch(t *testing.T) {
 	}}
 	d, _ := qaDevice(t, nil, k)
 	qaClaim(t, d)
-	for _, e := range []unix.Errno{unix.EOVERFLOW, unix.EPIPE, unix.ETIMEDOUT, unix.EINTR, unix.EAGAIN, unix.ENOMEM, unix.EINVAL, unix.ENOENT, unix.EBUSY} {
+	for _, e := range []unix.Errno{unix.EOVERFLOW, unix.ETIMEDOUT, unix.EINTR, unix.EAGAIN, unix.ENOMEM, unix.EINVAL, unix.ENOENT, unix.EBUSY} {
 		next = e
 		if _, err := d.BulkIn(qaIn, make([]byte, 4), time.Second); !errors.Is(err, e) || errors.Is(err, ErrGone) {
 			t.Fatalf("%v: %v", e, err)

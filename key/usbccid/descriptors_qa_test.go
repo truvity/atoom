@@ -234,6 +234,17 @@ func TestQAOpenTakesOnlySimpleDescriptors(t *testing.T) {
 		{"an endpoint address listed twice by one interface", qaSet(qaIface(0, 0, 0xFF, qaEP(0x04, 2), qaEP(0x04, 2))), ErrBadDescriptors},
 		{"an endpoint address of the CCID interface listed by a HID interface", qaSet(qaHID1(), qaIface(1, 0, 3, qaEP(0x04, 3)), qaCCIDIf()), ErrBadDescriptors},
 		{"an in address listed twice", qaSet(qaHID1(), qaIface(1, 0, 3, qaEP(0x81, 3)), qaCCIDIf()), ErrBadDescriptors},
+		// the limits of usbfs: 32 interfaces, numbers below 64
+		{"32 interfaces", qaSet(ifacesNumbered(0, 32)...), nil},
+		{"33 interfaces", qaSet(ifacesNumbered(0, 33)...), ErrBadDescriptors},
+		{"32 interfaces with the numbers 32 to 63", qaSet(ifacesNumbered(32, 32)...), nil},
+		{"33 interfaces with numbers below 64", qaSet(append(ifacesNumbered(31, 32), qaIface(0, 0, 0xFF))...), ErrBadDescriptors},
+		{"interface number 63", qaSet(qaIface(63, 0, 0xFF)), nil},
+		{"interface number 64", qaSet(qaIface(64, 0, 0xFF)), ErrBadDescriptors},
+		{"interface number 65", qaSet(qaIface(65, 0, 0xFF)), ErrBadDescriptors},
+		{"interface number 255", qaSet(qaIface(255, 0, 0xFF)), ErrBadDescriptors},
+		{"a CCID interface of number 64", qaSet(qaIface(64, 0, 0x0B, qaEP(0x04, 2), qaEP(0x84, 2))), ErrBadDescriptors},
+		{"a CCID interface of number 63", qaSet(qaIface(63, 0, 0x0B, qaEP(0x04, 2), qaEP(0x84, 2))), nil},
 		// the number of endpoint descriptors
 		{"bNumEndpoints one more than listed (last interface)", edit(func(b []byte) []byte {
 			return bytesReplaceIface(b, qaCCIDIf(), qaIfaceN(2, 0, 0x0B, 4, qaCCIDClassDesc, qaEP(0x04, 2), qaEP(0x84, 2), qaEP(0x85, 3)))
@@ -295,6 +306,15 @@ func TestQAOpenTakesOnlySimpleDescriptors(t *testing.T) {
 	}
 }
 
+// ifacesNumbered lists count interfaces without endpoints, numbered first, first+1, ...
+func ifacesNumbered(first, count int) [][]byte {
+	var out [][]byte
+	for i := range count {
+		out = append(out, qaIface(byte(first+i), 0, 0xFF)) //nolint:gosec // numbers below 256
+	}
+	return out
+}
+
 func slicesClone(b []byte) []byte { return append([]byte(nil), b...) }
 
 // bytesReplaceIface replaces the first occurrence of the interface block old by repl in a descriptor set and fixes the total length.
@@ -353,14 +373,10 @@ func TestQAValidSetHeldToTheCCIDInterface(t *testing.T) {
 // Descriptors of 64 KiB: a valid configuration of exactly the 64 KiB that are read, with more bytes behind them in the node, is
 // taken; one that is longer than the 64 KiB is refused.
 func TestQALargeDescriptors(t *testing.T) {
-	// 250 interfaces without endpoints, padded with class-specific descriptors to the exact length.
+	// 32 interfaces (the most a configuration may have) without endpoints, padded with class-specific descriptors to the exact length.
 	pad := func(n int) []byte { return append([]byte{byte(n), 0x21}, make([]byte, n-2)...) } //nolint:gosec // at most 255
 	build := func(total int) []byte {
-		var parts [][]byte
-		for i := range 250 {
-			parts = append(parts, qaIface(byte(i), 0, 0xFF))
-		}
-		cfg := qaCfg(250, parts...)
+		cfg := qaCfg(32, ifacesNumbered(0, 32)...)
 		for rem := total - len(cfg); rem > 0; {
 			n := min(rem, 200)
 			if rem-n == 1 {
@@ -377,7 +393,7 @@ func TestQALargeDescriptors(t *testing.T) {
 		t.Fatalf("the test blob is %d bytes", len(blob))
 	}
 	l, err := parseLayout(blob)
-	if err != nil || len(l.ifaces) != 250 {
+	if err != nil || len(l.ifaces) != 32 {
 		t.Errorf("a configuration that fills 64 KiB: %d interfaces, %v", len(l.ifaces), err)
 	}
 	write := func(b []byte) string {
@@ -465,7 +481,7 @@ func qaRead(b []byte) qaSeen {
 func FuzzParseLayout(f *testing.F) {
 	for _, b := range [][]byte{qaDefaultDesc(), qaSet(qaHID1(), qaHID2(), qaCCIDIf()), qaDefaultDesc()[:18], qaDefaultDesc()[:30], qaDefaultDesc()[:len(qaDefaultDesc())-1],
 		{}, {18, 1}, qaDev(0, 0), qaBlob(1, 2, qaCfg(1, qaEP(qaOut, 2))), qaBlobN(1, 2, 2, qaCfg(1, qaCCIDIf())),
-		qaSet(qaIface(0, 0, 0xFF, qaEP(4, 2), qaEP(4, 2))), qaSet(qaIface(0, 0, 0xFF), qaIface(0, 0, 0xFF)), qaSet(qaIface(0, 1, 0xFF)),
+		qaSet(qaIface(0, 0, 0xFF, qaEP(4, 2), qaEP(4, 2))), qaSet(qaIface(0, 0, 0xFF), qaIface(0, 0, 0xFF)), qaSet(qaIface(0, 1, 0xFF)), qaSet(ifacesNumbered(0, 33)...), qaSet(qaIface(64, 0, 0xFF)),
 		qaSet(qaIfaceN(0, 0, 0xFF, 3, qaEP(4, 2))), qaSet(qaIface(0, 0, 0xFF, qaEP(0x12, 2))), qaSet(qaIface(0, 0, 0xFF, qaEP(0x01, 2), qaEP(0x81, 2))),
 		bytes.Repeat([]byte{9, 2, 9, 0, 1, 1, 0, 0x80, 50}, 20), append(qaDev(1, 2), bytes.Repeat([]byte{0xFF}, 300)...)} {
 		f.Add(b)
@@ -498,6 +514,14 @@ func FuzzParseLayout(f *testing.F) {
 		}
 		if int(b[18+2])|int(b[18+3])<<8 != len(b)-18 || int(b[18+4]) != len(l.ifaces) {
 			t.Fatal("the length or bNumInterfaces of an accepted set is not as declared")
+		}
+		if len(l.ifaces) > 32 {
+			t.Fatalf("%d interfaces accepted", len(l.ifaces))
+		}
+		for _, in := range l.ifaces {
+			if in.number >= 64 {
+				t.Fatalf("interface number %d accepted", in.number)
+			}
 		}
 		seen := qaRead(b)
 		if !seen.ok || len(seen.ifaces) != len(l.ifaces) {

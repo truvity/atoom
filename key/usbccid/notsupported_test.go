@@ -8,7 +8,8 @@ import (
 	"time"
 )
 
-// On a system that is not Linux the package builds and every entry point returns ErrNotSupported. CI runs this on macOS.
+// On a system that is not Linux on amd64 or arm64 the package builds and every entry point returns ErrNotSupported, except Release and
+// Close of a Device, which return nil (there is nothing to release or to close). CI runs this on macOS.
 func TestNotSupported(t *testing.T) {
 	dir := t.TempDir()
 	if _, err := Open(dir); !errors.Is(err, ErrNotSupported) {
@@ -30,8 +31,8 @@ func TestNotSupported(t *testing.T) {
 	if err := p.Claim(0); !errors.Is(err, ErrNotSupported) {
 		t.Errorf("Claim: %v", err)
 	}
-	if err := p.Release(0); !errors.Is(err, ErrNotSupported) {
-		t.Errorf("Release: %v", err)
+	if err := p.Release(0); err != nil {
+		t.Errorf("Release: %v, want nil", err)
 	}
 	if _, err := p.BulkOut(2, nil, time.Second); !errors.Is(err, ErrNotSupported) {
 		t.Errorf("BulkOut: %v", err)
@@ -39,7 +40,10 @@ func TestNotSupported(t *testing.T) {
 	if _, err := p.BulkIn(0x82, nil, time.Second); !errors.Is(err, ErrNotSupported) {
 		t.Errorf("BulkIn: %v", err)
 	}
-	if err := p.Close(); !errors.Is(err, ErrNotSupported) {
-		t.Errorf("Close: %v", err)
+	if err := p.Close(); err != nil {
+		t.Errorf("Close: %v, want nil", err)
+	}
+	if err := p.Close(); err != nil {
+		t.Errorf("second Close: %v, want nil", err)
 	}
 }

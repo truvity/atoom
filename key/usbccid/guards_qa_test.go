@@ -638,3 +638,57 @@ func TestQAReviewerCases(t *testing.T) {
 		t.Errorf("an address that is listed once: %v", err)
 	}
 }
+
+// Open maps "no such device" and "shut down" from the read of the descriptors to ErrGone. Pread of a regular file cannot fail like
+// that and there is no seam for the read, so what is held is the source: the branch exists, names both errnos, and wraps ErrGone and
+// the errno as the only errors, with the descriptor closed first.
+func TestQAReadOfDescriptorsThatMeetsAGoneDeviceIsErrGone(t *testing.T) {
+	b, err := os.ReadFile("device_linux.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	src := string(b)
+	i := strings.Index(src, "n, err := unix.Pread(fd, buf, 0)")
+	if i < 0 {
+		t.Fatal("the read of the descriptors is gone")
+	}
+	branch := src[i : i+700]
+	for _, want := range []string{"_ = unix.Close(fd)", "unix.ENODEV", "unix.ESHUTDOWN", "ErrGone", `%w: %w", path, ErrGone, err)`} {
+		if want == `%w: %w", path, ErrGone, err)` {
+			want = "ErrGone, err)"
+		}
+		if !strings.Contains(branch, want) {
+			t.Errorf("the branch of the read lacks %s", want)
+		}
+	}
+	if strings.Index(branch, "_ = unix.Close(fd)") > strings.Index(branch, "ErrGone") {
+		t.Error("the descriptor is not closed before the error is returned")
+	}
+	// A read that fails otherwise is still a plain path error, not ErrGone: a directory cannot be read.
+	dir := t.TempDir()
+	if d, err := open(dir, false); err == nil || d != nil || errors.Is(err, ErrGone) {
+		t.Errorf("a directory: %v %v", d, err)
+	}
+}
+
+// "No such device" from the reopen goes through the same decision as "no such file". An ENODEV cannot be made to come from a reopen
+// of a file under t.TempDir() (it needs a device node with no driver), so the condition is held from the source: ENOENT, ENOTDIR and
+// ENODEV are one case, and its body is the access check of procFdDir that tells ErrNoProcSelfFd from ErrGone.
+func TestQAReopenENODEVGoesThroughTheSameDecision(t *testing.T) {
+	b, err := os.ReadFile("device_linux.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	src := string(b)
+	i := strings.Index(src, "errors.Is(err, unix.ENOENT)")
+	if i < 0 {
+		t.Fatal("the decision of the reopen is gone")
+	}
+	cond := src[i : i+160]
+	if !strings.Contains(cond, "errors.Is(err, unix.ENOTDIR)") || !strings.Contains(cond, "errors.Is(err, unix.ENODEV)") || !strings.Contains(cond[:strings.Index(cond, "{")], "||") {
+		t.Errorf("ENOENT, ENOTDIR and ENODEV are not one condition: %q", cond)
+	}
+	if !strings.Contains(src[i:i+900], "unix.Access(procFdDir, unix.F_OK)") {
+		t.Error("the decision does not use the access check of procFdDir")
+	}
+}

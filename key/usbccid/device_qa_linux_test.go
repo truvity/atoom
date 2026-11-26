@@ -386,33 +386,71 @@ func TestQAReleaseSemantics(t *testing.T) {
 // A release the kernel refuses (not fatal) is reported and the claim is forgotten; the device stays usable and Close does not
 // release it again. A release answered with a fatal errno latches the device and reports nothing.
 func TestQAReleaseErrors(t *testing.T) {
-	t.Run("not fatal", func(t *testing.T) {
+	// A release that fails and is not fatal keeps the claim: the kernel may still hold it. A second Release asks the kernel again, Close
+	// releases it, a bulk call is still allowed while the claim is kept, and nothing is latched.
+	t.Run("not fatal keeps the claim", func(t *testing.T) {
+		var fail atomic.Bool
+		fail.Store(true)
 		k := &qaKernel{answer: func(c kcall) (uintptr, unix.Errno) {
-			if c.req == reqRelease {
+			if c.req == reqRelease && fail.Load() {
+				return 0, unix.EINVAL
+			}
+			return uintptr(c.bt.Len), 0
+		}}
+		d, _ := qaDevice(t, nil, k)
+		qaClaim(t, d)
+		for i := 1; i <= 2; i++ {
+			err := d.Release(qaCCID)
+			if !errors.Is(err, unix.EINVAL) || errors.Is(err, ErrGone) {
+				t.Fatalf("release %d: %v", i, err)
+			}
+			if got := k.countReq(reqRelease); got != i {
+				t.Fatalf("%d release requests after %d calls: the second call must ask the kernel again", got, i)
+			}
+		}
+		if _, err := d.Descriptors(); err != nil {
+			t.Errorf("a refused release must not latch: %v", err)
+		}
+		if _, err := d.BulkOut(qaOut, nil, time.Second); err != nil {
+			t.Errorf("a bulk call while the claim is kept: %v", err)
+		}
+		fail.Store(false) // the kernel lets it go
+		if err := d.Release(qaCCID); err != nil {
+			t.Fatalf("the release that succeeds: %v", err)
+		}
+		if _, err := d.BulkOut(qaOut, nil, time.Second); !errors.Is(err, ErrNotClaimed) {
+			t.Errorf("after the release that succeeded: %v", err)
+		}
+		if err := d.Release(qaCCID); err != nil || k.countReq(reqRelease) != 3 {
+			t.Errorf("a release of what is gone: %v, %d requests", err, k.countReq(reqRelease))
+		}
+		if err := d.Close(); err != nil || k.countReq(reqRelease) != 3 {
+			t.Errorf("close: %v, %d release requests", err, k.countReq(reqRelease))
+		}
+	})
+	t.Run("Close releases a claim that a failed release kept", func(t *testing.T) {
+		var fail atomic.Bool
+		fail.Store(true)
+		k := &qaKernel{answer: func(c kcall) (uintptr, unix.Errno) {
+			if c.req == reqRelease && fail.Load() {
 				return 0, unix.EINVAL
 			}
 			return 0, 0
 		}}
 		d, _ := qaDevice(t, nil, k)
 		qaClaim(t, d)
-		err := d.Release(qaCCID)
-		if !errors.Is(err, unix.EINVAL) || errors.Is(err, ErrGone) {
-			t.Fatalf("release: %v", err)
+		if err := d.Release(qaCCID); !errors.Is(err, unix.EINVAL) {
+			t.Fatal(err)
 		}
-		if _, err := d.Descriptors(); err != nil {
-			t.Errorf("a refused release must not latch: %v", err)
-		}
-		if _, err := d.BulkOut(qaOut, nil, time.Second); !errors.Is(err, ErrNotClaimed) {
-			t.Errorf("the claim is forgotten after a refused release: %v", err)
-		}
+		fail.Store(false)
 		if err := d.Close(); err != nil {
-			t.Errorf("close after a failed release: %v", err)
+			t.Errorf("close: %v", err)
 		}
-		if got := k.countReq(reqRelease); got != 1 {
-			t.Errorf("%d release calls, want 1", got)
+		if got := k.countReq(reqRelease); got != 2 {
+			t.Errorf("%d release requests, want 2 (the failed one, and Close)", got)
 		}
 	})
-	t.Run("fatal", func(t *testing.T) {
+	t.Run("fatal forgets the claim", func(t *testing.T) {
 		gone := false
 		k := &qaKernel{answer: func(kcall) (uintptr, unix.Errno) {
 			if gone {
@@ -426,12 +464,15 @@ func TestQAReleaseErrors(t *testing.T) {
 		if err := d.Release(qaCCID); err != nil {
 			t.Fatalf("release that met a gone device: %v, want nil", err)
 		}
+		if d.claimed[qaCCID] {
+			t.Error("the claim is kept after a fatal release")
+		}
 		before := k.count()
 		if _, err := d.BulkIn(qaIn, make([]byte, 2), time.Second); !errors.Is(err, ErrGone) || !errors.Is(err, unix.ENODEV) {
 			t.Errorf("after the fatal release: %v, want ErrGone", err)
 		}
-		if k.count() != before {
-			t.Error("the latch let a call through")
+		if err := d.Release(qaCCID); err != nil || d.Close() != nil || k.count() != before {
+			t.Errorf("release and close after the latch asked the kernel (%d calls) or failed", k.count()-before)
 		}
 	})
 }
@@ -593,9 +634,11 @@ func TestQAGoneLatchesFromEveryMethod(t *testing.T) {
 
 // B. Timeouts and interrupts.
 
-// A transfer that times out is ErrTimeout (and ETIMEDOUT), asks the kernel once, and leaves the handle usable: the next transfer
-// is made and succeeds.
-func TestQATimeoutLeavesTheHandleUsable(t *testing.T) {
+// A transfer that times out is ErrTimeout (and ETIMEDOUT) and asks the kernel once. The handle can still be called: the next transfer
+// is made and, here, succeeds. That does not mean the session is sound: the stream of the endpoint is out of step, a late answer may
+// arrive on the next read, and the layer above must treat its session as lost and close and open again (this layer never aborts or
+// resynchronises for it; see TestQAAfterATimeoutTheNextReadMayReturnALateAnswer).
+func TestQAAfterATimeoutTheHandleCanBeCalledButTheSessionIsLost(t *testing.T) {
 	var step atomic.Int32
 	k := &qaKernel{answer: func(c kcall) (uintptr, unix.Errno) {
 		if c.req != reqBulk {
