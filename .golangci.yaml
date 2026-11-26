@@ -5,12 +5,30 @@ linters:
   default: standard
   enable:
     - errorlint
+    - forbidigo
     - gosec
     - misspell
     - nolintlint
     - revive
     - unconvert
     - usestdlibvars
+  settings:
+    forbidigo:
+      # A library writes through the logger of its options (Options.Logger, resolved by the helper log()), never through the package-level
+      # functions of log/slog, which write to the default logger of the host. slog.Default() itself is not on the list.
+      forbid:
+        - pattern: '^slog\.(Info|Warn|Error|Debug|Log|LogAttrs|InfoContext|WarnContext|ErrorContext|DebugContext)$'
+          msg: a library writes through the logger of its options (the option Logger, resolved by the helper log()), not through the package-level functions of log/slog
+  exclusions:
+    rules:
+      # The thin mains are hosts: they may write to the default logger.
+      - path: (^|/)cmd/
+        linters:
+          - forbidigo
+      # The module socket (and socket/restart inside it): the guard still writes one line to the default logger; a logger for it may follow.
+      - path: ^socket/
+        linters:
+          - forbidigo
 formatters:
   enable:
     - gofmt
