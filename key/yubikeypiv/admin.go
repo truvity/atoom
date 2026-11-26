@@ -103,8 +103,8 @@ func (a admin) Unlock(ctx context.Context, req *connect.Request[keyv1alpha1.Unlo
 		return nil, err
 	}
 	// A person unlocked the board: a released PIN that the card refused before no longer stops the PIN release.
-	a.s.refused.clear()
-	slog.Info("unlocked: the driver holds the PIN in locked memory")
+	a.s.refused.clear(a.s.log())
+	a.s.log().Info("unlocked: the driver holds the PIN in locked memory")
 	return connect.NewResponse(&keyv1alpha1.UnlockResponse{}), nil
 }
 
@@ -130,23 +130,23 @@ func (s *Service) unlockHeld(ctx context.Context, method string, pin []byte) *co
 		s.cardGone(method)
 		return s.refuse(ctx, method, connect.CodeUnavailable, reasonCard, "")
 	case errors.Is(rerr, card.ErrSharing):
-		slog.Error("unlock refused: another process holds the card, so it cannot be reset and its counter cannot be read; stop that process", "error", rerr.Error())
+		s.log().Error("unlock refused: another process holds the card, so it cannot be reset and its counter cannot be read; stop that process", "error", rerr.Error())
 		return s.refuse(ctx, method, connect.CodeFailedPrecondition, reasonCard, "")
 	case errors.Is(rerr, card.ErrVerified):
-		slog.Error("unlock refused: the card is still PIN-verified after a reset of its session, so its PIN counter cannot be read")
+		s.log().Error("unlock refused: the card is still PIN-verified after a reset of its session, so its PIN counter cannot be read")
 		return s.refuse(ctx, method, connect.CodeFailedPrecondition, reasonCard, "")
 	case rerr != nil:
-		slog.Error("unlock refused: the PIN counter cannot be read", "error", rerr.Error())
+		s.log().Error("unlock refused: the PIN counter cannot be read", "error", rerr.Error())
 		return s.refuse(ctx, method, connect.CodeFailedPrecondition, reasonCard, "")
 	case retries == 0:
-		slog.Error("unlock refused: the card is blocked and needs the PUK")
+		s.log().Error("unlock refused: the card is blocked and needs the PUK")
 		return s.refuse(ctx, method, connect.CodeFailedPrecondition, reasonBlocked, "pin")
 	case retries == 1:
-		slog.Error("unlock refused: the card has one PIN attempt left; the PUK procedure is the owners'")
+		s.log().Error("unlock refused: the card has one PIN attempt left; the PUK procedure is the owners'")
 		return s.refuse(ctx, method, connect.CodeFailedPrecondition, reasonRetries, "pin")
 	}
 	if err := s.pin.set(pin); err != nil {
-		slog.Error("unlock refused: the PIN cannot be held in locked memory", "error", err.Error())
+		s.log().Error("unlock refused: the PIN cannot be held in locked memory", "error", err.Error())
 		return s.refuse(ctx, method, connect.CodeFailedPrecondition, reasonMemory, "")
 	}
 	if err := s.card.Login(pin); err != nil {
@@ -158,13 +158,13 @@ func (s *Service) unlockHeld(ctx context.Context, method string, pin []byte) *co
 		var pe *card.PINError
 		if errors.As(err, &pe) {
 			if pe.Retries == 0 {
-				slog.Error("unlock refused: the card is blocked and needs the PUK")
+				s.log().Error("unlock refused: the card is blocked and needs the PUK")
 				return s.refuse(ctx, method, connect.CodeFailedPrecondition, reasonBlocked, "pin")
 			}
-			slog.Warn("unlock refused: the card did not accept the PIN", "retries", pe.Retries)
+			s.log().Warn("unlock refused: the card did not accept the PIN", "retries", pe.Retries)
 			return s.refuse(ctx, method, connect.CodePermissionDenied, reasonPIN, "pin")
 		}
-		slog.Error("unlock failed", "error", err.Error())
+		s.log().Error("unlock failed", "error", err.Error())
 		return refusal.New(connect.CodeInternal, reasonStore, "")
 	}
 	return nil
@@ -177,7 +177,7 @@ func (s *Service) unlockHeld(ctx context.Context, method string, pin []byte) *co
 // card unreachable returns card.ErrCardGone.
 func (s *Service) logOut(where string) (int, error) {
 	if err := s.card.ResetSession(); err != nil {
-		slog.Error("the card session cannot be reset", "where", where, "card", cardLoggedIn, "error", err.Error())
+		s.log().Error("the card session cannot be reset", "where", where, "card", cardLoggedIn, "error", err.Error())
 		return 0, err
 	}
 	s.logReset(where, cardLoggedIn, s.pin.held())
@@ -201,7 +201,7 @@ func ServeAdmin(ctx context.Context, cfg AdminConfig, s *Service) error {
 	protocols.SetHTTP1(true)
 	protocols.SetUnencryptedHTTP2(true) // h2c, as every other socket of sluis (kits/go/rpc)
 	srv := &http.Server{
-		Handler:           guardAdmin(cfg.Allow, mux),
+		Handler:           guardAdmin(s.log, cfg.Allow, mux),
 		Protocols:         &protocols,
 		ReadHeaderTimeout: 10 * time.Second,
 		ConnContext: func(c context.Context, conn net.Conn) context.Context {
@@ -237,11 +237,11 @@ type (
 )
 
 // guardAdmin refuses a call whose peer is not an administrator, before the request body is read.
-func guardAdmin(allow func(uint32) bool, next http.Handler) http.Handler {
+func guardAdmin(log func() *slog.Logger, allow func(uint32) bool, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		p, _ := r.Context().Value(uidKey{}).(adminPeer)
 		if !p.ok || !allow(p.uid) {
-			slog.Info("admin call refused", "reason", reasonCaller, "uid", p.uid, "path", r.URL.Path)
+			log().Info("admin call refused", "reason", reasonCaller, "uid", p.uid, "path", r.URL.Path)
 			// 403 is permission_denied in the Connect protocol; the body is not read.
 			http.Error(w, "", http.StatusForbidden)
 			return

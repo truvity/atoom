@@ -92,7 +92,7 @@ func (s *Service) VerifyAttestation(ctx context.Context, req *connect.Request[ke
 	a, err := s.card.VerifyAttestation(signer, slotCert)
 	s.mu.Unlock()
 	if err != nil {
-		slog.Warn("a peer's attestation refused", "error", err.Error())
+		s.log().Warn("a peer's attestation refused", "error", err.Error())
 		return nil, s.refuse(ctx, "VerifyAttestation", connect.CodeFailedPrecondition, reasonAttestation, "attestation")
 	}
 	if !a.Version.AtLeast(FirmwareFloor.Major, FirmwareFloor.Minor, FirmwareFloor.Patch) {
@@ -181,7 +181,7 @@ func (s *Service) signPinText(ctx context.Context, method string, text []byte) (
 		return nil, s.failed(ctx, method, err)
 	}
 	if !ecdsa.VerifyASN1(k.pub, digest, sig) {
-		slog.Error("the card's pin-release signature does not verify with its public key")
+		s.log().Error("the card's pin-release signature does not verify with its public key")
 		return nil, s.internalRefusal(ctx, method)
 	}
 	return sig, nil
@@ -231,7 +231,7 @@ func (s *Service) SealPin(ctx context.Context, req *connect.Request[keyv1alpha1.
 	if cerr != nil {
 		return nil, cerr
 	}
-	slog.Info("sealed the PIN to a verified request of a peer", "node", r.Node, "request", r.ID)
+	s.log().Info("sealed the PIN to a verified request of a peer", "node", r.Node, "request", r.ID)
 	return connect.NewResponse(&keyv1alpha1.SealPinResponse{AnswerText: at, AnswerSignatureDer: sig}), nil
 }
 
@@ -295,13 +295,13 @@ func (s *Service) FinishPinRelease(ctx context.Context, req *connect.Request[key
 			if err := s.refused.mark(); err != nil {
 				// Fail closed: the stop holds in this process, and the driver exits rather than go on with a stop that a
 				// restart would forget.
-				slog.Error("the PIN release stop cannot be saved: the driver exits", "error", err.Error())
+				s.log().Error("the PIN release stop cannot be saved: the driver exits", "error", err.Error())
 				s.exit(err)
 			}
 		}
 		return nil, cerr
 	}
-	slog.Info("unlocked by a peer's PIN release: the driver holds the PIN in locked memory", "releaser", a.Releaser, "request", a.ID)
+	s.log().Info("unlocked by a peer's PIN release: the driver holds the PIN in locked memory", "releaser", a.Releaser, "request", a.ID)
 	return connect.NewResponse(&keyv1alpha1.FinishPinReleaseResponse{}), nil
 }
 
@@ -310,19 +310,19 @@ func (s *Service) FinishPinRelease(ctx context.Context, req *connect.Request[key
 // an ES384 signature over the text by that key. It logs a refusal by its word and names, never a value.
 func (s *Service) verifyPeer(ctx context.Context, method string, keyPlan []byte, boundary, node string, text, sig []byte, sigField string) *connect.Error {
 	if boundary != s.boundary {
-		slog.Warn("a PIN release of another boundary refused", "call", method)
+		s.log().Warn("a PIN release of another boundary refused", "call", method)
 		return s.refuse(ctx, method, connect.CodeFailedPrecondition, reasonBoundary, "")
 	}
 	pub, err := s.peerKey(ctx, keyPlan, node)
 	if err != nil {
-		logPeerRefusal(method, err, node)
+		s.logPeerRefusal(method, err, node)
 		if errors.Is(err, ErrUnlisted) {
 			return s.refuse(ctx, method, connect.CodeFailedPrecondition, reasonUnlisted, "")
 		}
 		return s.refuse(ctx, method, connect.CodeFailedPrecondition, reasonKeyPlan, "key_plan")
 	}
 	if !verifySigned(pub, text, sig) {
-		slog.Warn("a PIN release refused: the signature", "call", method, "node", node)
+		s.log().Warn("a PIN release refused: the signature", "call", method, "node", node)
 		return s.refuse(ctx, method, connect.CodeFailedPrecondition, reasonSignature, sigField)
 	}
 	return nil
