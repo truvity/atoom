@@ -33,52 +33,52 @@ use (
 	./transport/sqs
 )
 
-replace github.com/truvity/atoom/blob v0.10.0 => ./blob
+replace github.com/truvity/atoom/blob v0.11.0 => ./blob
 
-replace github.com/truvity/atoom/blob/s3 v0.10.0 => ./blob/s3
+replace github.com/truvity/atoom/blob/s3 v0.11.0 => ./blob/s3
 
-replace github.com/truvity/atoom/blocks/seal v0.10.0 => ./blocks/seal
+replace github.com/truvity/atoom/blocks/seal v0.11.0 => ./blocks/seal
 
-replace github.com/truvity/atoom/blocks/token v0.10.0 => ./blocks/token
+replace github.com/truvity/atoom/blocks/token v0.11.0 => ./blocks/token
 
-replace github.com/truvity/atoom/common v0.10.0 => ./common
+replace github.com/truvity/atoom/common v0.11.0 => ./common
 
-replace github.com/truvity/atoom/destination v0.10.0 => ./destination
+replace github.com/truvity/atoom/destination v0.11.0 => ./destination
 
-replace github.com/truvity/atoom/index v0.10.0 => ./index
+replace github.com/truvity/atoom/index v0.11.0 => ./index
 
-replace github.com/truvity/atoom/key v0.10.0 => ./key
+replace github.com/truvity/atoom/key v0.11.0 => ./key
 
-replace github.com/truvity/atoom/key/awskms v0.10.0 => ./key/awskms
+replace github.com/truvity/atoom/key/awskms v0.11.0 => ./key/awskms
 
-replace github.com/truvity/atoom/key/conformance v0.10.0 => ./key/conformance
+replace github.com/truvity/atoom/key/conformance v0.11.0 => ./key/conformance
 
-replace github.com/truvity/atoom/key/pinrelease v0.10.0 => ./key/pinrelease
+replace github.com/truvity/atoom/key/pinrelease v0.11.0 => ./key/pinrelease
 
-replace github.com/truvity/atoom/key/slotplan v0.10.0 => ./key/slotplan
+replace github.com/truvity/atoom/key/slotplan v0.11.0 => ./key/slotplan
 
-replace github.com/truvity/atoom/key/software v0.10.0 => ./key/software
+replace github.com/truvity/atoom/key/software v0.11.0 => ./key/software
 
-replace github.com/truvity/atoom/key/usbccid v0.10.0 => ./key/usbccid
+replace github.com/truvity/atoom/key/usbccid v0.11.0 => ./key/usbccid
 
-replace github.com/truvity/atoom/key/yubikeypiv v0.10.0 => ./key/yubikeypiv
+replace github.com/truvity/atoom/key/yubikeypiv v0.11.0 => ./key/yubikeypiv
 
-replace github.com/truvity/atoom/policy v0.10.0 => ./policy
+replace github.com/truvity/atoom/policy v0.11.0 => ./policy
 
-replace github.com/truvity/atoom/socket v0.10.0 => ./socket
+replace github.com/truvity/atoom/socket v0.11.0 => ./socket
 
-replace github.com/truvity/atoom/source v0.10.0 => ./source
+replace github.com/truvity/atoom/source v0.11.0 => ./source
 
-replace github.com/truvity/atoom/source/appconfig v0.10.0 => ./source/appconfig
+replace github.com/truvity/atoom/source/appconfig v0.11.0 => ./source/appconfig
 
-replace github.com/truvity/atoom/source/file v0.10.0 => ./source/file
+replace github.com/truvity/atoom/source/file v0.11.0 => ./source/file
 
-replace github.com/truvity/atoom/store v0.10.0 => ./store
+replace github.com/truvity/atoom/store v0.11.0 => ./store
 
-replace github.com/truvity/atoom/store/dynamodb v0.10.0 => ./store/dynamodb
+replace github.com/truvity/atoom/store/dynamodb v0.11.0 => ./store/dynamodb
 
-replace github.com/truvity/atoom/transport v0.10.0 => ./transport
+replace github.com/truvity/atoom/transport v0.11.0 => ./transport
 
-replace github.com/truvity/atoom/transport/nats v0.10.0 => ./transport/nats
+replace github.com/truvity/atoom/transport/nats v0.11.0 => ./transport/nats
 
-replace github.com/truvity/atoom/transport/sqs v0.10.0 => ./transport/sqs
+replace github.com/truvity/atoom/transport/sqs v0.11.0 => ./transport/sqs
