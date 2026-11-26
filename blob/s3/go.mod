@@ -10,9 +10,9 @@ require (
 	github.com/aws/aws-sdk-go-v2/config v1.33.20
 	github.com/aws/aws-sdk-go-v2/service/s3 v1.116.0
 	github.com/aws/smithy-go v1.28.9
-	github.com/truvity/atoom/blob v0.9.0
-	github.com/truvity/atoom/common v0.9.0
-	github.com/truvity/atoom/socket v0.9.0
+	github.com/truvity/atoom/blob v0.10.0
+	github.com/truvity/atoom/common v0.10.0
+	github.com/truvity/atoom/socket v0.10.0
 )
 
 require (

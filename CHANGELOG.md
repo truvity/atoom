@@ -5,6 +5,24 @@ libraries changed. `just release-prepare X.Y.Z` writes the section.
 
 <!-- release-prepare: new sections go below this line -->
 
+## 0.10.0 - 2026-11-26
+
+One version for the whole repository: every library is tagged 0.10.0, changed or not.
+
+Libraries that changed since v0.9.0:
+- `blob/s3`
+- `key`
+- `key/awskms`
+- `key/software`
+- `key/yubikeypiv`
+- `socket`
+- `source/appconfig`
+- `source/file`
+- `store/dynamodb`
+- `transport/nats`
+- `transport/sqs`
+
+
 ## Unreleased
 
 ### Added
