@@ -279,14 +279,14 @@ func TestQADrainTimeIsBounded(t *testing.T) {
 type closeAware struct{ *fakeDevice }
 
 func (p *closeAware) BulkOut(ep uint8, d []byte, to time.Duration) (int, error) {
-	if p.fakeDevice.closed {
+	if p.closed {
 		return 0, usbccid.ErrClosed
 	}
 	return p.fakeDevice.BulkOut(ep, d, to)
 }
 
 func (p *closeAware) BulkIn(ep uint8, b []byte, to time.Duration) (int, error) {
-	if p.fakeDevice.closed {
+	if p.closed {
 		return 0, usbccid.ErrClosed
 	}
 	return p.fakeDevice.BulkIn(ep, b, to)
@@ -397,7 +397,7 @@ func TestQABudgetGoneBetweenTheHeaderAndTheBody(t *testing.T) {
 					t.Errorf("err = %v, want the cause %v", err, want)
 				}
 			}
-			if c.cause[len(c.cause)-1] == ErrBudgetExhausted && f.nIn-base != 1 {
+			if len(c.cause) == 1 && f.nIn-base != 1 {
 				t.Errorf("%d reads: the body was read after the budget was gone", f.nIn-base)
 			}
 			assertNoLeak(t, "budget", err, qaResp, qaCmd)
