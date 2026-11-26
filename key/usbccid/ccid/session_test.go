@@ -579,7 +579,6 @@ func TestDrainReadIsCutToWhatIsLeftOfMaxDrainTime(t *testing.T) {
 // A second Open on a Port that a Reader holds is refused with ErrAlreadyClaimed, and leaves the Port and its Reader as they were.
 func TestSecondOpenOnTheSamePortLeavesTheFirstReaderAlone(t *testing.T) {
 	f := newFake(descSpec{}, cardHandler(echoSW))
-	f.refuseSecondClaim = true
 	r1, err := Open(f, Options{})
 	if err != nil {
 		t.Fatal(err)
