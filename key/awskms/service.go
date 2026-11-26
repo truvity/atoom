@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"errors"
-	"log/slog"
 	"net"
 
 	"connectrpc.com/connect"
@@ -29,7 +28,7 @@ const (
 
 // refuse logs a refusal, with the method and the reason and no value, and returns it.
 func (s *Service) refuse(ctx context.Context, method string, code connect.Code, reason, field string) *connect.Error {
-	slog.Warn("refused", "method", method, "code", code.String(), "reason", reason, "field", field, "caller", s.callerOf(ctx))
+	s.log().Warn("refused", "method", method, "code", code.String(), "reason", reason, "field", field, "caller", s.callerOf(ctx))
 	return refusal.New(code, reason, field)
 }
 
@@ -169,7 +168,7 @@ func (s *Service) failed(ctx context.Context, method string, err error) *connect
 	case errors.Is(err, errPeer):
 		return s.refuse(ctx, method, connect.CodeInvalidArgument, reasonPeer, "peer_public")
 	case errors.As(err, &state):
-		slog.Error("the KMS key cannot be used", "method", method, "state", string(state.state))
+		s.log().Error("the KMS key cannot be used", "method", method, "state", string(state.state))
 		return refusal.New(connect.CodeFailedPrecondition, reasonStore, "")
 	case errors.Is(err, context.Canceled):
 		return refusal.New(connect.CodeCanceled, "canceled", "")
@@ -185,7 +184,7 @@ func (s *Service) failed(ctx context.Context, method string, err error) *connect
 	case errors.As(err, &netErr):
 		code = connect.CodeUnavailable
 	}
-	slog.Error("KMS failed", "method", method, "code", code.String(), "error", err.Error())
+	s.log().Error("KMS failed", "method", method, "code", code.String(), "error", err.Error())
 	return refusal.New(code, reasonStore, "")
 }
 
