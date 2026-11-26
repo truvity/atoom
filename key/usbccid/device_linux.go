@@ -109,7 +109,11 @@ func open(path string, usb bool) (*Device, error) {
 		return nil, &os.PathError{Op: "read descriptors", Path: path, Err: err}
 	}
 	desc := buf[:n]
-	lay, _ := parseLayout(desc) // what a malformed descriptor leaves is held to: a claim of anything else is refused
+	lay, err := parseLayout(desc)
+	if err != nil {
+		_ = unix.Close(fd)
+		return nil, fmt.Errorf("%w: %s: %w", ErrBadDescriptors, path, err)
+	}
 	return &Device{fd: fd, claimed: map[int]bool{}, desc: desc, lay: lay, ioctl: sysIoctl}, nil
 }
 
@@ -148,8 +152,14 @@ func openChecked(path string, check func(*unix.Stat_t) error, flags int) (int, e
 	if err := check(&st); err != nil {
 		return -1, err
 	}
-	fd, err := unix.Open("/proc/self/fd/"+strconv.Itoa(pfd), flags|unix.O_CLOEXEC|unix.O_NOCTTY|unix.O_NONBLOCK, 0)
+	proc := "/proc/self/fd/" + strconv.Itoa(pfd)
+	fd, err := unix.Open(proc, flags|unix.O_CLOEXEC|unix.O_NOCTTY|unix.O_NONBLOCK, 0)
 	if err != nil {
+		if errors.Is(err, unix.ENOENT) || errors.Is(err, unix.ENOTDIR) {
+			// The node exists (it was just looked at), so this is /proc: not mounted, or hidden. The errno is not wrapped, so that the
+			// error does not read as a node that does not exist.
+			return -1, fmt.Errorf("%w: %s cannot be reopened through %s: %v", ErrNoProcSelfFd, path, proc, err) //nolint:errorlint // see above
+		}
 		return -1, &os.PathError{Op: "open", Path: path, Err: err}
 	}
 	var st2 unix.Stat_t
@@ -194,11 +204,16 @@ func (d *Device) verify(c Candidate) error {
 	if d.lay.vendor != c.VendorID || d.lay.product != c.ProductID {
 		return wrong(fmt.Sprintf("the ids are %04x:%04x, not %04x:%04x", d.lay.vendor, d.lay.product, c.VendorID, c.ProductID))
 	}
+	if d.lay.several() {
+		return fmt.Errorf("%w (node %s, port %s)", ErrSeveralConfigurations, c.NodePath, c.PortPath)
+	}
 	in := d.lay.find(c.Interface)
 	if in == nil || in.class != ClassCCID {
 		return wrong(fmt.Sprintf("it has no CCID interface %d", c.Interface))
 	}
-	if c.BulkOut&0x80 != 0 || c.BulkIn&0x80 == 0 || !in.has(c.BulkOut) || !in.has(c.BulkIn) {
+	out, err1 := d.lay.bulkOwner(c.BulkOut)
+	inn, err2 := d.lay.bulkOwner(c.BulkIn)
+	if c.BulkOut&0x80 != 0 || c.BulkIn&0x80 == 0 || err1 != nil || err2 != nil || out != in || inn != in {
 		return wrong(fmt.Sprintf("interface %d has not the bulk endpoints 0x%02x and 0x%02x", c.Interface, c.BulkOut, c.BulkIn))
 	}
 	return nil
@@ -259,7 +274,9 @@ func (d *Device) fail(what string, e unix.Errno) error {
 }
 
 // Claim takes interface n with USBDEVFS_CLAIMINTERFACE, for an interface that the descriptors hold and whose class is 0x0B (CCID);
-// any other number is refused before the kernel is asked, with an error that wraps ErrNoSuchInterface. A busy interface returns an
+// any other number (a number outside 0 to 255 included, which no longer reaches the kernel to be refused as an invalid argument) is
+// refused before the kernel is asked, with an error that wraps ErrNoSuchInterface. A device that declares several configurations is
+// refused with ErrSeveralConfigurations. A busy interface returns an
 // error that wraps ErrBusy (and EBUSY); the holder may also be another handle of the same process. Nothing is detached, the device
 // is not reset, and Claim never retries.
 func (d *Device) Claim(n int) error {
@@ -267,6 +284,9 @@ func (d *Device) Claim(n int) error {
 	defer d.mu.Unlock()
 	if err := d.state(); err != nil {
 		return err
+	}
+	if d.lay.several() {
+		return fmt.Errorf("usbccid: claim interface %d: %w", n, ErrSeveralConfigurations)
 	}
 	in := (*ifaceDesc)(nil)
 	if n >= 0 && n <= maxInterface {
@@ -329,26 +349,24 @@ func ms(t time.Duration) uint32 {
 	return uint32((t + time.Millisecond - 1) / time.Millisecond)
 }
 
-// owns reports how ep stands to the handle: ok when it is a bulk endpoint of an interface this handle has claimed, and otherwise
-// the error that says why not. d.mu is held.
+// owns reports whether ep may be used for a bulk transfer: it must be a bulk endpoint of exactly one interface of the descriptors
+// (an address that two interfaces list is refused, because usbfs would pick an interface by itself and claim it), and that interface
+// must be claimed by this handle. Otherwise it returns the error that says why. d.mu is held.
 func (d *Device) owns(ep uint8) error {
-	other := false
-	for i := range d.lay.ifaces {
-		in := &d.lay.ifaces[i]
-		if !in.has(ep) {
-			continue
-		}
-		if d.claimed[in.number] {
-			return nil
-		}
-		if in.class == ClassCCID {
-			other = true
-		}
+	if d.lay.several() {
+		return ErrSeveralConfigurations
 	}
-	if other {
+	in, err := d.lay.bulkOwner(ep)
+	if err != nil {
+		return err
+	}
+	if d.claimed[in.number] {
+		return nil
+	}
+	if in.class == ClassCCID {
 		return ErrNotClaimed
 	}
-	return ErrBadEndpoint
+	return ErrBadEndpoint // an interface that is never claimed
 }
 
 func (d *Device) bulk(ep uint8, p []byte, timeout time.Duration, in bool) (int, error) {

@@ -42,7 +42,8 @@ var ErrNoSuchInterface = errors.New("usbccid: the device has no CCID interface w
 var ErrNotClaimed = errors.New("usbccid: the endpoint belongs to an interface that is not claimed by this handle")
 
 // ErrBadEndpoint is returned by a bulk call whose endpoint is not a bulk endpoint of an interface this handle has claimed, or whose
-// direction does not fit the call (BulkOut takes an OUT address, BulkIn an IN address).
+// direction does not fit the call (BulkOut takes an OUT address, BulkIn an IN address). An address that is listed by more than one
+// interface (or twice by one) is refused too: usbfs would pick an interface by itself and claim it.
 var ErrBadEndpoint = errors.New("usbccid: the endpoint is not a bulk endpoint of a claimed interface, or its direction does not fit the call")
 
 // ErrBadLength is returned by a bulk call with a length the layer refuses: more than 64 KiB, or an empty BulkIn.
@@ -55,3 +56,17 @@ var ErrNotUSBNode = errors.New("usbccid: not a USB device node")
 // ErrWrongDevice is returned by Candidate.Open when the device at the node is not the one Discover found: the device number was
 // reused between the two (unplug, then another device plugged). The descriptor is closed.
 var ErrWrongDevice = errors.New("usbccid: the device at this node is not the one that was found")
+
+// ErrSeveralConfigurations is returned by Claim and by every bulk call on a device whose device descriptor declares other than one
+// configuration. The kernel knows only the active configuration, and usbfs does not say which one that is, so this layer cannot know
+// which interfaces and endpoints the kernel would claim; it does not choose between configurations and never selects one.
+var ErrSeveralConfigurations = errors.New("usbccid: the device declares several configurations, and this layer does not choose between them")
+
+// ErrBadDescriptors is returned by Open when the node gives no descriptors, or they do not parse (no device descriptor, a malformed
+// configuration). A device whose layout is not known is never used.
+var ErrBadDescriptors = errors.New("usbccid: the descriptors of the device are missing or malformed")
+
+// ErrNoProcSelfFd is returned by Open when the node cannot be reopened through /proc/self/fd, which it needs (it opens the node first
+// with O_PATH, checks what it is, and reopens that same inode). The node exists; /proc is not mounted or is hidden. It is not an
+// error that wraps os.ErrNotExist.
+var ErrNoProcSelfFd = errors.New("usbccid: /proc/self/fd is not available")
