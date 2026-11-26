@@ -22,9 +22,6 @@ Libraries that changed since v0.9.0:
 - `transport/nats`
 - `transport/sqs`
 
-
-## Unreleased
-
 ### Added
 
 - **`key/signer`**, in the module `key`: a `crypto.Signer` over a client of the key port, for code that takes a `crypto.Signer` and a key that stays in the store. It signs a digest for `ES256`, `ES384` and `RS256` and checks each answer against the key it read at the start ([the key port](key/docs/key-port.md#a-cryptosigner)).
