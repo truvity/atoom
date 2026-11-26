@@ -9,6 +9,8 @@ import (
 	"go/token"
 	"go/types"
 	"os"
+	"os/exec"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -202,9 +204,10 @@ func TestQAOtherSystemsOfferTheSameEntryPointsAsLinux(t *testing.T) {
 	}
 }
 
-// Every entry point of device_other.go is a one-line return of ErrNotSupported (with zero values before it), and nothing else:
-// no state, no system call, nothing that could differ between systems.
-func TestQAOtherSystemsEntryPointsOnlyReturnErrNotSupported(t *testing.T) {
+// Every entry point of device_other.go is a one-line return of ErrNotSupported (with zero values before it), and nothing else: no
+// state, no system call, nothing that could differ between systems. The exceptions are Release and Close of a Device, which are a
+// one-line `return nil` (a Device of these systems holds nothing).
+func TestQAOtherSystemsEntryPointsReturnErrNotSupportedExceptReleaseAndClose(t *testing.T) {
 	fset := token.NewFileSet()
 	f, err := parser.ParseFile(fset, "device_other.go", nil, parser.ParseComments)
 	if err != nil {
@@ -228,6 +231,12 @@ func TestQAOtherSystemsEntryPointsOnlyReturnErrNotSupported(t *testing.T) {
 		ret, ok := fd.Body.List[0].(*ast.ReturnStmt)
 		if !ok || len(ret.Results) == 0 {
 			t.Errorf("%s: not a return", fd.Name.Name)
+			continue
+		}
+		if fd.Recv != nil && (fd.Name.Name == "Release" || fd.Name.Name == "Close") {
+			if id, ok := ret.Results[0].(*ast.Ident); !ok || id.Name != "nil" || len(ret.Results) != 1 {
+				t.Errorf("%s: returns %s, want nil", fd.Name.Name, types.ExprString(ret.Results[0]))
+			}
 			continue
 		}
 		last, ok := ret.Results[len(ret.Results)-1].(*ast.Ident)
@@ -278,5 +287,39 @@ func TestQANotSupportedTestNamesEveryEntryPoint(t *testing.T) {
 		if !used[name] {
 			t.Errorf("notsupported_test.go never mentions %s", name)
 		}
+	}
+}
+
+// The stub is run here. notsupported_test.go is built only off linux/amd64 and linux/arm64, so no Linux run of the module executes it;
+// this test copies the files of the stub into a scratch module, changes their constraints to `linux` (the stub and its test are then
+// the only files there), and runs `go test` on them. It shows the behaviour of the stub on this system; what only a macOS run can show
+// is that the same files build and pass with GOOS=darwin (the compile checks of the test binary cover the build).
+func TestQAStubRunsOnThisSystem(t *testing.T) {
+	goTool, err := exec.LookPath("go")
+	if err != nil {
+		t.Skip("no go tool on the path")
+	}
+	dir := t.TempDir()
+	const stubTag = "//go:build !(linux && !android && (amd64 || arm64))\n"
+	for _, name := range []string{"go.mod", "candidate.go", "device_other.go", "doc.go", "errors.go", "port.go", "notsupported_test.go"} {
+		b, err := os.ReadFile(name) //nolint:gosec // a file of this package
+		if err != nil {
+			t.Fatal(err)
+		}
+		if strings.HasPrefix(string(b), stubTag) {
+			b = append([]byte("//go:build linux\n"), b[len(stubTag):]...)
+		} else if name == "device_other.go" || name == "notsupported_test.go" {
+			t.Fatalf("%s does not start with the constraint of the stub", name)
+		}
+		if err := os.WriteFile(filepath.Join(dir, name), b, 0o600); err != nil { //nolint:gosec // a fixed list of names of this package, under t.TempDir()
+			t.Fatal(err)
+		}
+	}
+	cmd := exec.Command(goTool, "test", "-count=1", "-v", ".") //nolint:gosec // the go tool of this machine, on files this test wrote
+	cmd.Dir = dir
+	cmd.Env = append(os.Environ(), "GOWORK=off", "GOFLAGS=", "GOPROXY=off")
+	out, err := cmd.CombinedOutput()
+	if err != nil || !strings.Contains(string(out), "--- PASS: TestNotSupported") {
+		t.Errorf("the stub test does not pass here: %v\n%s", err, out)
 	}
 }

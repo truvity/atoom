@@ -397,7 +397,7 @@ func TestFirstFatalErrorStays(t *testing.T) {
 	}
 }
 
-// A timeout, a stall, an overflow and a busy interface leave the device usable; a timeout is ErrTimeout.
+// A timeout, an overflow, an interrupt and a busy interface leave the handle callable; a timeout is ErrTimeout.
 func TestOnlyFatalErrorsAreSticky(t *testing.T) {
 	next := unix.Errno(0)
 	d := scripted(t, nil, func(req uintptr, _ unsafe.Pointer) (uintptr, unix.Errno) {
@@ -409,7 +409,8 @@ func TestOnlyFatalErrorsAreSticky(t *testing.T) {
 	if err := d.Claim(qaCCID); err != nil {
 		t.Fatal(err)
 	}
-	for _, e := range []unix.Errno{unix.ETIMEDOUT, unix.EPIPE, unix.EBUSY, unix.EOVERFLOW, unix.EINTR} {
+	// EPIPE is not here: a stall latches ErrStalled (TestQAStallLatchesForTheHandle).
+	for _, e := range []unix.Errno{unix.ETIMEDOUT, unix.EBUSY, unix.EOVERFLOW, unix.EINTR, unix.EAGAIN} {
 		next = e
 		_, err := d.BulkIn(qaIn, make([]byte, 8), time.Millisecond)
 		if !errors.Is(err, e) || errors.Is(err, ErrGone) {
