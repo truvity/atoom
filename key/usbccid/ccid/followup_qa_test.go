@@ -294,7 +294,6 @@ func (p *closeAware) BulkIn(ep uint8, b []byte, to time.Duration) (int, error) {
 
 func TestQASecondOpenOnAHeldPort(t *testing.T) {
 	f := newFake(descSpec{}, cardHandler(echoSW))
-	f.refuseSecondClaim = true // as a Device
 	r1, err := Open(f, Options{})
 	if err != nil {
 		t.Fatal(err)
@@ -337,7 +336,6 @@ func TestQASecondOpenOnAHeldPort(t *testing.T) {
 // it over twice.
 func TestQASecondOpenThatFailsBeforeTheClaimClosesTheSharedPort(t *testing.T) {
 	f := newFake(descSpec{}, cardHandler(echoSW))
-	f.refuseSecondClaim = true
 	p := &closeAware{f}
 	r1, err := Open(p, Options{})
 	if err != nil {
