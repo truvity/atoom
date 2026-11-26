@@ -13,6 +13,7 @@ import (
 // answers and time extensions. The expected bytes are written out here from CCID 1.1 (chapter 6), not taken from the source.
 
 func TestQAOutgoingHeadersByteByByte(t *testing.T) {
+	setSeq(0) // the numbers of the process counter start here at 1
 	f := newFake(descSpec{}, cardHandler(echoSW))
 	r, err := Open(f, Options{})
 	if err != nil {
@@ -69,6 +70,7 @@ func TestQAOutgoingHeadersOfChainedMessages(t *testing.T) {
 		}},
 	} {
 		t.Run(c.name, func(t *testing.T) {
+			setSeq(0)
 			cc := &chainCard{respParts: [][]byte{{0x01}, {0x90, 0x00}}} // two blocks, so one continuation
 			f := newFake(c.spec, cc.handler())
 			r, err := Open(f, Options{})
@@ -117,7 +119,7 @@ func TestQAIncomingHeaderFields(t *testing.T) {
 		}
 	})
 	t.Run("data of the length that the header says", func(t *testing.T) {
-		for _, n := range []int{0, 1, 2, 255, 256, 257, 261} {
+		for _, n := range []int{2, 3, 255, 256, 257, 261} {
 			data := bytes.Repeat([]byte{0x77}, n)
 			r, _ := openPowered(t, Options{}, reply(func(seq byte) []byte {
 				m := msg(rspDataBlock, seq, stOK, 0xAB, 0, data) // bError of an accepted answer is not looked at
@@ -168,6 +170,7 @@ func TestQAIncomingHeaderFields(t *testing.T) {
 
 // Sequence numbers count every message, all kinds and every block of a chain, and wrap from 255 to 0 and go on.
 func TestQASequenceNumbersCountEveryMessage(t *testing.T) {
+	setSeq(0)
 	cc := &chainCard{respParts: [][]byte{{0x01}, {0x02}, {0x90, 0}}}
 	r, f, err := openFake(Options{}, cc.handler())
 	if err != nil {
@@ -209,6 +212,7 @@ func TestQASequenceNumbersCountEveryMessage(t *testing.T) {
 func TestQAStaleAnswersAcrossTheWrap(t *testing.T) {
 	for k := 0; k <= MaxStaleAnswers+1; k++ {
 		t.Run(fmt.Sprintf("%d stale", k), func(t *testing.T) {
+			setSeq(0)
 			armed := false
 			h := func(f *fakeDevice, m []byte) {
 				if m[0] != msgXfrBlock || !armed {

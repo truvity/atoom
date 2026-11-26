@@ -151,14 +151,14 @@ func TestQAChainParameterValues(t *testing.T) {
 		{"begin, middle, then 0xFF", []byte{begin, middle, 0xFF}, false, ""},
 		{"begin, then whole", []byte{begin, whole}, false, "a block that begins and ends in itself inside a chain"},
 		{"begin, then begin, end", []byte{begin, begin, end}, false, "a second begin inside a chain"},
-		{"end as the first block", []byte{end}, false, "a chain that begins with its end"},
-		{"middle as the first block, then end", []byte{middle, end}, false, "a chain that begins with a middle block"},
-		{"middle, middle, whole", []byte{middle, middle, whole}, false, "a chain that begins with a middle block"},
+		{"end as the first block", []byte{end}, false, ""},
+		{"middle as the first block, then end", []byte{middle, end}, false, ""},
+		{"middle, middle, whole", []byte{middle, middle, whole}, false, ""},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			if c.bug != "" {
-				knownBug(t, "reader.go:430 (the loop of the response chain) takes "+c.bug+" for a response; doc.go and errors.go say a chain parameter out of order ends the session")
+				knownBug(t, "reader.go (the loop of the response chain) takes "+c.bug+" for a response; doc.go and errors.go say a chain parameter out of order ends the session")
 			}
 			i := 0
 			var want []byte

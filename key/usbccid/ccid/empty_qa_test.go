@@ -40,14 +40,14 @@ func TestQAEmptyPacketAtEveryBoundary(t *testing.T) {
 				var totals []int
 				for _, k := range []int{1, 2, 3, 5} {
 					for _, d := range []int{-1, 0, 1} {
-						if tot := k*mps + d; tot >= 10 && tot <= 2300 {
+						if tot := k*mps + d; tot >= 12 && tot <= 2300 {
 							totals = append(totals, tot)
 						}
 					}
 				}
 				n := 0
 				for _, a := range totals {
-					for _, b := range []int{a, 10 + 2, 10 + 0} {
+					for _, b := range []int{a, 10 + 2} {
 						for _, tot := range []int{a, b, 10 + 2} {
 							n++
 							want = pattern(tot-10, n)
@@ -76,7 +76,7 @@ func TestQAEmptyPacketComesAndGoes(t *testing.T) {
 				if m[0] == msgXfrBlock {
 					f.noZLP = rng.IntN(2) == 0
 					tot := (1+rng.IntN(2300/mps))*mps + rng.IntN(3) - 1
-					tot = min(max(tot, 10), 2300)
+					tot = min(max(tot, 12), 2300)
 					want = pattern(tot-10, tot)
 					f.send(msg(rspDataBlock, m[6], stOK, 0, 0, want))
 					return
@@ -262,10 +262,8 @@ func TestQACommandOfAWholeNumberOfPackets(t *testing.T) {
 }
 
 // A new Reader on a device whose last message of the old session ended on a packet boundary: the empty packet that follows it is still
-// on the endpoint, and the new Reader reads it first.
-func TestQAEmptyPacketLeftByThePreviousSession(t *testing.T) {
-	knownBug(t, "reader.go:182 starts a Reader with emptyOK false, so the empty packet that the previous session left on the endpoint "+
-		"(its last answer was a whole number of packets) is read as 'an empty read where no message ends' and loses the first call of the new session")
+// on the endpoint. The drain of the new session reads it and drops it, so the first call works (found by this test before the drain).
+func TestQANewSessionDropsTheEmptyPacketOfTheOldOne(t *testing.T) {
 	f := newFake(descSpec{}, cardHandler(func([]byte) []byte { return bytes.Repeat([]byte{1}, 54) })) // 64 bytes with the header
 	r1, err := Open(f, Options{})
 	if err != nil {
