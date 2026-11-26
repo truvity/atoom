@@ -292,6 +292,7 @@ func TestQANewSessionDropsTheEmptyPacketOfTheOldOne(t *testing.T) {
 	if err := r1.Close(); err != nil {
 		t.Fatal(err)
 	}
+	f.claimed = false // a new Device of the same reader: the first one let go of its claim
 	r2, err := Open(f, Options{})
 	if err != nil {
 		t.Fatal(err)

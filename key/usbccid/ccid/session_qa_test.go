@@ -58,8 +58,8 @@ func TestQADrainDropsEveryNumberOfTheFirstThreeMessages(t *testing.T) {
 	}
 }
 
-// Messages and empty packets of an earlier session: the pipe is quiet after the last. Seven items fit in the eight reads of the drain
-// (the eighth read is the one that finds the pipe quiet); eight items do not.
+// Messages and empty packets of an earlier session: the pipe is quiet after two reads in a row that time out. Six items and those two
+// reads are the eight reads of the drain; seven items do not fit, and the session is lost.
 func TestQADrainBoundsTheNumberOfItems(t *testing.T) {
 	for n := 0; n <= MaxDrainReads+2; n++ {
 		t.Run(fmt.Sprint(n), func(t *testing.T) {
@@ -77,7 +77,7 @@ func TestQADrainBoundsTheNumberOfItems(t *testing.T) {
 				t.Fatal(err)
 			}
 			st, err := r.SlotStatus(testBudget)
-			if n < MaxDrainReads {
+			if n+2 <= MaxDrainReads {
 				if err != nil || st != SlotActive || len(f.in) != 0 {
 					t.Fatalf("%d items: %v %v, %d left", n, st, err, len(f.in))
 				}
@@ -134,8 +134,8 @@ func TestQADrainOrderAndOpenAndClose(t *testing.T) {
 	if _, err := r.PowerOn(testBudget); err != nil {
 		t.Fatal(err)
 	}
-	// Three reads for the drain (two messages, then the quiet one), then write and read for each of the two messages of PowerOn.
-	if got := fmt.Sprint(f.calls[2:]); got != "[in in in out in out in]" {
+	// Four reads for the drain (two messages, then two quiet windows), then write and read for each of the two messages of PowerOn.
+	if got := fmt.Sprint(f.calls[2:]); got != "[in in in in out in out in]" {
 		t.Errorf("calls of the first call: %s", got)
 	}
 	n := f.mark()
@@ -184,7 +184,8 @@ func TestQADrainRunsBeforeWhicheverCallIsFirst(t *testing.T) {
 			if err := op.call(r, testBudget); err != nil {
 				t.Fatal(err)
 			}
-			if f.calls[2] != "in" || f.calls[3] != "in" || f.calls[4] != "in" || f.calls[5] != "out" {
+			// Two stale messages and two quiet windows, all reads, before the first write.
+			if f.calls[2] != "in" || f.calls[3] != "in" || f.calls[4] != "in" || f.calls[5] != "in" || f.calls[6] != "out" {
 				t.Errorf("calls: %v", f.calls[2:])
 			}
 		})
@@ -296,6 +297,7 @@ func TestQAEndToEndLostSessionThenLateAnswer(t *testing.T) {
 	if err := r1.Close(); err != nil {
 		t.Fatal(err)
 	}
+	f.claimed = false // the second Reader stands for a new Device of the same reader: the first one let go of its claim
 	// The person touches the key late: the old answer, with the number of the old command, arrives.
 	silent = false
 	f.send(msg(rspDataBlock, oldSeq, stOK, 0, 0, []byte{0x90, 0x00}))
@@ -870,12 +872,12 @@ func TestQADrainNeedsAWholeReadInTheBudget(t *testing.T) {
 				if r.drained {
 					t.Error("the drain was marked done after a read that was not made")
 				}
-				// The drain is still pending: it happens before the first write of the next call, once.
+				// The drain is still pending: it happens before the first write of the next call, once (two quiet windows).
 				if _, err := r.SlotStatus(testBudget); err != nil {
 					t.Fatalf("the next call: %v", err)
 				}
-				if got := fmt.Sprint(f.callsAfter(mark)); got != "[in out in]" {
-					t.Errorf("calls of the next call: %s, want one drain read, then write and read", got)
+				if got := fmt.Sprint(f.callsAfter(mark)); got != "[in in out in]" {
+					t.Errorf("calls of the next call: %s, want two drain reads, then write and read", got)
 				}
 			})
 		}
