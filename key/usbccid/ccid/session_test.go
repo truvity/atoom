@@ -142,11 +142,17 @@ func TestDrainTimeoutIsCutToTheTransferTimeoutAndASmallBudgetIsRefused(t *testin
 	}
 	f = newFake(descSpec{}, cardHandler(echoSW))
 	r, _ = Open(f, Options{})
-	// A budget that leaves no room for one whole drain read is no proof of a quiet pipe: the session is lost, nothing is written.
+	// A budget that leaves no room for one whole drain read is no proof of a quiet pipe: the call is refused before its first read,
+	// nothing is read or written, the pipe is not marked quiet, and the session is kept.
 	_, err := r.SlotStatus(3 * time.Millisecond)
-	lostWith(t, err, ErrBudgetExhausted)
+	if !errors.Is(err, ErrBudgetExhausted) || errors.Is(err, ErrSessionLost) {
+		t.Errorf("err = %v, want ErrBudgetExhausted and not ErrSessionLost", err)
+	}
 	if f.nIn != 0 || f.nOut != 0 || r.drained {
 		t.Errorf("reads %d, writes %d, drained %v", f.nIn, f.nOut, r.drained)
+	}
+	if _, err := r.SlotStatus(testBudget); err != nil || !r.drained {
+		t.Errorf("the next call: %v, drained %v", err, r.drained)
 	}
 }
 

@@ -123,8 +123,10 @@ func parseDescriptors(b []byte, cand *usbccid.Candidate) (*layout, error) {
 		return nil, fmt.Errorf("%w: CCID interface %d has %d endpoint descriptors and bNumEndpoints says %d", usbccid.ErrBadDescriptors, c.number, c.endpointsSeen, c.numEndpoints)
 	}
 	for _, e := range []endpointInfo{c.bulkOut[0], c.bulkIn[0]} {
-		if e.mps < 8 || e.mps > 1024 {
-			return nil, fmt.Errorf("%w: a bulk endpoint of CCID interface %d has a packet size of %d, outside 8 to 1024", usbccid.ErrBadDescriptors, c.number, e.mps)
+		switch e.mps { // the whole 16-bit field, so a value with an upper bit set is refused
+		case 8, 16, 32, 64, 512, 1024:
+		default:
+			return nil, fmt.Errorf("%w: a bulk endpoint of CCID interface %d has a packet size of %d, and a bulk endpoint takes 8, 16, 32, 64, 512 or 1024", usbccid.ErrBadDescriptors, c.number, e.mps)
 		}
 	}
 	if c.subclass != 0 || c.protocol != 0 {
@@ -223,7 +225,7 @@ func walk(b []byte) (ifs []ifaceInfo, vid, pid uint16, err error) {
 				continue
 			}
 			cur.endpointsSeen++
-			e := endpointInfo{addr: d[2], mps: int(le16(d[4:])) & 0x7FF}
+			e := endpointInfo{addr: d[2], mps: int(le16(d[4:]))}
 			in := d[2]&0x80 != 0
 			switch {
 			case d[3]&3 == 2 && !in:

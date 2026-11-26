@@ -233,7 +233,7 @@ func TestParseRefusals(t *testing.T) {
 		{"two bulk in", descSpec{twoBulkIn: true}.build(), usbccid.ErrBadDescriptors, "2 bulk IN"},
 		{"packet size of 0", patchBulkInPacket(descSpec{}.build(), 0), usbccid.ErrBadDescriptors, "packet size of 0"},
 		{"packet size of 4", patchBulkInPacket(descSpec{}.build(), 4), usbccid.ErrBadDescriptors, "packet size of 4"},
-		{"packet size of 2048", patchBulkInPacket(descSpec{}.build(), 2048), usbccid.ErrBadDescriptors, "packet size of 0"}, // bits 11 and up are not the size
+		{"packet size of 2048", patchBulkInPacket(descSpec{}.build(), 2048), usbccid.ErrBadDescriptors, "packet size of 2048"}, // the whole field is judged
 		{"a reserved bit in an endpoint address", descSpec{bulkIn: 0x92}.build(), usbccid.ErrBadDescriptors, "reserved bits"},
 	}
 	for _, c := range cases {
@@ -395,6 +395,21 @@ func TestRefusalTextsAreShortAndNameTheRule(t *testing.T) {
 		_, err := parseDescriptors(s.build(), nil)
 		if err == nil || len(err.Error()) > 300 {
 			t.Errorf("%+v: %v", s, err)
+		}
+	}
+}
+
+// A bulk endpoint takes only the packet sizes a bulk endpoint can have, judged on the whole 16-bit field.
+func TestBulkPacketSizes(t *testing.T) {
+	for _, size := range []uint16{8, 16, 32, 64, 512, 1024} {
+		if _, err := parseDescriptors(patchBulkInPacket(descSpec{}.build(), size), nil); err != nil {
+			t.Errorf("packet size %d: %v", size, err)
+		}
+	}
+	for _, size := range []uint16{0, 7, 9, 24, 100, 128, 256, 1000, 1023, 1025, 0x0840, 0x1200, 0x8040} {
+		_, err := parseDescriptors(patchBulkInPacket(descSpec{}.build(), size), nil)
+		if !errors.Is(err, usbccid.ErrBadDescriptors) {
+			t.Errorf("packet size %d: err = %v", size, err)
 		}
 	}
 }

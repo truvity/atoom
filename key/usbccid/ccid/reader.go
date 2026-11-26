@@ -163,6 +163,9 @@ type Reader struct {
 	// emptyOK is true when the last message read filled a whole number of packets: the reader may have sent the empty packet that
 	// ends it, which the next read then returns as zero bytes. That one empty read is consumed, and is no answer.
 	emptyOK bool
+	// touched is true once the current call has made a call on the Port. A call that fails on its budget before that has sent and
+	// read nothing, and leaves the session as it was. begin clears it.
+	touched bool
 }
 
 // Open takes ownership of the Port p, reads its descriptors, checks that the device is of the simple kind this layer accepts and
@@ -289,9 +292,13 @@ func (r *Reader) PowerOn(budget time.Duration) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
+	was := r.powered
 	r.powered = false
 	st, err := r.slotStatus(dl)
 	if err != nil {
+		if !r.touched { // refused on the budget before any Port call: nothing changed
+			r.powered = was
+		}
 		return nil, err
 	}
 	if st == SlotEmpty {
@@ -329,9 +336,13 @@ func (r *Reader) PowerOff(budget time.Duration) error {
 	if err != nil {
 		return err
 	}
+	was := r.powered
 	r.powered = false
 	a, ce, err := r.exchange("IccPowerOff", msgIccPowerOff, 0, nil, rspSlotStatus, dl)
 	if err != nil {
+		if !r.touched { // refused on the budget before any Port call: nothing changed
+			r.powered = was
+		}
 		return err
 	}
 	if ce != nil {
@@ -349,7 +360,8 @@ func (r *Reader) PowerOff(budget time.Duration) error {
 // a response that comes in blocks is collected.
 //
 // budget is the total time of the exchange, including every time-extension message the card sends while it waits for a person; it is
-// at most MaxBudget. When it runs out the session is lost (ErrSessionLost, ErrBudgetExhausted). A transfer cannot be cancelled once
+// at most MaxBudget. When it runs out the session is lost (ErrSessionLost, ErrBudgetExhausted), unless that was before the call's
+// first Port call: then the error wraps ErrBudgetExhausted alone and the session goes on. A transfer cannot be cancelled once
 // started, so a call returns at most about one scheduling delay after the budget, and a context is not taken.
 //
 // A card-level failure that the reader reports (a *CommandError: a mute card, a parity error, no card, and the rest) answers the
@@ -392,7 +404,8 @@ func (r *Reader) Transmit(apdu []byte, budget time.Duration) ([]byte, error) {
 	return out, nil
 }
 
-// begin checks the state and the budget of a call and returns its deadline. The caller holds the lock.
+// begin checks the state and the budget of a call, starts it (no Port call made yet) and returns its deadline. The caller holds the
+// lock.
 func (r *Reader) begin(budget time.Duration) (time.Time, error) {
 	if r.closed {
 		return time.Time{}, usbccid.ErrClosed
@@ -406,6 +419,7 @@ func (r *Reader) begin(budget time.Duration) (time.Time, error) {
 	if budget <= 0 || budget > MaxBudget {
 		return time.Time{}, fmt.Errorf("%w: %v", ErrBadBudget, budget)
 	}
+	r.touched = false
 	return time.Now().Add(budget), nil
 }
 
@@ -506,15 +520,16 @@ func (r *Reader) xfr(apdu []byte, dl time.Time) ([]byte, error) {
 		if ce != nil {
 			return out, r.failXfr(ce, false)
 		}
+		// After a begin block each block is a middle one (more follows) or the end; anything else is out of order.
+		if a.chain != chainMiddle && a.chain != chainEnd {
+			return out, r.lose(fmt.Errorf("%w: bChainParameter 0x%02X in a response block after a begin block", ErrProtocol, a.chain))
+		}
 		if a.state != 0 {
 			return out, r.cardOff(a, false)
 		}
 		if out, err = r.collect(out, a.data); err != nil {
 			return out, err
 		}
-	}
-	if c := a.chain; c != chainWhole && c != chainEnd {
-		return out, r.lose(fmt.Errorf("%w: unexpected bChainParameter 0x%02X in the last response block", ErrProtocol, c))
 	}
 	if len(out) < 2 {
 		return out, r.lose(fmt.Errorf("%w: a response of %d bytes: a response APDU ends in two status bytes", ErrProtocol, len(out)))
@@ -584,6 +599,17 @@ func (r *Reader) exchange(op string, typ byte, level uint16, payload []byte, wan
 			return answer{}, nil, err
 		}
 	}
+	// A budget that is spent before the first Port call of the call has sent and read nothing: it refuses the call and keeps the
+	// session. It is checked before the sequence number is taken, so that a refusal spends none.
+	to, clamped, err := r.timeout(dl)
+	if err != nil {
+		err = fmt.Errorf("ccid: %s: %w", op, err)
+		if r.touched {
+			err = r.lose(err)
+		}
+		return answer{}, nil, err
+	}
+	r.touched = true
 	seq := nextSeq()
 	n := headerLen + len(payload)
 	msg := r.wbuf[:n]
@@ -594,10 +620,6 @@ func (r *Reader) exchange(op string, typ byte, level uint16, payload []byte, wan
 	msg[7] = 0 // bBWI, or bPowerSelect: 0, the reader chooses
 	binary.LittleEndian.PutUint16(msg[8:10], level)
 	copy(msg[headerLen:], payload)
-	to, clamped, err := r.timeout(dl)
-	if err != nil {
-		return answer{}, nil, r.lose(fmt.Errorf("ccid: %s: %w", op, err))
-	}
 	sent, err := r.port.BulkOut(r.lay.bulkOut, msg, to)
 	clear(msg)
 	if err != nil {
@@ -631,6 +653,9 @@ func (r *Reader) exchange(op string, typ byte, level uint16, payload []byte, wan
 		}
 		switch h[7] >> 6 { // bmCommandStatus
 		case 0:
+			if want == rspDataBlock && h[9] != chainWhole && !r.lay.class.extended() {
+				return answer{}, nil, r.lose(fmt.Errorf("%w: %s: bChainParameter 0x%02X at short APDU level, where a response has no chain", ErrProtocol, op, h[9]))
+			}
 			return answer{state: h[7] & 3, chain: h[9], data: r.rbuf[headerLen:total]}, nil, nil
 		case 1:
 			return answer{}, &CommandError{Op: op, Code: h[8], ICCStatus: h[7] & 3}, nil
@@ -649,7 +674,7 @@ func (r *Reader) exchange(op string, typ byte, level uint16, payload []byte, wan
 // transfer timeout or what is left of the budget), discards and clears what arrives, and stops at the first read that times out: the
 // pipe is quiet. An empty packet that ended an earlier message is read and dropped here; one that arrives just after the drain is
 // consumed by the first read of the session (as after a whole-packet message). A read cut short by the budget is no proof of quiet:
-// the budget error ends the session. At most MaxDrainReads reads and MaxDrainTime in all: a device that is not quiet by then keeps sending without
+// the budget error ends the session, except before the first read, where it only refuses the call. At most MaxDrainReads reads and MaxDrainTime in all: a device that is not quiet by then keeps sending without
 // being asked, and the session is lost with ErrProtocol. On a quiet device the cost is one timed-out read, DrainReadTimeout.
 func (r *Reader) drain(op string, dl time.Time) error {
 	buf := r.rbuf[:min(len(r.rbuf), MaxMessageLength)]
@@ -659,12 +684,17 @@ func (r *Reader) drain(op string, dl time.Time) error {
 			return r.lose(fmt.Errorf("%w: %s: the IN pipe is not quiet after %d reads (MaxDrainReads, MaxDrainTime): the device sends without being asked", ErrProtocol, op, reads))
 		}
 		// A read that the budget cut short proves nothing about the pipe: unless the budget leaves room for one whole drain read
-		// (DrainReadTimeout, or the transfer timeout when that is shorter), the session is lost as for a spent budget, and the
-		// drain is not marked done.
+		// (DrainReadTimeout, or the transfer timeout when that is shorter), the drain is not marked done. Before its first read
+		// that only refuses the call (nothing was read, the session is kept); later it ends the session.
 		to := min(DrainReadTimeout, r.xfer)
 		if time.Until(dl) < to {
-			return r.lose(fmt.Errorf("ccid: %s: drain: %w: not enough left for one whole read of %v", op, ErrBudgetExhausted, to))
+			err := fmt.Errorf("ccid: %s: drain: %w: not enough left for one whole read of %v", op, ErrBudgetExhausted, to)
+			if r.touched {
+				err = r.lose(err)
+			}
+			return err
 		}
+		r.touched = true
 		n, err := r.port.BulkIn(r.lay.bulkIn, buf, to)
 		clear(buf)
 		switch {

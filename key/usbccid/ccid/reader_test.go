@@ -1794,13 +1794,19 @@ func TestChainRefusals(t *testing.T) {
 		untouched(t, r, f, err)
 	})
 	t.Run("response chain that never ends", func(t *testing.T) {
-		// Every block says "more follows"; the reader stops at MaxResponseAPDU.
+		// A begin block, then middle blocks, each saying "more follows"; the reader stops at MaxResponseAPDU.
+		blocks := 0
 		h := func(f *fakeDevice, m []byte) {
 			if m[0] != msgXfrBlock {
 				cardHandler(echoSW)(f, m)
 				return
 			}
-			f.send(msg(rspDataBlock, m[6], stOK, 0, chainBegin, bytes.Repeat([]byte{1}, 250)))
+			chain := byte(chainMiddle)
+			if blocks == 0 {
+				chain = chainBegin
+			}
+			blocks++
+			f.send(msg(rspDataBlock, m[6], stOK, 0, chain, bytes.Repeat([]byte{1}, 250)))
 			f.endless = msg(rspDataBlock, m[6], stOK, 0, chainMiddle, bytes.Repeat([]byte{1}, 250))
 		}
 		r, f := openPowered(t, Options{}, h)
@@ -1892,5 +1898,104 @@ func TestTheLimits(t *testing.T) {
 	if MaxShortCommandAPDU != 261 || MaxCommandAPDU != 65544 || MaxResponseAPDU != 65538 || MaxStaleAnswers != 3 || MaxATR != 33 ||
 		MaxBudget != 90*time.Second || DefaultTransferTimeout != 10*time.Second || MinMessageLength != 271 || MaxMessageLength != 65536 {
 		t.Error("a limit changed")
+	}
+}
+
+// After a begin block each response block is a middle one or the end: a whole, a second begin or any other value is out of order, and
+// the reader asks for nothing more.
+func TestResponseChainKeepsItsOrder(t *testing.T) {
+	for _, next := range []byte{chainWhole, chainBegin, chainEmptyAck, 0x77} {
+		t.Run(fmt.Sprintf("0x%02X after begin", next), func(t *testing.T) {
+			calls := 0
+			h := func(f *fakeDevice, m []byte) {
+				if m[0] != msgXfrBlock {
+					cardHandler(echoSW)(f, m)
+					return
+				}
+				calls++
+				chain := next
+				if calls == 1 {
+					chain = chainBegin
+				}
+				f.send(msg(rspDataBlock, m[6], stOK, 0, chain, []byte{0x90, 0}))
+			}
+			r, f := openPowered(t, Options{}, h)
+			_, err := r.Transmit(apduSelect, testBudget)
+			lostWith(t, err, ErrProtocol)
+			if calls != 2 {
+				t.Errorf("%d XfrBlock messages, want the command and one continuation", calls)
+			}
+			untouched(t, r, f, err)
+		})
+	}
+}
+
+// A reader at short APDU level has no response chain: any chain parameter but 0 ends the session, and nothing more is sent.
+func TestShortLevelAnswerWithAChainEndsTheSession(t *testing.T) {
+	for _, chain := range []byte{chainBegin, chainEnd, chainMiddle, chainEmptyAck} {
+		t.Run(fmt.Sprintf("0x%02X", chain), func(t *testing.T) {
+			f := newFake(descSpec{features: featuresShort}, func(f *fakeDevice, m []byte) {
+				if m[0] == msgXfrBlock {
+					f.send(msg(rspDataBlock, m[6], stOK, 0, chain, []byte{0x90, 0}))
+					return
+				}
+				cardHandler(echoSW)(f, m)
+			})
+			r, err := Open(f, Options{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := r.PowerOn(testBudget); err != nil {
+				t.Fatal(err)
+			}
+			n := f.nOut
+			_, err = r.Transmit(apduSelect, testBudget)
+			lostWith(t, err, ErrProtocol)
+			if f.nOut != n+1 {
+				t.Errorf("%d messages written, want one", f.nOut-n)
+			}
+			untouched(t, r, f, err)
+		})
+	}
+}
+
+// A call whose budget is spent before its first Port call is refused with ErrBudgetExhausted and keeps the session, the power state
+// and the sequence counter; the next call works.
+func TestSpentBudgetBeforeTheFirstPortCallKeepsTheSession(t *testing.T) {
+	calls := map[string]func(r *Reader) error{
+		"SlotStatus": func(r *Reader) error { _, err := r.SlotStatus(time.Nanosecond); return err },
+		"PowerOn":    func(r *Reader) error { _, err := r.PowerOn(time.Nanosecond); return err },
+		"PowerOff":   func(r *Reader) error { return r.PowerOff(time.Nanosecond) },
+		"Transmit":   func(r *Reader) error { _, err := r.Transmit(apduSelect, time.Nanosecond); return err },
+	}
+	for name, call := range calls {
+		for _, first := range []bool{true, false} {
+			if name == "Transmit" && first {
+				continue // a Transmit needs a powered card, so it is never the first exchange
+			}
+			t.Run(fmt.Sprintf("%s first=%v", name, first), func(t *testing.T) {
+				r, f, err := openFake(Options{}, cardHandler(echoSW))
+				if err != nil {
+					t.Fatal(err)
+				}
+				if !first {
+					if _, err := r.PowerOn(testBudget); err != nil {
+						t.Fatal(err)
+					}
+				}
+				powered, drained, mark := r.powered, r.drained, f.mark()
+				setSeq(41)
+				err = call(r)
+				if !errors.Is(err, ErrBudgetExhausted) || errors.Is(err, ErrSessionLost) {
+					t.Fatalf("err = %v, want ErrBudgetExhausted and not ErrSessionLost", err)
+				}
+				if r.lost != nil || r.powered != powered || r.drained != drained || len(f.callsAfter(mark)) != 0 || seqs.n.Load() != 41 {
+					t.Errorf("lost %v, powered %v, drained %v, port calls %v, counter %d", r.lost, r.powered, r.drained, f.callsAfter(mark), seqs.n.Load())
+				}
+				if _, err := r.PowerOn(testBudget); err != nil {
+					t.Errorf("the next call: %v", err)
+				}
+			})
+		}
 	}
 }

@@ -27,7 +27,8 @@
 //   - a declared voltage (bVoltageSupport not 0; ErrVoltage): power-on always asks the reader to choose the voltage and the clock
 //     (bPowerSelect 0), and never sets one. The automatic-voltage bit of dwFeatures (0x00000008) is not required: the reader this layer
 //     comes from does not declare it and was driven with the same power-on message;
-//   - T=0 or T=1 among the protocols, and a dwMaxCCIDMessageLength of at least MinMessageLength.
+//   - T=0 or T=1 among the protocols, and a dwMaxCCIDMessageLength of at least MinMessageLength;
+//   - a packet size of 8, 16, 32, 64, 512 or 1024 (the whole wMaxPacketSize field) on the bulk endpoints.
 //
 // A reader that needs anything more from the host (a PIN pad, a secure command, a clock change, a bulk message of another form, a
 // second slot) is refused or never used: the reader sends only GetSlotStatus, IccPowerOn, IccPowerOff and XfrBlock.
@@ -52,6 +53,10 @@
 // ErrClosed stays reachable with errors.Is, in its own meaning, and ErrBudgetExhausted or ErrProtocol is the cause when the layer
 // found it), and every later call returns the same error without touching the port. The caller closes the Reader and opens it
 // again. The ErrStalled, ErrGone and ErrClosed of the Port end the session in the same way.
+//
+// A budget that runs out ends the session only once the call has made a call on the Port (the first read of the drain counts). A call
+// whose budget is spent before that has sent and read nothing: it returns an error that wraps ErrBudgetExhausted and not
+// ErrSessionLost, and the session, the power state and the drain stay as they were, so the next call works.
 //
 // # Sequence numbers and the first exchange
 //
@@ -89,6 +94,8 @@
 //
 // A command that does not fit one CCID message (extended APDU level only) is sent in blocks (wLevelParameter begin, middle, end), each
 // answered by an empty block that asks for the next, and a response that comes in blocks is collected by empty continuation blocks.
+// A response is whole, or it is a begin block, then middle blocks, then an end block; a chain parameter in any other order ends the
+// session. At short APDU level there is no chain: any chain parameter but 0 in an answer ends the session.
 // The messages are as large as the reader's dwMaxCCIDMessageLength, held to MaxMessageLength (the 64 KiB of one transfer of the Port).
 //
 // Reads are sized from the same length: the buffer holds the largest message and one packet. The reader asks for the first packet of
@@ -110,7 +117,7 @@
 // # Errors and secrets
 //
 // The errors are values to test with errors.Is: the refusals of Open (ErrNoInterface, ErrBadClass, ErrExchangeLevel and the others),
-// ErrSessionLost with its causes, the argument and state errors (ErrBadBudget, ErrAPDUTooShort, ErrAPDUTooLong, ErrNotPowered, ErrStillActive, ErrBadATR, ErrNotOpen
+// ErrSessionLost with its causes, the argument and state errors (ErrBadBudget, a budget spent before the call's first Port call, ErrAPDUTooShort, ErrAPDUTooLong, ErrNotPowered, ErrStillActive, ErrBadATR, ErrNotOpen
 // for the zero Reader, a nil Reader and a nil Port) that leave the session as it was, and the card-level failures of the reader's answer (ErrNoCard, ErrCardMute, ErrCardParity,
 // ErrCardProtocol, ErrSlotBusy, ErrReaderFault, ErrCommandNotSupported, ErrBadParameter, all of them ErrCommandFailed), where
 // errors.As to *CommandError gives bError and bmICCStatus. The text of an error holds counts, header numbers and status bytes, and
