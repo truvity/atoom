@@ -1,14 +1,14 @@
-//go:build !linux
+//go:build !(linux && (amd64 || arm64))
 
 package usbccid
 
 import "time"
 
-// Device is one open usbfs node. On this system there is none: Open returns ErrNotSupported and the methods of a Device that was
+// Device is one open usbfs node. On this system (anything but Linux on amd64 or arm64) there is none: Open returns ErrNotSupported and the methods of a Device that was
 // never opened do the same. The type is here so that a program that links this package compiles.
 type Device struct{}
 
-// Open returns ErrNotSupported: direct USB access needs Linux (usbfs).
+// Open returns ErrNotSupported: direct USB access needs Linux (usbfs) on amd64 or arm64.
 func Open(_ string) (*Device, error) { return nil, ErrNotSupported }
 
 // Descriptors returns ErrNotSupported.
@@ -40,3 +40,6 @@ func Discover(_, _ string, _ Filter) ([]Candidate, error) { return nil, ErrNotSu
 
 // DiscoverHost returns ErrNotSupported.
 func DiscoverHost(_ Filter) ([]Candidate, error) { return nil, ErrNotSupported }
+
+// openCandidate returns ErrNotSupported.
+func openCandidate(Candidate) (*Device, error) { return nil, ErrNotSupported }

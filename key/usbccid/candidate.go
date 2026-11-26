@@ -46,5 +46,9 @@ type Filter struct {
 	PortPath string
 }
 
-// Open opens the usbfs node of the candidate: Open(c.NodePath).
-func (c Candidate) Open() (*Device, error) { return Open(c.NodePath) }
+// Open opens the usbfs node of the candidate, as Open does, and then checks that the device it opened is the one that was found:
+// the device number can be reused between Discover and Open (unplug, then another device plugged). It compares the vendor and
+// product id of the device descriptor, and that the descriptors hold the candidate's CCID interface number with the candidate's
+// bulk endpoints. On a mismatch it closes the descriptor and returns an error that wraps ErrWrongDevice. A caller still checks the
+// serial number from the card after the claim: the ids do not tell two cards of one kind apart.
+func (c Candidate) Open() (*Device, error) { return openCandidate(c) }

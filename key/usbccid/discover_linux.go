@@ -1,26 +1,41 @@
-//go:build linux
+//go:build linux && (amd64 || arm64)
 
 package usbccid
 
 import (
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"regexp"
 	"slices"
 	"strconv"
 	"strings"
+
+	"golang.org/x/sys/unix"
 )
 
+// maxAttrBytes is the most that is read of an attribute file; the values of sysfs that are read here are a few bytes.
+const maxAttrBytes = 64
+
+// maxNumber is the largest bus number and device number: the node path has three digits for each (/dev/bus/usb/BBB/DDD).
+const maxNumber = 999
+
 // Discover reads a sysfs USB tree and returns the devices that have a CCID interface (class 0x0B) with both bulk endpoints, in
-// the order of bus, then device number. It only reads files below sysfsDir: it opens no device node, claims nothing and sends
-// nothing. devDir is the directory the NodePath of each candidate is derived from (a path is made, never opened).
+// the order of bus, then device number. It opens no device node, claims nothing and sends nothing. devDir is the directory the
+// NodePath of each candidate is derived from (a path is made, never opened).
+//
+// What it follows and what it does not: the entries of sysfsDir may be symbolic links (on a real system each is a link into the
+// device tree), and it follows them. Inside a device it lists the interface and endpoint directories and accepts only real
+// directories, not links. Each attribute file is opened without following a link, with O_NONBLOCK, must be a regular file (a
+// device or a FIFO is never read) and is read to at most 64 bytes.
 //
 // Both directories are required and are not defaulted: a test passes a made-up tree under t.TempDir(), and DiscoverHost passes
 // the real ones. An entry that does not look like a USB device, or whose files are missing or malformed, is skipped and is not an
-// error; only an unreadable sysfsDir is. Of a device with several CCID interfaces the first by number that has both bulk
-// endpoints is described.
+// error; only an unreadable sysfsDir is. A device is skipped when the bus number in its port path disagrees with its busnum file,
+// when the bus number or the device number is above 999 (the node path has three digits each), or when an endpoint number is not 1
+// to 15. Of a device with several CCID interfaces the first by number that has both bulk endpoints is described.
 //
 // The candidates carry no card serial number: see Candidate.
 func Discover(sysfsDir, devDir string, f Filter) ([]Candidate, error) {
@@ -34,8 +49,8 @@ func Discover(sysfsDir, devDir string, f Filter) ([]Candidate, error) {
 	var out []Candidate
 	for _, e := range entries {
 		name := e.Name()
-		if !devicePath.MatchString(name) {
-			continue // a root hub (usb1) or an interface (1-2:1.0)
+		if !devicePath.MatchString(name) || e.Type()&(fs.ModeDir|fs.ModeSymlink) == 0 {
+			continue // a root hub (usb1), an interface (1-2:1.0) or a plain file
 		}
 		if f.PortPath != "" && f.PortPath != name {
 			continue
@@ -81,6 +96,9 @@ func describe(dir, name, devDir string) (Candidate, bool) {
 	if !ok1 || !ok2 || !ok3 || !ok4 {
 		return c, false
 	}
+	if portBus, _, _ := strings.Cut(name, "-"); portBus != strconv.Itoa(bus) {
+		return c, false // the bus of the port path and the bus attribute disagree
+	}
 	c = Candidate{
 		VendorID: vid, ProductID: pid,
 		Bus: bus, Address: dev,
@@ -95,8 +113,8 @@ func describe(dir, name, devDir string) (Candidate, bool) {
 	found := false
 	best := -1
 	for _, e := range entries {
-		if !re.MatchString(e.Name()) {
-			continue
+		if !e.IsDir() || !re.MatchString(e.Name()) {
+			continue // a link or a file is no interface directory
 		}
 		in, ok := ccidInterface(filepath.Join(dir, e.Name()))
 		if !ok || (found && in.number >= best) {
@@ -130,13 +148,13 @@ func ccidInterface(dir string) (ccidIf, bool) {
 		return ccidIf{}, false
 	}
 	for _, e := range entries { // sorted by name, so the endpoints come in a fixed order
-		if !strings.HasPrefix(e.Name(), "ep_") {
+		if !e.IsDir() || !strings.HasPrefix(e.Name(), "ep_") {
 			continue
 		}
 		ep := filepath.Join(dir, e.Name())
 		addr, ok1 := attr8(ep, "bEndpointAddress")
 		attrs, ok2 := attr8(ep, "bmAttributes")
-		if !ok1 || !ok2 {
+		if !ok1 || !ok2 || !validEndpoint(addr) {
 			continue
 		}
 		in := addr&0x80 != 0
@@ -164,18 +182,29 @@ func attr16(dir, name string) (uint16, bool) {
 	return uint16(v), ok //nolint:gosec // ParseUint bounded it to 16 bits
 }
 
-// attrDecimal reads the decimal number, 1 to 65535, in a file of dir (the bus number and the device number).
+// attrDecimal reads the decimal number, 1 to 999, in a file of dir (the bus number and the device number).
 func attrDecimal(dir, name string) (int, bool) {
 	v, ok := attr(dir, name, 10, 16)
-	return int(v), ok && v > 0 //nolint:gosec // ParseUint bounded it to 16 bits
+	return int(v), ok && v > 0 && v <= maxNumber //nolint:gosec // ParseUint bounded it to 16 bits
 }
 
-// attr reads the number in file name of dir, in the given base, that fits in bits.
+// attr reads the number in file name of dir, in the given base, that fits in bits. The file is opened without following a link and
+// without blocking, must be a regular file, and is read to at most maxAttrBytes (a file that fills the whole bound is refused).
 func attr(dir, name string, base, bits int) (uint64, bool) {
-	b, err := os.ReadFile(filepath.Join(dir, name)) //nolint:gosec // a file of the tree that the caller named
+	fd, err := unix.Open(filepath.Join(dir, name), unix.O_RDONLY|unix.O_CLOEXEC|unix.O_NOCTTY|unix.O_NONBLOCK|unix.O_NOFOLLOW, 0)
 	if err != nil {
 		return 0, false
 	}
-	v, err := strconv.ParseUint(strings.TrimSpace(string(b)), base, bits)
+	defer func() { _ = unix.Close(fd) }()
+	var st unix.Stat_t
+	if unix.Fstat(fd, &st) != nil || st.Mode&unix.S_IFMT != unix.S_IFREG {
+		return 0, false
+	}
+	buf := make([]byte, maxAttrBytes)
+	n, err := unix.Read(fd, buf)
+	if err != nil || n >= maxAttrBytes {
+		return 0, false
+	}
+	v, err := strconv.ParseUint(strings.TrimSpace(string(buf[:n])), base, bits)
 	return v, err == nil
 }
