@@ -1,6 +1,6 @@
 # 0026. One YubiKey driver, over direct USB, with the policy declared by the host
 
-Status: proposed, 2026-11-26 (waits for the owner's decision; no code is written before it is accepted)
+Status: accepted, 2026-11-26 (owner decision on the pull request)
 
 ## Context
 
@@ -96,7 +96,7 @@ Most of this is written up in [PIN, touch, delete, move and reset](../../key/yub
 
 ## Open points
 
-Not decided here.
+These stay open, and the pull requests that build the driver settle them.
 
 - The proto of the ceremony service, with the field of the unlock call that says "one operation or the session", and the lock call (a `Lock` on `UnlockService`, in the style of `Status` and `Unlock`).
 - The names of the three new refusal reasons: the interface is busy; the card gave up waiting for a touch; the touch was not given or the management key is wrong (`6982`, a third reason of its own).

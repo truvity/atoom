@@ -35,7 +35,7 @@ The records were rewritten once, in a clean state, on 2026-11-21, so that each s
 | [0023](0023-session-to-done-first.md) | session to done first: B9's session parts lead the order; AppConfig before SSM; `transport/nats` joins B9; no Lambda zip for an in-process Go driver | 2026-11-25 |
 | [0024](0024-the-rotation-ring-of-the-token-block.md) | The rotation ring of the token block: slots, states and a ring item on the store port | 2026-11-25 |
 | [0025](0025-generic-blob-transport-and-index.md) | Generic blob, transport and index contracts: the host declares its pointers, its payload and its columns | 2026-11-25 |
-| [0026](0026-one-yubikey-driver-over-direct-usb.md) | One YubiKey driver, over direct USB, with the policy declared by the host (proposed) | 2026-11-26 |
+| [0026](0026-one-yubikey-driver-over-direct-usb.md) | One YubiKey driver, over direct USB, with the policy declared by the host | 2026-11-26 |
 
 ## Renumbered in the clean rewrite of 2026-11-21
 
