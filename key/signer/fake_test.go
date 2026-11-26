@@ -175,7 +175,7 @@ func newFake(t testing.TB, alg string) (*fake, *testKey) {
 		{Name: purposeName, Algorithm: alg, Operations: []string{string(purpose.Sign)}},
 	}
 	f.setKey(k)
-	f.sign = honest(t, k)
+	f.sign = honest(k)
 	return f, k
 }
 
@@ -302,7 +302,7 @@ func (f *fake) Sign(ctx context.Context, req *connect.Request[keyv1alpha1.SignRe
 }
 
 // honest signs the digest of the request with the key and names the key.
-func honest(t testing.TB, k *testKey) signFunc {
+func honest(k *testKey) signFunc {
 	return func(_ context.Context, req *keyv1alpha1.SignRequest) (*keyv1alpha1.SignResponse, error) {
 		sig, err := k.priv.Sign(rand.Reader, req.GetDigest(), k.hash)
 		if err != nil {

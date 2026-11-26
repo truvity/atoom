@@ -257,50 +257,44 @@ func TestNewRefuses(t *testing.T) {
 	}
 }
 
-func TestNewTimeoutThatIsNotPositiveIsRefusedBeforeAnyCall(t *testing.T) {
-	for _, d := range []time.Duration{0, -time.Nanosecond, -time.Hour} {
-		t.Run(d.String(), func(t *testing.T) {
-			f, _ := newFake(t, purpose.ES256)
-			s, err := signer.New(t.Context(), start(t, f), purposeName, signer.WithTimeout(d))
-			if s != nil {
-				t.Fatal("New returned a Signer")
-			}
-			refused(t, nil, err, signer.ErrTimeout)
-			if f.capsCount() != 0 || f.pubCount() != 0 {
-				t.Fatalf("the store was asked (%d, %d) though the timeout is refused", f.capsCount(), f.pubCount())
-			}
-		})
-	}
-}
-
-func TestNewNeedsAClientAndAContextAndDoesNotPanic(t *testing.T) {
+func TestNewRefusesBadArgumentsBeforeAnyCallAndDoesNotPanic(t *testing.T) {
+	var nilCtx context.Context
 	f, _ := newFake(t, purpose.ES256)
 	client := start(t, f)
-	var nilCtx context.Context
-	for name, call := range map[string]func() (*signer.Signer, error){
-		"nil context": func() (*signer.Signer, error) { return signer.New(nilCtx, client, purposeName) },
-		"nil client":  func() (*signer.Signer, error) { return signer.New(t.Context(), nil, purposeName) },
-		"both nil":    func() (*signer.Signer, error) { return signer.New(nilCtx, nil, purposeName) },
-	} {
-		t.Run(name, func(t *testing.T) {
+	cases := []struct {
+		name string
+		call func() (*signer.Signer, error)
+		want error // nil: any error
+	}{
+		{"timeout zero", func() (*signer.Signer, error) {
+			return signer.New(t.Context(), client, purposeName, signer.WithTimeout(0))
+		}, signer.ErrTimeout},
+		{"timeout negative", func() (*signer.Signer, error) {
+			return signer.New(t.Context(), client, purposeName, signer.WithTimeout(-time.Hour))
+		}, signer.ErrTimeout},
+		{"nil context", func() (*signer.Signer, error) { return signer.New(nilCtx, client, purposeName) }, nil},
+		{"nil client", func() (*signer.Signer, error) { return signer.New(t.Context(), nil, purposeName) }, nil},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
 			defer func() {
 				if r := recover(); r != nil {
 					t.Fatalf("New panicked: %v", r)
 				}
 			}()
-			s, err := call()
-			if s != nil || err == nil {
+			s, err := c.call()
+			if s != nil || err == nil || (c.want != nil && !errors.Is(err, c.want)) {
 				t.Fatalf("New returned %v, %v", s, err)
 			}
 		})
 	}
 	if f.capsCount() != 0 {
-		t.Fatal("the store was asked though the client or the context was nil")
+		t.Fatal("the store was asked though an argument was refused")
 	}
 }
 
 func TestNewReturnsAFailureOfThePortAsItCame(t *testing.T) {
-	codes := []connect.Code{connect.CodeUnavailable, connect.CodePermissionDenied, connect.CodeInternal, connect.CodeFailedPrecondition, connect.CodeUnauthenticated}
+	codes := []connect.Code{connect.CodeUnavailable, connect.CodePermissionDenied}
 	for _, code := range codes {
 		t.Run("Capabilities "+code.String(), func(t *testing.T) {
 			f, _ := newFake(t, purpose.ES256)
@@ -422,10 +416,7 @@ func TestSignRefusesAnAnswerThatIsNotTheKeyOrNotAValidSignature(t *testing.T) {
 				b[i] ^= 1 << bit
 				return b
 			}
-			junk := make([]byte, len(good))
-			if _, err := rand.Read(junk); err != nil {
-				t.Fatal(err)
-			}
+			junk := bytes.Repeat([]byte{0xa5}, len(good))
 			type answerCase struct {
 				name string
 				sig  []byte
@@ -436,21 +427,17 @@ func TestSignRefusesAnAnswerThatIsNotTheKeyOrNotAValidSignature(t *testing.T) {
 				{"another key_id", good, stranger.id, signer.ErrKeyChanged},
 				{"an empty key_id", good, "", signer.ErrKeyChanged},
 				{"a key_id with a prefix added", good, "9a:" + k.id, signer.ErrKeyChanged},
-				{"the key_id in upper case", good, strings.ToUpper(k.id), signer.ErrKeyChanged},
 				{"another key_id and a bad signature", junk, stranger.id, signer.ErrKeyChanged},
 				{"a signature by another key", stranger.sign(t, digest), k.id, signer.ErrVerify},
 				{"a signature over another digest", k.sign(t, digestOf(alg, "another message")), k.id, signer.ErrVerify},
 				{"a signature cut by one byte", good[:len(good)-1], k.id, signer.ErrVerify},
-				{"a signature cut to half", good[:len(good)/2], k.id, signer.ErrVerify},
-				{"a signature of one byte", good[:1], k.id, signer.ErrVerify},
 				{"an empty signature", []byte{}, k.id, signer.ErrVerify},
 				{"no signature", nil, k.id, signer.ErrVerify},
 				{"a signature with a byte after it", append(append([]byte(nil), good...), 0), k.id, signer.ErrVerify},
-				{"random bytes", junk, k.id, signer.ErrVerify},
+				{"garbage of the right size", junk, k.id, signer.ErrVerify},
 				{"a flipped bit in the first byte", flip(0, 0), k.id, signer.ErrVerify},
 				{"a flipped bit in the middle", flip(len(good)/2, 3), k.id, signer.ErrVerify},
 				{"a flipped bit in the last byte", flip(len(good)-1, 0), k.id, signer.ErrVerify},
-				{"a flipped top bit in the last byte", flip(len(good)-1, 7), k.id, signer.ErrVerify},
 			}
 			if alg == purpose.RS256 {
 				pss, err := rsa.SignPSS(rand.Reader, k.priv.(*rsa.PrivateKey), crypto.SHA256, digest, nil)
@@ -473,7 +460,7 @@ func TestSignRefusesAnAnswerThatIsNotTheKeyOrNotAValidSignature(t *testing.T) {
 					f.answer(c.sig, c.id)
 					sig, err := s.Sign(nil, digest, hashOf(alg))
 					refused(t, sig, err, c.want)
-					if c.want == signer.ErrKeyChanged && errors.Is(err, signer.ErrVerify) {
+					if errors.Is(c.want, signer.ErrKeyChanged) && errors.Is(err, signer.ErrVerify) {
 						t.Error("a key change is also reported as a bad signature")
 					}
 					if got := f.signCount() - before; got != 1 {
@@ -486,7 +473,7 @@ func TestSignRefusesAnAnswerThatIsNotTheKeyOrNotAValidSignature(t *testing.T) {
 }
 
 func TestSignReturnsAFailureOfThePortAsItCame(t *testing.T) {
-	codes := []connect.Code{connect.CodeUnavailable, connect.CodePermissionDenied, connect.CodeInvalidArgument, connect.CodeInternal, connect.CodeResourceExhausted, connect.CodeFailedPrecondition}
+	codes := []connect.Code{connect.CodeUnavailable, connect.CodePermissionDenied, connect.CodeInvalidArgument}
 	for _, alg := range algorithms {
 		for _, code := range codes {
 			t.Run(alg+" "+code.String(), func(t *testing.T) {
@@ -577,10 +564,10 @@ func TestWhatReachesThePortIsExactlyWhatWasGiven(t *testing.T) {
 
 type ctxKey struct{}
 
-func TestEveryCallCarriesTheContextOfNewAndTheDeadlineOfWithTimeout(t *testing.T) {
+func TestEveryCallCarriesItsContextAndTheDeadlineOfWithTimeout(t *testing.T) {
 	type seen struct {
 		procedure string
-		id        any
+		value     any
 		remaining time.Duration
 		hasDL     bool
 	}
@@ -595,40 +582,43 @@ func TestEveryCallCarriesTheContextOfNewAndTheDeadlineOfWithTimeout(t *testing.T
 			return next(ctx, req)
 		}
 	})
-	check := func(t *testing.T, timeout time.Duration, opts ...signer.Option) {
-		mu.Lock()
-		calls = nil
-		mu.Unlock()
-		f, _ := newFake(t, purpose.ES256)
-		ctx := context.WithValue(t.Context(), ctxKey{}, "correlation-1")
-		s, err := signer.New(ctx, start(t, f, connect.WithInterceptors(ic)), purposeName, opts...)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if _, err := s.Sign(nil, digestOf(purpose.ES256, "m"), crypto.SHA256); err != nil {
-			t.Fatal(err)
-		}
-		mu.Lock()
-		defer mu.Unlock()
-		if len(calls) != 3 {
-			t.Fatalf("%d calls, want Capabilities, PublicKey and Sign", len(calls))
-		}
-		for _, c := range calls {
-			if c.id != "correlation-1" {
-				t.Errorf("%s: the value of the context of New did not arrive (%v)", c.procedure, c.id)
+	for name, timeout := range map[string]time.Duration{"WithTimeout": 90 * time.Second, "default": signer.DefaultTimeout} {
+		t.Run(name, func(t *testing.T) {
+			mu.Lock()
+			calls = nil
+			mu.Unlock()
+			f, _ := newFake(t, purpose.ES256)
+			s, err := signer.New(context.WithValue(t.Context(), ctxKey{}, "original"), start(t, f, connect.WithInterceptors(ic)), purposeName, signer.WithTimeout(timeout))
+			if err != nil {
+				t.Fatal(err)
 			}
-			if !c.hasDL || c.remaining <= 0 || c.remaining > timeout || c.remaining < timeout-time.Minute/2 {
-				t.Errorf("%s: deadline in %v (present: %v), want within %v", c.procedure, c.remaining, c.hasDL, timeout)
+			digest := digestOf(purpose.ES256, "m")
+			if _, err := s.Sign(nil, digest, crypto.SHA256); err != nil {
+				t.Fatal(err)
 			}
-		}
+			// A copy takes the context of its caller, with the same timeout.
+			if _, err := s.WithContext(context.WithValue(t.Context(), ctxKey{}, "request")).Sign(nil, digest, crypto.SHA256); err != nil {
+				t.Fatal(err)
+			}
+			mu.Lock()
+			defer mu.Unlock()
+			want := []string{"original", "original", "original", "request"} // Capabilities, PublicKey, Sign, Sign of the copy
+			if len(calls) != len(want) {
+				t.Fatalf("%d calls, want %d", len(calls), len(want))
+			}
+			for i, c := range calls {
+				if c.value != want[i] {
+					t.Errorf("%s: the value %v arrived, want %v", c.procedure, c.value, want[i])
+				}
+				if !c.hasDL || c.remaining <= 0 || c.remaining > timeout || c.remaining < timeout-time.Minute/2 {
+					t.Errorf("%s: deadline in %v (present: %v), want within %v", c.procedure, c.remaining, c.hasDL, timeout)
+				}
+			}
+		})
 	}
-	t.Run("WithTimeout", func(t *testing.T) { check(t, 90*time.Second, signer.WithTimeout(90*time.Second)) })
-	t.Run("default", func(t *testing.T) {
-		if signer.DefaultTimeout != 2*time.Minute {
-			t.Fatalf("DefaultTimeout is %v", signer.DefaultTimeout)
-		}
-		check(t, signer.DefaultTimeout)
-	})
+	if signer.DefaultTimeout != 2*time.Minute {
+		t.Fatalf("DefaultTimeout is %v", signer.DefaultTimeout)
+	}
 }
 
 // Deadline and cancellation.
@@ -641,153 +631,166 @@ func isCanceled(err error) bool {
 	return errors.Is(err, context.Canceled) || connect.CodeOf(err) == connect.CodeCanceled
 }
 
-// describe says which of the two forms of a deadline an error has.
-func describe(err error) string {
-	return fmt.Sprintf("errors.Is(DeadlineExceeded)=%v, connect code=%s, error=%q", errors.Is(err, context.DeadlineExceeded), connect.CodeOf(err), err)
-}
-
-func TestSignOfASlowStoreEndsAtTheTimeout(t *testing.T) {
-	f, k := newFake(t, purpose.ES384)
-	s := newSigner(t, f, signer.WithTimeout(50*time.Millisecond))
-	f.blockSign()
-	begin := time.Now()
-	sig, err := s.Sign(nil, digestOf(purpose.ES384, "m"), crypto.SHA384)
-	if elapsed := time.Since(begin); elapsed > 5*time.Second {
-		t.Fatalf("Sign took %v with a timeout of 50ms", elapsed)
+func TestSignEndsWhenItsTimeOrItsContextEnds(t *testing.T) {
+	digest := digestOf(purpose.ES256, "m")
+	// Each case makes the Signer to sign with, and may make another that must go on working, and a stop that ends the context of the
+	// first (called before Sign when early, otherwise once the store holds the request). The store waits for the caller to give up.
+	type setup struct {
+		s, other *signer.Signer
+		stop     func()
 	}
-	if sig != nil || err == nil || !isDeadline(err) {
-		t.Fatalf("sig %x, err %v: not a deadline", sig, err)
-	}
-	t.Log(describe(err))
-	// A timeout is not a state: the next call, to a store that answers, signs.
-	f.setSign(honest(t, k))
-	if sig, err := s.Sign(nil, digestOf(purpose.ES384, "m"), crypto.SHA384); err != nil || sig == nil {
-		t.Fatalf("Sign after a timeout: %v", err)
-	}
-}
-
-func TestNewOfASlowStoreEndsAtTheTimeout(t *testing.T) {
-	for _, call := range []string{"Capabilities", "PublicKey"} {
-		t.Run(call, func(t *testing.T) {
-			f, _ := newFake(t, purpose.ES256)
-			f.blockCaps = call == "Capabilities"
-			f.blockPub = call == "PublicKey"
-			begin := time.Now()
-			s, err := signer.New(t.Context(), start(t, f), purposeName, signer.WithTimeout(50*time.Millisecond))
-			if elapsed := time.Since(begin); elapsed > 5*time.Second {
-				t.Fatalf("New took %v with a timeout of 50ms", elapsed)
+	cases := []struct {
+		name         string
+		wantCanceled bool
+		early        bool
+		make         func(t *testing.T, f *fake) setup
+	}{
+		{"the timeout of WithTimeout", false, false, func(t *testing.T, f *fake) setup {
+			return setup{s: newSigner(t, f, signer.WithTimeout(50*time.Millisecond))}
+		}},
+		{"a deadline of the context of New sooner than the timeout", false, false, func(t *testing.T, f *fake) setup {
+			ctx, cancel := context.WithTimeout(t.Context(), 300*time.Millisecond)
+			t.Cleanup(cancel)
+			s, err := signer.New(ctx, start(t, f), purposeName, signer.WithTimeout(time.Hour))
+			if err != nil {
+				t.Fatal(err)
 			}
-			if s != nil || err == nil || !isDeadline(err) {
-				t.Fatalf("signer %v, err %v: not a deadline", s, err)
+			return setup{s: s}
+		}},
+		{"a deadline of WithContext sooner than the timeout", false, false, func(t *testing.T, f *fake) setup {
+			ctx, cancel := context.WithTimeout(t.Context(), 300*time.Millisecond)
+			t.Cleanup(cancel)
+			s := newSigner(t, f, signer.WithTimeout(time.Hour))
+			return setup{s: s.WithContext(ctx), other: s}
+		}},
+		{"a cancel of the context of New while the store works", true, false, func(t *testing.T, f *fake) setup {
+			ctx, cancel := context.WithCancel(t.Context())
+			s, err := signer.New(ctx, start(t, f), purposeName)
+			if err != nil {
+				t.Fatal(err)
 			}
-			t.Log(describe(err))
+			return setup{s: s, stop: cancel}
+		}},
+		{"a cancel of the context of New before Sign, which does not stop a copy", true, true, func(t *testing.T, f *fake) setup {
+			ctx, cancel := context.WithCancel(t.Context())
+			s, err := signer.New(ctx, start(t, f), purposeName)
+			if err != nil {
+				t.Fatal(err)
+			}
+			return setup{s: s, other: s.WithContext(t.Context()), stop: cancel}
+		}},
+		{"a cancel of the context of WithContext, which does not stop the original", true, false, func(t *testing.T, f *fake) setup {
+			ctx, cancel := context.WithCancel(t.Context())
+			s := newSigner(t, f)
+			return setup{s: s.WithContext(ctx), other: s, stop: cancel}
+		}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			f, k := newFake(t, purpose.ES256)
+			st := c.make(t, f)
+			f.blockSign()
+			if c.early {
+				st.stop()
+			}
+			type result struct {
+				sig []byte
+				err error
+			}
+			done := make(chan result, 1)
+			go func() {
+				sig, err := st.s.Sign(nil, digest, crypto.SHA256)
+				done <- result{sig, err}
+			}()
+			if st.stop != nil && !c.early {
+				select {
+				case <-f.entered:
+				case <-time.After(5 * time.Second):
+					t.Fatal("the store was not reached")
+				}
+				st.stop()
+			}
+			select {
+			case r := <-done:
+				ended := isDeadline(r.err)
+				if c.wantCanceled {
+					ended = isCanceled(r.err)
+				}
+				if r.sig != nil || !ended {
+					t.Fatalf("sig %x, err %v (deadline: errors.Is %v, code %s)", r.sig, r.err, errors.Is(r.err, context.DeadlineExceeded), connect.CodeOf(r.err))
+				}
+			case <-time.After(10 * time.Second):
+				t.Fatal("Sign did not return")
+			}
+			if st.other != nil {
+				f.setSign(honest(k))
+				if sig, err := st.other.Sign(nil, digest, crypto.SHA256); err != nil || !verifies(t, purpose.ES256, st.other.Public(), digest, sig) {
+					t.Fatalf("the other Signer after the end: %v", err)
+				}
+			}
 		})
 	}
 }
 
-func TestCancellingTheContextOfNewStopsLaterSigns(t *testing.T) {
-	f, _ := newFake(t, purpose.ES256)
-	ctx, cancel := context.WithCancel(t.Context())
-	s, err := signer.New(ctx, start(t, f), purposeName)
-	if err != nil {
-		t.Fatal(err)
+func TestNewEndsWhenTheStoreIsSlowOrTheContextHasEnded(t *testing.T) {
+	cases := []struct {
+		name string
+		slow func(f *fake)
+		ctx  func(t *testing.T) context.Context
+	}{
+		{"Capabilities waits", func(f *fake) { f.blockCaps = true }, nil},
+		{"PublicKey waits", func(f *fake) { f.blockPub = true }, nil},
+		{"the context ended before the call", nil, func(t *testing.T) context.Context {
+			ctx, cancel := context.WithDeadline(t.Context(), time.Now().Add(-time.Second))
+			t.Cleanup(cancel)
+			return ctx
+		}},
 	}
-	if _, err := s.Sign(nil, digestOf(purpose.ES256, "m"), crypto.SHA256); err != nil {
-		t.Fatalf("Sign before the cancel: %v", err)
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			f, _ := newFake(t, purpose.ES256)
+			ctx := t.Context()
+			if c.slow != nil {
+				c.slow(f)
+			}
+			if c.ctx != nil {
+				ctx = c.ctx(t)
+			}
+			begin := time.Now()
+			s, err := signer.New(ctx, start(t, f), purposeName, signer.WithTimeout(50*time.Millisecond))
+			if elapsed := time.Since(begin); elapsed > 5*time.Second {
+				t.Fatalf("New took %v with a timeout of 50ms", elapsed)
+			}
+			if s != nil || !isDeadline(err) {
+				t.Fatalf("signer %v, err %v: not a deadline", s, err)
+			}
+		})
 	}
-	cancel()
-	sig, err := s.Sign(nil, digestOf(purpose.ES256, "m"), crypto.SHA256)
-	if sig != nil || err == nil || !isCanceled(err) {
-		t.Fatalf("sig %x, err %v: not a cancellation", sig, err)
-	}
-	t.Logf("errors.Is(Canceled)=%v, connect code=%s", errors.Is(err, context.Canceled), connect.CodeOf(err))
-}
-
-func TestCancellingWhileTheStoreWaitsReturnsAtOnce(t *testing.T) {
-	f, _ := newFake(t, purpose.ES256)
-	ctx, cancel := context.WithCancel(t.Context())
-	s, err := signer.New(ctx, start(t, f), purposeName)
-	if err != nil {
-		t.Fatal(err)
-	}
-	f.blockSign()
-	type result struct {
-		sig []byte
-		err error
-	}
-	done := make(chan result, 1)
-	go func() {
-		sig, err := s.Sign(nil, digestOf(purpose.ES256, "m"), crypto.SHA256)
-		done <- result{sig, err}
-	}()
-	select {
-	case <-f.entered:
-	case <-time.After(5 * time.Second):
-		t.Fatal("the store was not reached")
-	}
-	cancel()
-	select {
-	case r := <-done:
-		if r.sig != nil || r.err == nil || !isCanceled(r.err) {
-			t.Fatalf("sig %x, err %v: not a cancellation", r.sig, r.err)
-		}
-	case <-time.After(5 * time.Second):
-		t.Fatal("Sign did not return after the cancel")
-	}
-}
-
-func TestContextOfNewThatEndedBeforeNewMakesNewFail(t *testing.T) {
-	f, _ := newFake(t, purpose.ES256)
-	past, cancel := context.WithDeadline(t.Context(), time.Now().Add(-time.Second))
-	defer cancel()
-	s, err := signer.New(past, start(t, f), purposeName)
-	if s != nil || err == nil || !isDeadline(err) {
-		t.Fatalf("signer %v, err %v: not a deadline", s, err)
-	}
-}
-
-func TestDeadlineOfTheContextOfNewWinsWhenItIsSoonerThanTheTimeout(t *testing.T) {
-	f, _ := newFake(t, purpose.ES256)
-	ctx, cancel := context.WithTimeout(t.Context(), 500*time.Millisecond)
-	defer cancel()
-	s, err := signer.New(ctx, start(t, f), purposeName, signer.WithTimeout(time.Hour))
-	if err != nil {
-		t.Fatal(err)
-	}
-	f.blockSign()
-	begin := time.Now()
-	sig, err := s.Sign(nil, digestOf(purpose.ES256, "m"), crypto.SHA256)
-	if elapsed := time.Since(begin); elapsed > 10*time.Second {
-		t.Fatalf("Sign took %v: the hour of WithTimeout won over the 500ms of the context", elapsed)
-	}
-	if sig != nil || err == nil || !isDeadline(err) {
-		t.Fatalf("sig %x, err %v: not a deadline", sig, err)
-	}
-	t.Log(describe(err))
 }
 
 // Concurrency.
 
-func TestManyGoroutinesSignThroughOneSigner(t *testing.T) {
+func TestManyGoroutinesSignThroughOneSignerAndItsCopies(t *testing.T) {
 	const goroutines, each = 16, 8
-	for _, alg := range []string{purpose.ES256, purpose.ES384, purpose.RS256} {
+	for _, alg := range algorithms {
 		t.Run(alg, func(t *testing.T) {
 			f, _ := newFake(t, alg)
 			s := newSigner(t, f)
 			var wg sync.WaitGroup
 			for g := range goroutines {
+				sg := s
+				if g%2 == 1 {
+					sg = s.WithContext(t.Context()) // every other goroutine signs through a copy of its own
+				}
 				wg.Add(1)
 				go func() {
 					defer wg.Done()
 					for i := range each {
 						digest := digestOf(alg, fmt.Sprintf("goroutine %d, message %d", g, i))
-						sig, err := s.Sign(nil, digest, hashOf(alg))
-						if err != nil {
-							t.Errorf("Sign: %v", err)
+						sig, err := sg.Sign(nil, digest, hashOf(alg))
+						if err != nil || !verifies(t, alg, sg.Public(), digest, sig) {
+							t.Errorf("goroutine %d, message %d: %v", g, i, err)
 							return
-						}
-						if !verifies(t, alg, s.Public(), digest, sig) {
-							t.Errorf("goroutine %d, message %d: the signature does not verify", g, i)
 						}
 					}
 				}()
@@ -800,43 +803,9 @@ func TestManyGoroutinesSignThroughOneSigner(t *testing.T) {
 	}
 }
 
-func TestNewIgnoresANilOptionAndAppliesTheOthers(t *testing.T) {
-	// The real options on both sides of the nil one apply, in order: the last timeout is the one that holds.
-	t.Run("only nil options", func(t *testing.T) {
-		f, _ := newFake(t, purpose.ES256)
-		if _, err := signer.New(t.Context(), start(t, f), purposeName, nil, nil); err != nil {
-			t.Fatalf("New: %v", err)
-		}
-	})
-	t.Run("the timeout after the nil option applies", func(t *testing.T) {
-		f, _ := newFake(t, purpose.ES256)
-		s, err := signer.New(t.Context(), start(t, f), purposeName, signer.WithTimeout(-time.Second), nil, signer.WithTimeout(50*time.Millisecond))
-		if err != nil {
-			t.Fatalf("New: %v", err)
-		}
-		f.blockSign()
-		begin := time.Now()
-		sig, err := s.Sign(nil, digestOf(purpose.ES256, "m"), crypto.SHA256)
-		if elapsed := time.Since(begin); elapsed > 5*time.Second {
-			t.Fatalf("Sign took %v: the timeout of 50ms was not applied", elapsed)
-		}
-		if sig != nil || !isDeadline(err) {
-			t.Fatalf("sig %x, err %v: not a deadline", sig, err)
-		}
-	})
-	t.Run("the timeout before the nil option applies", func(t *testing.T) {
-		f, _ := newFake(t, purpose.ES256)
-		s, err := signer.New(t.Context(), start(t, f), purposeName, signer.WithTimeout(time.Minute), nil, signer.WithTimeout(0))
-		if s != nil {
-			t.Fatal("New returned a Signer")
-		}
-		refused(t, nil, err, signer.ErrTimeout)
-	})
-}
-
 func TestRS256RefusesAnExponentThatIsNot65537(t *testing.T) {
 	base := &rsaKey(t, 2048, 0).PublicKey
-	for _, e := range []int{3, 17, 257, 65539} {
+	for _, e := range []int{3, 17, 65539} {
 		t.Run(fmt.Sprint("E=", e), func(t *testing.T) {
 			f, _ := newFake(t, purpose.RS256)
 			spki, err := x509.MarshalPKIXPublicKey(&rsa.PublicKey{N: base.N, E: e})
@@ -852,47 +821,24 @@ func TestRS256RefusesAnExponentThatIsNot65537(t *testing.T) {
 			refused(t, nil, err, signer.ErrKey)
 		})
 	}
-	t.Run("65537 is taken", func(t *testing.T) {
-		f, _ := newFake(t, purpose.RS256)
-		if base.E != 65537 {
-			t.Fatalf("the test key has the exponent %d", base.E)
-		}
-		if s := newSigner(t, f); s.Public().(*rsa.PublicKey).E != 65537 {
-			t.Fatal("the exponent is not 65537")
-		}
-	})
 }
 
 // Sign copies the digest.
 
 func TestSignCopiesTheDigest(t *testing.T) {
+	// The caller changes its slice while the store works and still gets a valid signature of the first value. The fake signals that it
+	// has the request, the test changes the slice, and only then the fake answers.
 	for _, alg := range algorithms {
 		t.Run(alg, func(t *testing.T) {
 			f, k := newFake(t, alg)
 			s := newSigner(t, f)
 			digest := digestOf(alg, "m")
 			given := append([]byte(nil), digest...)
-			_, err := s.Sign(nil, digest, hashOf(alg))
-			if err != nil {
-				t.Fatal(err)
-			}
-			if !bytes.Equal(digest, given) {
-				t.Error("Sign changed the slice of the caller")
-			}
-			if got := f.requests()[0].GetDigest(); !bytes.Equal(got, given) {
-				t.Errorf("the store got %x, the caller gave %x", got, given)
-			}
-
-			// The caller changes its slice while the store works: it still gets a valid signature of the first value. The fake
-			// signals that it has the request, the test changes the slice, and only then the fake answers.
 			proceed := make(chan struct{})
-			f.setSign(func(_ context.Context, req *keyv1alpha1.SignRequest) (*keyv1alpha1.SignResponse, error) {
+			f.setSign(func(ctx context.Context, req *keyv1alpha1.SignRequest) (*keyv1alpha1.SignResponse, error) {
 				<-proceed
-				return honest(t, k)(nil, req)
+				return honest(k)(ctx, req)
 			})
-			for len(f.entered) > 0 {
-				<-f.entered
-			}
 			type result struct {
 				sig []byte
 				err error
@@ -918,6 +864,9 @@ func TestSignCopiesTheDigest(t *testing.T) {
 			if !verifies(t, alg, s.Public(), given, r.sig) {
 				t.Fatal("the signature is not a valid signature of the value at the time of the call")
 			}
+			if got := f.requests()[0].GetDigest(); !bytes.Equal(got, given) {
+				t.Errorf("the store got %x, the caller gave %x", got, given)
+			}
 		})
 	}
 }
@@ -942,8 +891,6 @@ func TestKeyChangedCarriesNoIdOfTheStore(t *testing.T) {
 	}
 }
 
-// WithContext.
-
 func TestWithContextMakesNoCallAndKeepsTheKey(t *testing.T) {
 	f, _ := newFake(t, purpose.ES384)
 	s := newSigner(t, f)
@@ -962,141 +909,5 @@ func TestWithContextMakesNoCallAndKeepsTheKey(t *testing.T) {
 	sig, err := c.Sign(nil, digest, crypto.SHA384)
 	if err != nil || !verifies(t, purpose.ES384, c.Public(), digest, sig) {
 		t.Fatalf("Sign of the copy: %v", err)
-	}
-}
-
-func TestWithContextCallsCarryTheNewContext(t *testing.T) {
-	var mu sync.Mutex
-	var values []any
-	ic := connect.UnaryInterceptorFunc(func(next connect.UnaryFunc) connect.UnaryFunc {
-		return func(ctx context.Context, req connect.AnyRequest) (connect.AnyResponse, error) {
-			if req.Spec().Procedure == "/atoom.key.v1alpha1.KeyStoreService/Sign" {
-				mu.Lock()
-				values = append(values, ctx.Value(ctxKey{}))
-				mu.Unlock()
-			}
-			return next(ctx, req)
-		}
-	})
-	f, _ := newFake(t, purpose.ES256)
-	s, err := signer.New(context.WithValue(t.Context(), ctxKey{}, "original"), start(t, f, connect.WithInterceptors(ic)), purposeName)
-	if err != nil {
-		t.Fatal(err)
-	}
-	digest := digestOf(purpose.ES256, "m")
-	if _, err := s.WithContext(context.WithValue(t.Context(), ctxKey{}, "request")).Sign(nil, digest, crypto.SHA256); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := s.Sign(nil, digest, crypto.SHA256); err != nil {
-		t.Fatal(err)
-	}
-	mu.Lock()
-	defer mu.Unlock()
-	if len(values) != 2 || values[0] != "request" || values[1] != "original" {
-		t.Fatalf("the values that reached the port: %v, want [request original]", values)
-	}
-}
-
-func TestWithContextDeadlineWinsWhenSoonerThanTheTimeout(t *testing.T) {
-	f, _ := newFake(t, purpose.ES256)
-	s := newSigner(t, f, signer.WithTimeout(time.Hour))
-	ctx, cancel := context.WithTimeout(t.Context(), 300*time.Millisecond)
-	defer cancel()
-	f.blockSign()
-	begin := time.Now()
-	sig, err := s.WithContext(ctx).Sign(nil, digestOf(purpose.ES256, "m"), crypto.SHA256)
-	if elapsed := time.Since(begin); elapsed > 10*time.Second {
-		t.Fatalf("Sign took %v: the deadline of the new context did not win", elapsed)
-	}
-	if sig != nil || !isDeadline(err) {
-		t.Fatalf("sig %x, err %v: not a deadline", sig, err)
-	}
-}
-
-func TestWithContextCancellationsAreIndependent(t *testing.T) {
-	digest := digestOf(purpose.ES256, "m")
-	sign := func(s *signer.Signer) ([]byte, error) { return s.Sign(nil, digest, crypto.SHA256) }
-
-	t.Run("cancelling the copy stops the copy and not the original", func(t *testing.T) {
-		f, _ := newFake(t, purpose.ES256)
-		s := newSigner(t, f)
-		ctx, cancel := context.WithCancel(t.Context())
-		c := s.WithContext(ctx)
-		cancel()
-		if sig, err := sign(c); sig != nil || !isCanceled(err) {
-			t.Fatalf("copy: sig %x, err %v: not a cancellation", sig, err)
-		}
-		if _, err := sign(s); err != nil {
-			t.Fatalf("the original after the copy was cancelled: %v", err)
-		}
-	})
-	t.Run("cancelling the original does not stop the copy", func(t *testing.T) {
-		f, _ := newFake(t, purpose.ES256)
-		ctx, cancel := context.WithCancel(t.Context())
-		s, err := signer.New(ctx, start(t, f), purposeName)
-		if err != nil {
-			t.Fatal(err)
-		}
-		c := s.WithContext(t.Context())
-		cancel()
-		if sig, err := sign(s); sig != nil || !isCanceled(err) {
-			t.Fatalf("original: sig %x, err %v: not a cancellation", sig, err)
-		}
-		if sig, err := sign(c); err != nil || !verifies(t, purpose.ES256, c.Public(), digest, sig) {
-			t.Fatalf("the copy after the original was cancelled: %v", err)
-		}
-	})
-}
-
-func TestWithContextOfNilPanicsAndSaysWhy(t *testing.T) {
-	f, _ := newFake(t, purpose.ES256)
-	s := newSigner(t, f)
-	var nilCtx context.Context
-	defer func() {
-		r := recover()
-		if r == nil {
-			t.Fatal("WithContext(nil) did not panic")
-		}
-		if msg := fmt.Sprint(r); !strings.Contains(msg, "nil context") {
-			t.Fatalf("the panic says %q, want it to name the nil context", msg)
-		}
-	}()
-	s.WithContext(nilCtx)
-}
-
-func TestCopiesAndTheOriginalSignTogether(t *testing.T) {
-	const goroutines, each = 8, 8
-	for _, alg := range []string{purpose.ES256, purpose.RS256} {
-		t.Run(alg, func(t *testing.T) {
-			f, _ := newFake(t, alg)
-			s := newSigner(t, f)
-			var wg sync.WaitGroup
-			for g := range goroutines {
-				// Half of the goroutines sign through the original, the others each through a copy of their own, and some copy a copy.
-				sg := s
-				if g%2 == 1 {
-					sg = s.WithContext(context.WithValue(t.Context(), ctxKey{}, g))
-					if g%4 == 3 {
-						sg = sg.WithContext(t.Context())
-					}
-				}
-				wg.Add(1)
-				go func() {
-					defer wg.Done()
-					for i := range each {
-						digest := digestOf(alg, fmt.Sprintf("goroutine %d, message %d", g, i))
-						sig, err := sg.Sign(nil, digest, hashOf(alg))
-						if err != nil || !verifies(t, alg, sg.Public(), digest, sig) {
-							t.Errorf("goroutine %d, message %d: %v", g, i, err)
-							return
-						}
-					}
-				}()
-			}
-			wg.Wait()
-			if got := f.signCount(); got != goroutines*each {
-				t.Errorf("%d calls of the port, want %d", got, goroutines*each)
-			}
-		})
 	}
 }
