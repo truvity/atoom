@@ -14,7 +14,7 @@ set -euo pipefail
 cd "$(dirname "$0")/../.."
 
 cargo build --locked -p atoom-store-conformance -p atoom-store-memory -p atoom-store-rqlite
-bin=$PWD/target/debug
+bin=${CARGO_TARGET_DIR:-$PWD/target}/debug
 
 tmp=$(mktemp -d "${TMPDIR:-/tmp}/atoom-conf.XXXXXX")
 pids=()

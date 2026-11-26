@@ -15,7 +15,7 @@ if [ "$(uname -s)" != Linux ]; then
 fi
 
 cargo build --locked -p atoom-source-conformance -p atoom-source-file -p atoom-source-credential
-bin=$PWD/target/debug
+bin=${CARGO_TARGET_DIR:-$PWD/target}/debug
 
 tmp=$(mktemp -d "${TMPDIR:-/tmp}/atoom-conf-source.XXXXXX")
 pids=()
