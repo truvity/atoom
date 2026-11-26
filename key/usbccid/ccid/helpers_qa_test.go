@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
-	"os"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -122,8 +121,6 @@ type lostCase struct {
 	// cause must be reachable with errors.Is (nil: only ErrSessionLost is required); not must not be.
 	cause []error
 	not   []error
-	// noPort says that the call itself must not reach the port at all (a budget that is gone before the first transfer).
-	noPort bool
 }
 
 // runLost runs the case and holds the lost-session rule: ErrSessionLost with the cause reachable, no secret in the text, the buffers
@@ -155,11 +152,6 @@ func runLost(t *testing.T, c lostCase) {
 	err = c.call(r)
 	if err == nil {
 		t.Fatal("the call succeeded")
-	}
-	if c.noPort {
-		if after := f.callsAfter(mark); len(after) != 0 {
-			t.Errorf("the port was used: %v", after)
-		}
 	}
 	if !errors.Is(err, ErrSessionLost) {
 		t.Fatalf("err = %v, want ErrSessionLost", err)
@@ -250,13 +242,12 @@ type qaFault struct {
 	// reply answers the message of the failing type: rsp is the type of the answer to it.
 	reply func(f *fakeDevice, rsp, seq byte)
 	// tune injects a failure on the port; skip is the number of normal exchanges before the failing one.
-	tune   func(f *fakeDevice, baseIn, baseOut, skip int)
-	noPort bool
+	tune func(f *fakeDevice, baseIn, baseOut, skip int)
 }
 
 func (q qaFault) lostCase(op opCase) lostCase {
 	// A transfer timeout shorter than the budget, so that a timeout of the transfer is not taken for the budget running out.
-	c := lostCase{name: op.name + "/" + q.name, cause: q.cause, not: q.not, noPort: q.noPort, opts: Options{TransferTimeout: time.Second}}
+	c := lostCase{name: op.name + "/" + q.name, cause: q.cause, not: q.not, opts: Options{TransferTimeout: time.Second}}
 	b := q.budget
 	if b == 0 {
 		b = testBudget
@@ -280,12 +271,4 @@ func (q qaFault) lostCase(op opCase) lostCase {
 // bigFrame is an answer of dlen data bytes (qaResp repeated) that the header of the answer announces in full.
 func bigFrame(rsp, seq byte, dlen int) []byte {
 	return msg(rsp, seq, stOK, 0, 0, bytes.Repeat(qaResp, dlen/len(qaResp)+1)[:dlen])
-}
-
-// knownBug skips a test that shows a defect of the code under test, unless CCID_QA_SHOW_BUGS is set: with it the test runs and fails.
-func knownBug(t *testing.T, text string) {
-	t.Helper()
-	if os.Getenv("CCID_QA_SHOW_BUGS") == "" {
-		t.Skip("BUG: " + text)
-	}
 }

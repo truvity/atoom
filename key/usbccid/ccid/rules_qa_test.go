@@ -1,0 +1,585 @@
+package ccid
+
+import (
+	"bytes"
+	"encoding/binary"
+	"errors"
+	"fmt"
+	"math/rand/v2"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/truvity/atoom/key/usbccid"
+)
+
+// The four rules of the last round, at their edges: the order of a response chain, no chain at short APDU level, a budget that is spent
+// before the first Port call, and the six packet sizes.
+
+// ---- rule 1: after a begin block, only middle (0x03) continues and only end (0x02) ends ----
+
+// chainByValues answers the command with blocks whose chain parameters are given (the first message gets blocks[0], each continuation the
+// next), each with its own payload, and counts the messages.
+type chainByValues struct {
+	params []byte
+	sent   int
+	data   [][]byte
+}
+
+func (c *chainByValues) handler() func(f *fakeDevice, m []byte) {
+	return func(f *fakeDevice, m []byte) {
+		if m[0] != msgXfrBlock {
+			cardHandler(echoSW)(f, m)
+			return
+		}
+		i := c.sent
+		c.sent++
+		if i >= len(c.params) {
+			return // nothing more: a read would time out
+		}
+		d := append(bytes.Repeat(qaResp, 2), byte(i), 0x90)
+		c.data = append(c.data, d)
+		f.send(msg(rspDataBlock, m[6], stOK, 0, c.params[i], d))
+	}
+}
+
+func TestQAChainSecondAndLaterBlockValues(t *testing.T) {
+	for _, prefix := range [][]byte{{chainBegin}, {chainBegin, chainMiddle}, {chainBegin, chainMiddle, chainMiddle, chainMiddle}} {
+		for v := range 256 {
+			t.Run(fmt.Sprintf("after %v, %#02x", prefix, v), func(t *testing.T) {
+				params := append(append([]byte(nil), prefix...), byte(v))
+				if v == chainMiddle {
+					params = append(params, chainEnd) // only 0x03 continues: one more block
+				}
+				c := &chainByValues{params: params}
+				r, f := openPowered(t, Options{}, c.handler())
+				outs := len(f.outs)
+				got, err := r.Transmit(apduSelect, testBudget)
+				good := v == chainEnd || v == chainMiddle
+				if good {
+					var want []byte
+					for _, d := range c.data {
+						want = append(want, d...)
+					}
+					if err != nil || !bytes.Equal(got, want) {
+						t.Fatalf("%d bytes, %v", len(got), err)
+					}
+					if sent := len(f.outs) - outs; sent != len(params) {
+						t.Errorf("%d messages for %d blocks", sent, len(params))
+					}
+					return
+				}
+				lostWith(t, err, ErrProtocol)
+				if got != nil {
+					t.Error("a response with the error")
+				}
+				// No block was asked for after the refused one: the command and one continuation for each block so far.
+				if sent := len(f.outs) - outs; sent != len(prefix)+1 {
+					t.Errorf("%d messages sent, want %d", sent, len(prefix)+1)
+				}
+				assertWiped(t, r, "after the refused block")
+				assertNoLeak(t, "chain", err, qaResp)
+				untouched(t, r, f, err)
+			})
+		}
+	}
+}
+
+// A chain of begin, many middle blocks and end, to the limit of the response, goes through.
+func TestQAChainOfManyMiddleBlocksToTheLimit(t *testing.T) {
+	want := pattern(MaxResponseAPDU, 4)
+	blocks := cut(want, 261)
+	cc := &chainCard{respParts: blocks}
+	r, _ := openPowered(t, Options{}, cc.handler())
+	got, err := r.Transmit(apduSelect, testBudget)
+	if err != nil || !bytes.Equal(got, want) || len(blocks) < 200 {
+		t.Fatalf("%d bytes in %d blocks, %v", len(got), len(blocks), err)
+	}
+}
+
+// ---- rule 2: a reader at short APDU level has no chain ----
+
+func shortLevelFake(h func(f *fakeDevice, m []byte)) *fakeDevice {
+	return newFake(descSpec{features: featuresShort}, h)
+}
+
+func TestQAShortLevelChainValueInTheAnswerOfTransmit(t *testing.T) {
+	for v := range 256 {
+		t.Run(fmt.Sprintf("%#02x", v), func(t *testing.T) {
+			f := shortLevelFake(func(f *fakeDevice, m []byte) {
+				if m[0] == msgXfrBlock {
+					f.send(msg(rspDataBlock, m[6], stOK, 0, byte(v), append(bytes.Repeat(qaResp, 2), 0x90, 0)))
+					return
+				}
+				cardHandler(echoSW)(f, m)
+			})
+			r, err := Open(f, Options{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := r.PowerOn(testBudget); err != nil {
+				t.Fatal(err)
+			}
+			outs := len(f.outs)
+			got, err := r.Transmit(apduSelect, testBudget)
+			if v == 0 {
+				if err != nil || len(got) != 2*len(qaResp)+2 {
+					t.Fatalf("%d bytes, %v", len(got), err)
+				}
+				return
+			}
+			lostWith(t, err, ErrProtocol)
+			if got != nil || len(f.outs)-outs != 1 {
+				t.Errorf("response %v, %d messages sent: no further message is allowed", got != nil, len(f.outs)-outs)
+			}
+			assertNoLeak(t, "short level", err, qaResp)
+			assertWiped(t, r, "after the refusal")
+			untouched(t, r, f, err)
+		})
+	}
+}
+
+func TestQAShortLevelChainValueInTheAnswerToReset(t *testing.T) {
+	for v := range 256 {
+		t.Run(fmt.Sprintf("%#02x", v), func(t *testing.T) {
+			f := shortLevelFake(func(f *fakeDevice, m []byte) {
+				if m[0] == msgIccPowerOn {
+					f.send(msg(rspDataBlock, m[6], stOK, 0, byte(v), testATR))
+					return
+				}
+				cardHandler(echoSW)(f, m)
+			})
+			r, err := Open(f, Options{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			atr, err := r.PowerOn(testBudget)
+			if v == 0 {
+				if err != nil || !bytes.Equal(atr, testATR) {
+					t.Fatalf("%x %v", atr, err)
+				}
+				return
+			}
+			lostWith(t, err, ErrProtocol)
+			if atr != nil || len(f.outs) != 2 { // GetSlotStatus and IccPowerOn, and nothing after
+				t.Errorf("answer to reset %v, %d messages", atr != nil, len(f.outs))
+			}
+			untouched(t, r, f, err)
+		})
+	}
+}
+
+// The check is for the answers that carry a response (DataBlock): the byte of a slot status answer is bClockStatus there, and at
+// extended level every value is judged by the chain rules (PowerOn takes the answer to reset whatever its chain byte).
+func TestQAChainByteWhereItIsNotAChainByte(t *testing.T) {
+	for _, features := range []uint32{featuresShort, featuresExt} {
+		t.Run(fmt.Sprintf("features %#x", features), func(t *testing.T) {
+			f := newFake(descSpec{features: features}, func(f *fakeDevice, m []byte) {
+				switch m[0] {
+				case msgGetSlotState, msgIccPowerOff:
+					st := byte(iccPresent)
+					if m[0] == msgIccPowerOff {
+						st = iccInact
+					}
+					f.send(msg(rspSlotStatus, m[6], stOK|st, 0, 0x55, nil)) // bClockStatus
+				case msgIccPowerOn:
+					f.send(msg(rspDataBlock, m[6], stOK, 0, 0, testATR))
+				default:
+					cardHandler(echoSW)(f, m)
+				}
+			})
+			r, err := Open(f, Options{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if st, err := r.SlotStatus(testBudget); err != nil || st != SlotActive {
+				t.Fatalf("SlotStatus: %v %v", st, err)
+			}
+			if err := r.PowerOff(testBudget); err != nil {
+				t.Fatalf("PowerOff: %v", err)
+			}
+		})
+	}
+	t.Run("extended level takes an answer to reset with any chain byte", func(t *testing.T) {
+		for v := range 256 {
+			f := newFake(descSpec{}, func(f *fakeDevice, m []byte) {
+				if m[0] == msgIccPowerOn {
+					f.send(msg(rspDataBlock, m[6], stOK, 0, byte(v), testATR))
+					return
+				}
+				cardHandler(echoSW)(f, m)
+			})
+			r, err := Open(f, Options{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if atr, err := r.PowerOn(testBudget); err != nil || !bytes.Equal(atr, testATR) {
+				t.Fatalf("chain byte %#x: %x %v", v, atr, err)
+			}
+		}
+	})
+	t.Run("extended level still chains", func(t *testing.T) {
+		cc := &chainCard{respParts: [][]byte{{1, 2}, {3, 0x90, 0}}}
+		r, _ := openPowered(t, Options{}, cc.handler())
+		if got, err := r.Transmit(apduSelect, testBudget); err != nil || !bytes.Equal(got, []byte{1, 2, 3, 0x90, 0}) {
+			t.Fatalf("%x %v", got, err)
+		}
+	})
+}
+
+// A FAILED answer (command status 1) at short level with a chain byte other than 0 is not looked at: the *CommandError is returned and the
+// session goes on. Pinned as it is today. It is not wrong: a failed answer carries no response, so its chain byte means nothing, and the
+// reader reads bError and bmICCStatus only. A time extension is treated the same.
+func TestQAShortLevelFailedAnswerWithAChainByteIsNotChecked(t *testing.T) {
+	f := shortLevelFake(func(f *fakeDevice, m []byte) {
+		if m[0] == msgXfrBlock {
+			f.send(msg(rspDataBlock, m[6], stTimeExt, 1, 0x77, nil))
+			f.send(msg(rspDataBlock, m[6], stFailed, 0xFE, 0x55, nil))
+			return
+		}
+		cardHandler(echoSW)(f, m)
+	})
+	r, err := Open(f, Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.PowerOn(testBudget); err != nil {
+		t.Fatal(err)
+	}
+	_, err = r.Transmit(apduSelect, testBudget)
+	if !errors.Is(err, ErrCardMute) || errors.Is(err, ErrSessionLost) {
+		t.Fatalf("err = %v", err)
+	}
+}
+
+// ---- rule 3: a budget that is spent before the first Port call keeps the session; from the first Port call on it loses it ----
+
+// refusedOnBudget checks the shape of a refusal on the budget before any Port call.
+func refusedOnBudget(t *testing.T, r *Reader, f *fakeDevice, err error, mark int) {
+	t.Helper()
+	if !errors.Is(err, ErrBudgetExhausted) || errors.Is(err, ErrSessionLost) {
+		t.Fatalf("err = %v, want ErrBudgetExhausted without ErrSessionLost", err)
+	}
+	if after := f.callsAfter(mark); len(after) != 0 {
+		t.Fatalf("the port was used: %v", after)
+	}
+	assertWiped(t, r, "after the refusal")
+}
+
+func TestQABudgetSpentBeforeTheFirstPortCall(t *testing.T) {
+	budgets := []time.Duration{time.Nanosecond, 5 * time.Millisecond} // the last is under one drain read for a first call
+	for _, op := range []opCase{qaOps[0], qaOps[1], qaOps[3], qaOps[4]} {
+		for _, first := range []bool{true, false} {
+			if op.typ == msgXfrBlock && first {
+				continue // a Transmit needs a powered card, which a first call cannot have
+			}
+			for _, b := range budgets {
+				if !first && b > time.Millisecond {
+					continue // a later call with 5 ms does reach the port: that is not a refusal
+				}
+				name := fmt.Sprintf("%s/first=%v/%v", op.name, first, b)
+				t.Run(name, func(t *testing.T) {
+					setSeq(100)
+					stale := msg(rspDataBlock, 101, stOK, 0, 0, qaResp) // a late answer with the number of the next message
+					var f *fakeDevice
+					var r *Reader
+					if first {
+						var err error
+						f = newFake(descSpec{}, cardHandler(echoSW))
+						f.send(stale)
+						if r, err = Open(f, Options{}); err != nil {
+							t.Fatal(err)
+						}
+					} else {
+						r, f = openPowered(t, Options{}, cardHandler(echoSW))
+						setSeq(100) // no drain in a later call: a stale answer with the very number would be taken (the rest risk)
+					}
+					mark := f.mark()
+					err := op.call(r, b)
+					refusedOnBudget(t, r, f, err, mark)
+					// The same Reader works with a normal budget. The late answer is dropped by the drain, once, before the first
+					// send; no sequence number was spent by the refusal.
+					if err := op.call(r, testBudget); err != nil {
+						t.Fatalf("the next call: %v", err)
+					}
+					after := f.callsAfter(mark)
+					reads := 0
+					for _, c := range after {
+						if c == "out" {
+							break
+						}
+						if c == "in" {
+							reads++
+						}
+					}
+					if first && reads < 2 { // the stale message and the quiet read
+						t.Errorf("%d reads before the first write, want the drain (calls %v)", reads, after)
+					}
+					if !first && reads != 0 {
+						t.Errorf("a drain again: %v", after)
+					}
+					firstOut := f.outs[len(f.outs)-countOuts(op)]
+					if firstOut[6] != 101 {
+						t.Errorf("the first message after the refusal has the number %d, want 101 (no number was spent)", firstOut[6])
+					}
+					if len(f.in) != 0 {
+						t.Errorf("%d packets left", len(f.in))
+					}
+				})
+			}
+		}
+	}
+}
+
+// countOuts is the number of messages a successful call of op sends.
+func countOuts(op opCase) int {
+	if strings.HasPrefix(op.name, "PowerOn") {
+		return 2
+	}
+	return 1
+}
+
+// The state of the card after a refusal on the budget is what it was.
+func TestQABudgetRefusalKeepsThePowerState(t *testing.T) {
+	t.Run("PowerOn refused on a powered card", func(t *testing.T) {
+		r, f := openPowered(t, Options{}, cardHandler(echoSW))
+		mark := f.mark()
+		_, err := r.PowerOn(time.Nanosecond)
+		refusedOnBudget(t, r, f, err, mark)
+		if _, err := r.Transmit(apduSelect, testBudget); err != nil {
+			t.Errorf("Transmit after a refused PowerOn on a powered card: %v", err)
+		}
+	})
+	t.Run("PowerOn refused on a card that is off", func(t *testing.T) {
+		r, f, err := openFake(Options{}, cardHandler(echoSW))
+		if err != nil {
+			t.Fatal(err)
+		}
+		mark := f.mark()
+		_, err = r.PowerOn(time.Nanosecond)
+		refusedOnBudget(t, r, f, err, mark)
+		if _, err := r.Transmit(apduSelect, testBudget); !errors.Is(err, ErrNotPowered) {
+			t.Errorf("Transmit after a refused PowerOn: %v", err)
+		}
+		if _, err := r.PowerOn(testBudget); err != nil {
+			t.Errorf("PowerOn after the refusal: %v", err)
+		}
+	})
+	t.Run("PowerOff refused on a powered card", func(t *testing.T) {
+		r, f := openPowered(t, Options{}, cardHandler(echoSW))
+		mark := f.mark()
+		err := r.PowerOff(time.Nanosecond)
+		refusedOnBudget(t, r, f, err, mark)
+		if _, err := r.Transmit(apduSelect, testBudget); err != nil {
+			t.Errorf("Transmit after a refused PowerOff on a powered card: %v", err)
+		}
+	})
+	t.Run("PowerOff refused on a card that is off", func(t *testing.T) {
+		r, f, err := openFake(Options{}, cardHandler(echoSW))
+		if err != nil {
+			t.Fatal(err)
+		}
+		mark := f.mark()
+		err = r.PowerOff(time.Nanosecond)
+		refusedOnBudget(t, r, f, err, mark)
+		if _, err := r.Transmit(apduSelect, testBudget); !errors.Is(err, ErrNotPowered) {
+			t.Errorf("Transmit: %v", err)
+		}
+	})
+	t.Run("SlotStatus and Transmit refused on a powered card", func(t *testing.T) {
+		r, f := openPowered(t, Options{}, cardHandler(echoSW))
+		mark := f.mark()
+		_, err := r.SlotStatus(time.Nanosecond)
+		refusedOnBudget(t, r, f, err, mark)
+		_, err = r.Transmit(qaCmd, time.Nanosecond)
+		refusedOnBudget(t, r, f, err, mark)
+		if _, err := r.Transmit(apduSelect, testBudget); err != nil {
+			t.Errorf("Transmit after the refusals: %v", err)
+		}
+	})
+}
+
+// From the first Port call on, a budget failure loses the session: after one drain read; after a write whose answer is not read in time;
+// after the first message of a PowerOn; after the first block of a chain.
+func TestQABudgetFailureAfterAPortCallLosesTheSession(t *testing.T) {
+	lost := func(t *testing.T, r *Reader, f *fakeDevice, err error) {
+		t.Helper()
+		lostWith(t, err, ErrBudgetExhausted)
+		assertWiped(t, r, "after the loss")
+		untouched(t, r, f, err)
+	}
+	for _, op := range []opCase{qaOps[0], qaOps[1], qaOps[3]} {
+		t.Run("one drain read, then the budget is gone: "+op.name, func(t *testing.T) {
+			f := newFake(descSpec{}, cardHandler(echoSW))
+			f.onIn = func(*fakeDevice) { time.Sleep(60 * time.Millisecond) }
+			r, _ := Open(f, Options{})
+			err := op.call(r, DrainReadTimeout+20*time.Millisecond)
+			lost(t, r, f, err)
+			if f.nOut != 0 || f.nIn != 1 {
+				t.Errorf("%d writes, %d reads", f.nOut, f.nIn)
+			}
+		})
+	}
+	t.Run("PowerOn: the first message answered, the budget gone before the second", func(t *testing.T) {
+		r, f, err := openFake(Options{}, cardHandler(echoSW))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := r.SlotStatus(testBudget); err != nil { // the drain is done
+			t.Fatal(err)
+		}
+		f.onIn = func(*fakeDevice) { time.Sleep(60 * time.Millisecond) }
+		outs := f.nOut
+		_, err = r.PowerOn(30 * time.Millisecond)
+		lost(t, r, f, err)
+		if f.nOut-outs != 1 {
+			t.Errorf("%d messages written, want only GetSlotStatus", f.nOut-outs)
+		}
+	})
+	t.Run("a chain: the first block answered, the budget gone before the second", func(t *testing.T) {
+		cc := &chainCard{respParts: [][]byte{{0x90, 0}}}
+		r, f := openPowered(t, Options{}, cc.handler())
+		f.onIn = func(*fakeDevice) { time.Sleep(60 * time.Millisecond) }
+		outs := f.nOut
+		_, err := r.Transmit(qaLong, 30*time.Millisecond)
+		lost(t, r, f, err)
+		if f.nOut-outs != 1 {
+			t.Errorf("%d blocks written, want 1", f.nOut-outs)
+		}
+	})
+	t.Run("a write that succeeded and a budget gone before the read", func(t *testing.T) {
+		r, f := openPowered(t, Options{}, func(f *fakeDevice, m []byte) {
+			time.Sleep(60 * time.Millisecond)
+			cardHandler(echoSW)(f, m)
+		})
+		reads := f.nIn
+		_, err := r.Transmit(qaCmd, 30*time.Millisecond)
+		lost(t, r, f, err)
+		if f.nIn != reads {
+			t.Error("a read was started with no budget")
+		}
+	})
+	t.Run("a write that failed", func(t *testing.T) {
+		r, f := openPowered(t, Options{}, cardHandler(echoSW))
+		out := f.nOut
+		f.outFail = func(n int) error {
+			if n > out {
+				time.Sleep(40 * time.Millisecond)
+				return usbccid.ErrTimeout
+			}
+			return nil
+		}
+		_, err := r.Transmit(qaCmd, 30*time.Millisecond)
+		lost(t, r, f, err)
+	})
+}
+
+// The invariant, searched at random: whenever a call returns ErrBudgetExhausted and the session is not lost, the call made not one call
+// on the Port; and when it made a call on the Port, the session is lost or the call succeeded or failed for another reason. The sleeps
+// and the budgets are random, so the call is cut at every place.
+func TestQABudgetRefusalMeansNoPortCall(t *testing.T) {
+	rng := rand.New(rand.NewPCG(11, 12)) //nolint:gosec // a fixed seed
+	refused, lostN := 0, 0
+	for i := range 900 {
+		op := qaOps[rng.IntN(len(qaOps))]
+		first := rng.IntN(2) == 0
+		var r *Reader
+		var f *fakeDevice
+		h := func(f *fakeDevice, m []byte) {
+			if d := time.Duration(rng.IntN(4)) * time.Millisecond; d > 0 {
+				time.Sleep(d)
+			}
+			cardHandler(echoSW)(f, m)
+		}
+		if first && op.typ != msgXfrBlock {
+			f = newFake(descSpec{}, h)
+			var err error
+			if r, err = Open(f, Options{TransferTimeout: time.Duration(1+rng.IntN(25)) * time.Millisecond}); err != nil {
+				t.Fatal(err)
+			}
+		} else {
+			r, f = openPowered(t, Options{TransferTimeout: time.Duration(1+rng.IntN(25)) * time.Millisecond}, h)
+		}
+		f.onIn = func(*fakeDevice) {
+			if d := time.Duration(rng.IntN(4)) * time.Millisecond; d > 0 {
+				time.Sleep(d)
+			}
+		}
+		budget := time.Duration(1+rng.IntN(14)) * time.Millisecond
+		if rng.IntN(5) == 0 {
+			budget = time.Duration(1 + rng.IntN(2000))
+		}
+		mark := f.mark()
+		err := op.call(r, budget)
+		calls := len(f.callsAfter(mark))
+		switch {
+		case err == nil:
+		case errors.Is(err, ErrBudgetExhausted) && !errors.Is(err, ErrSessionLost):
+			refused++
+			if calls != 0 {
+				t.Fatalf("case %d (%s, first=%v, budget %v): ErrBudgetExhausted without ErrSessionLost after %d Port calls: %v", i, op.name, first, budget, calls, err)
+			}
+		case errors.Is(err, ErrSessionLost):
+			lostN++
+		}
+		if calls != 0 && errors.Is(err, ErrBudgetExhausted) && !errors.Is(err, ErrSessionLost) {
+			t.Fatalf("case %d: a budget failure after a Port call kept the session: %v", i, err)
+		}
+		// A refusal leaves a usable Reader; a lost session is the same error for every call.
+		if errors.Is(err, ErrSessionLost) {
+			mark = f.mark()
+			if _, e := r.SlotStatus(testBudget); !errors.Is(e, err) || len(f.callsAfter(mark)) != 0 {
+				t.Fatalf("case %d: a lost session is not latched: %v", i, e)
+			}
+		} else if errors.Is(err, ErrBudgetExhausted) {
+			if _, e := r.SlotStatus(testBudget); e != nil {
+				t.Fatalf("case %d: the Reader does not work after a refusal: %v", i, e)
+			}
+		}
+	}
+	if refused < 20 || lostN < 20 {
+		t.Errorf("the search met %d refusals and %d lost sessions: it does not cover both", refused, lostN)
+	}
+}
+
+// ---- rule 4: the packet sizes ----
+
+func setBulkPacketSizes(b []byte, out, in uint16) {
+	binary.LittleEndian.PutUint16(b[epAt(b, 0x02)+4:], out)
+	binary.LittleEndian.PutUint16(b[epAt(b, 0x82)+4:], in)
+}
+
+func TestQAEveryPacketSizeOfTheBulkEndpoints(t *testing.T) {
+	legal := map[int]bool{8: true, 16: true, 32: true, 64: true, 512: true, 1024: true}
+	for _, which := range []string{"bulk IN", "bulk OUT"} {
+		accepted := 0
+		for v := range 1 << 16 {
+			b := descSpec{}.build()
+			if which == "bulk IN" {
+				setBulkPacketSizes(b, 64, uint16(v)) //nolint:gosec // 16 bits
+			} else {
+				setBulkPacketSizes(b, uint16(v), 64) //nolint:gosec // 16 bits
+			}
+			f := newFake(descSpec{}, nil)
+			f.desc = b
+			r, err := Open(f, Options{})
+			if legal[v] {
+				accepted++
+				if err != nil || fmt.Sprint(f.calls) != "[descriptors claim]" {
+					t.Fatalf("%s size %d: err = %v, calls %v", which, v, err, f.calls)
+				}
+				info := r.Info()
+				if got := map[string]int{"bulk IN": info.MaxPacketIn, "bulk OUT": info.MaxPacketOut}[which]; got != v {
+					t.Fatalf("%s size %d: Info says %d", which, v, got)
+				}
+				continue
+			}
+			if r != nil || !errors.Is(err, usbccid.ErrBadDescriptors) || fmt.Sprint(f.calls) != "[descriptors close]" {
+				t.Fatalf("%s size %d: r=%v err=%v calls %v", which, v, r, err, f.calls)
+			}
+		}
+		if accepted != 6 {
+			t.Errorf("%s: %d sizes accepted, want 6", which, accepted)
+		}
+	}
+}

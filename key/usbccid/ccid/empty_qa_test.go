@@ -131,10 +131,19 @@ func TestQAEmptyPacketAfterEveryKindOfMessage(t *testing.T) {
 					}
 				}
 			})
-			t.Run("headers only, at a packet size of 10", func(t *testing.T) {
-				f := newFake(descSpec{mpsIn: 10, mpsOut: 10}, func(f *fakeDevice, m []byte) {
+			t.Run("slot status answers of a whole packet, at a packet size of 16", func(t *testing.T) {
+				// A slot status answer has no data bytes; a reader may pad it. 10 + 6 bytes are one packet of 16.
+				pad := []byte{0, 0, 0, 0, 0, 0}
+				f := newFake(descSpec{mpsIn: 16, mpsOut: 16}, func(f *fakeDevice, m []byte) {
 					f.noZLP = !zlp
-					cardHandler(echoSW)(f, m)
+					switch m[0] {
+					case msgGetSlotState:
+						f.send(msg(rspSlotStatus, m[6], stOK|iccPresent, 0, 0, pad))
+					case msgIccPowerOff:
+						f.send(msg(rspSlotStatus, m[6], stOK|iccInact, 0, 0, pad))
+					default:
+						cardHandler(echoSW)(f, m)
+					}
 				})
 				r, err := Open(f, Options{})
 				if err != nil {
@@ -203,11 +212,11 @@ func TestQAEmptyPacketAfterEveryKindOfMessage(t *testing.T) {
 					}
 				}
 			})
-			t.Run("acknowledgements of a command chain of whole packets", func(t *testing.T) {
-				// Acks have no data, so they are 10 bytes: whole packets at a packet size of 10.
-				cc := &chainCard{respParts: [][]byte{{0x90, 0}}}
+			t.Run("a command chain, and a response of whole packets, at a packet size of 8", func(t *testing.T) {
+				// The acknowledgements are 10 bytes (no multiple of a legal packet size); the response is 10 + 6 = two packets of 8.
+				cc := &chainCard{respParts: [][]byte{{1, 2, 3, 4, 0x90, 0}}}
 				h := cc.handler()
-				f := newFake(descSpec{mpsIn: 10, mpsOut: 10}, func(f *fakeDevice, m []byte) { f.noZLP = !zlp; h(f, m) })
+				f := newFake(descSpec{mpsIn: 8, mpsOut: 8}, func(f *fakeDevice, m []byte) { f.noZLP = !zlp; h(f, m) })
 				r, err := Open(f, Options{})
 				if err != nil {
 					t.Fatal(err)
@@ -216,7 +225,7 @@ func TestQAEmptyPacketAfterEveryKindOfMessage(t *testing.T) {
 					t.Fatal(err)
 				}
 				for range 3 {
-					if got, err := r.Transmit(bytes.Repeat([]byte{5}, 700), testBudget); err != nil || !bytes.Equal(got, []byte{0x90, 0}) {
+					if got, err := r.Transmit(bytes.Repeat([]byte{5}, 700), testBudget); err != nil || !bytes.Equal(got, []byte{1, 2, 3, 4, 0x90, 0}) {
 						t.Fatalf("%x %v", got, err)
 					}
 				}

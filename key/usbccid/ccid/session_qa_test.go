@@ -708,14 +708,19 @@ func TestQAPanicInTheDrain(t *testing.T) {
 // ---- the drain meets the faults of the port ----
 
 func TestQADrainFaults(t *testing.T) {
-	t.Run("a budget that is gone makes no read", func(t *testing.T) {
+	t.Run("a budget that is gone makes no read and keeps the session", func(t *testing.T) {
 		f := newFake(descSpec{}, cardHandler(echoSW))
 		r, _ := Open(f, Options{})
 		mark := f.mark()
 		_, err := r.SlotStatus(time.Nanosecond)
-		lostWith(t, err, ErrBudgetExhausted)
+		if !errors.Is(err, ErrBudgetExhausted) || errors.Is(err, ErrSessionLost) {
+			t.Fatalf("err = %v, want ErrBudgetExhausted alone", err)
+		}
 		if len(f.callsAfter(mark)) != 0 {
 			t.Error("the port was used")
+		}
+		if _, err := r.SlotStatus(testBudget); err != nil {
+			t.Errorf("the next call: %v", err)
 		}
 	})
 	for _, c := range []struct {
@@ -819,9 +824,10 @@ func TestQAEmptyReadAfterTheDrain(t *testing.T) {
 	})
 }
 
-// A drain read needs a whole DrainReadTimeout (or the transfer timeout, when that is shorter) left in the budget. With less, the session
-// is lost with ErrBudgetExhausted before any read, and the drain is not marked done. At the amount itself the call already has
-// microseconds spent, so it is refused as well; a few milliseconds above it, the call goes through.
+// A drain read needs a whole DrainReadTimeout (or the transfer timeout, when that is shorter) left in the budget. With less, the call is
+// refused with ErrBudgetExhausted before any read, the session is NOT lost (nothing was read or sent), the drain stays pending and
+// happens, once, in the next call that has the budget. At the amount itself the call already has microseconds spent, so it is refused
+// as well; a few milliseconds above it, the call goes through.
 func TestQADrainNeedsAWholeReadInTheBudget(t *testing.T) {
 	for _, c := range []struct {
 		name string
@@ -855,14 +861,22 @@ func TestQADrainNeedsAWholeReadInTheBudget(t *testing.T) {
 					}
 					return
 				}
-				lostWith(t, err, ErrBudgetExhausted)
+				if !errors.Is(err, ErrBudgetExhausted) || errors.Is(err, ErrSessionLost) {
+					t.Fatalf("err = %v, want ErrBudgetExhausted without ErrSessionLost", err)
+				}
 				if len(f.callsAfter(mark)) != 0 {
 					t.Errorf("the port was used: %v", f.callsAfter(mark))
 				}
 				if r.drained {
 					t.Error("the drain was marked done after a read that was not made")
 				}
-				untouched(t, r, f, err)
+				// The drain is still pending: it happens before the first write of the next call, once.
+				if _, err := r.SlotStatus(testBudget); err != nil {
+					t.Fatalf("the next call: %v", err)
+				}
+				if got := fmt.Sprint(f.callsAfter(mark)); got != "[in out in]" {
+					t.Errorf("calls of the next call: %s, want one drain read, then write and read", got)
+				}
 			})
 		}
 	}
