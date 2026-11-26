@@ -29,6 +29,13 @@ func (e endpoint) key() uint8 { return e.addr & 0x8F }
 // bulk reports whether the endpoint is a bulk endpoint with an address a CCID interface can have.
 func (e endpoint) bulk() bool { return e.attrs&3 == 2 && validEndpoint(e.addr) }
 
+// The limits of a simple configuration that come from the kernel: the number of interfaces in a configuration, and the size of the
+// bit mask in which usbfs keeps the claimed interfaces.
+const (
+	maxInterfaces  = 32
+	maxIfaceNumber = 64
+)
+
 // ifaceDesc is one interface at alternate setting 0, as the descriptors of the device hold it, with EVERY endpoint of it, whatever
 // the transfer type, up to the bNumEndpoints that the kernel counts.
 type ifaceDesc struct {
@@ -42,8 +49,9 @@ type ifaceDesc struct {
 // endpoint that is not a bulk endpoint of exactly one interface, which is claimed, is never used.
 //
 // A layout exists only for SIMPLE descriptors: one configuration; its length and bNumInterfaces as declared; every interface at
-// alternate setting 0 only, and no number twice; as many endpoint descriptors after each interface as its bNumEndpoints says; and no
-// endpoint address twice in the configuration. This layer serves one known kind of device, so it refuses everything else at Open
+// alternate setting 0 only, and no number twice; as many endpoint descriptors after each interface as its bNumEndpoints says; no
+// endpoint address twice in the configuration; at most 32 interfaces, and no interface number of 64 or more (usbfs keeps its claims in
+// a 64-bit mask, and such numbers would fail later with a kernel error). This layer serves one known kind of device, so it refuses everything else at Open
 // (ErrBadDescriptors, ErrSeveralConfigurations) instead of copying the rules the kernel applies to what is left open (the active
 // configuration, which usbfs does not name; the fall back to another alternate setting; the choice among duplicates and the
 // endpoints beyond a count). With nothing left for either side to choose, the layout cannot differ from the kernel's view of who
@@ -172,6 +180,14 @@ func parseConfig(cfg []byte) ([]ifaceDesc, error) {
 			}
 			if slices.ContainsFunc(out, func(i ifaceDesc) bool { return i.number == int(d[2]) }) {
 				return nil, errors.New("an interface number is listed twice")
+			}
+			// Two limits that usbfs would fail on later with a kernel error: it keeps its claims in a 64-bit mask, so an interface
+			// number of 64 or more cannot be claimed, and the kernel takes at most 32 interfaces in a configuration.
+			if d[2] >= maxIfaceNumber {
+				return nil, errors.New("an interface number is 64 or more (usbfs keeps its claims in a 64-bit mask)")
+			}
+			if len(out) >= maxInterfaces {
+				return nil, errors.New("the configuration lists more than 32 interfaces")
 			}
 			out = append(out, ifaceDesc{number: int(d[2]), class: d[5]})
 			want = append(want, int(d[4]))

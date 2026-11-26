@@ -86,6 +86,7 @@ type Device struct {
 	opened  bool // set only by the real open: the zero Device holds no descriptor and is closed
 	closed  bool
 	dead    error // the first fatal error; later calls return it wrapped in ErrGone
+	stall   error // the first stall (EPIPE) of a bulk call; later bulk calls return it wrapped in ErrStalled
 	claimed map[int]bool
 	desc    []byte
 	lay     layout // what desc holds, read at Open; the claim and the bulk calls are held to it
@@ -113,6 +114,9 @@ func open(path string, usb bool) (*Device, error) {
 	n, err := unix.Pread(fd, buf, 0)
 	if err != nil {
 		_ = unix.Close(fd)
+		if errors.Is(err, unix.ENODEV) || errors.Is(err, unix.ESHUTDOWN) {
+			return nil, fmt.Errorf("usbccid: %s: read descriptors: %w: %w", path, ErrGone, err)
+		}
 		return nil, &os.PathError{Op: "read descriptors", Path: path, Err: err}
 	}
 	desc := buf[:n]
@@ -327,8 +331,8 @@ func (d *Device) release(n int) error {
 	if d.closed || !d.opened || !d.claimed[n] {
 		return nil
 	}
-	delete(d.claimed, n)
 	if d.dead != nil {
+		delete(d.claimed, n)
 		return nil // the kernel dropped the claim with the device
 	}
 	v := uint32(n)                                        //nolint:gosec // claimed only after the check of Claim: 0 to 255
@@ -337,10 +341,12 @@ func (d *Device) release(n int) error {
 	if e != 0 {
 		err := d.fail(fmt.Sprintf("release interface %d", n), e)
 		if fatal(e) {
+			delete(d.claimed, n)
 			return nil // the device went away under the release, and the claim with it
 		}
-		return err
+		return err // the kernel may still hold the claim: the entry stays, a second Release tries again, and Close releases it
 	}
+	delete(d.claimed, n)
 	return nil
 }
 
@@ -380,6 +386,9 @@ func (d *Device) bulk(ep uint8, p []byte, timeout time.Duration, in bool) (int, 
 		return 0, err
 	}
 	what := fmt.Sprintf("bulk transfer on endpoint 0x%02X", ep)
+	if d.stall != nil {
+		return 0, fmt.Errorf("usbccid: %s: %w: %w", what, ErrStalled, d.stall)
+	}
 	if (ep&0x80 != 0) != in {
 		return 0, fmt.Errorf("usbccid: %s: the direction does not fit the call: %w", what, ErrBadEndpoint)
 	}
@@ -398,6 +407,10 @@ func (d *Device) bulk(ep uint8, p []byte, timeout time.Duration, in bool) (int, 
 	runtime.KeepAlive(p)
 	runtime.KeepAlive(&bt)
 	if e != 0 {
+		if e == unix.EPIPE {
+			d.stall = e // the first stall ends the use of the handle: nothing here clears a halt
+			return 0, fmt.Errorf("usbccid: %s: %w: %w", what, ErrStalled, e)
+		}
 		return 0, d.fail(what, e)
 	}
 	if r > uintptr(len(p)) {
