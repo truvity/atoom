@@ -46,7 +46,7 @@ func TestQAFilesPerSystem(t *testing.T) {
 				}
 			} else {
 				want = append(slices.Clone(shared), "device_other.go")
-				wantTests = []string{"notsupported_test.go"}
+				wantTests = []string{"claim_qa_other_test.go", "notsupported_test.go"}
 				for _, imp := range pkg.Imports {
 					if imp != "errors" && imp != "time" {
 						t.Errorf("%s: the package imports %q: nothing from x/sys or any other module may be needed off linux/amd64 and linux/arm64", sys.goos, imp)
@@ -146,7 +146,7 @@ func TestQAEveryLinuxFileCarriesTheConstraint(t *testing.T) {
 			if first != realBuild {
 				t.Errorf("%s starts with %q, want %q", name, first, realBuild)
 			}
-		case name == "device_other.go" || name == "notsupported_test.go":
+		case name == "device_other.go" || name == "notsupported_test.go" || name == "claim_qa_other_test.go":
 			if first != "//go:build !(linux && !android && (amd64 || arm64))\n" {
 				t.Errorf("%s starts with %q", name, first)
 			}
