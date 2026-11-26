@@ -759,3 +759,137 @@ func TestQADrainFaults(t *testing.T) {
 		}
 	})
 }
+
+// ---- after the drain ----
+
+// One empty packet that arrives just after the drain (the end of a whole-packet message of an earlier session) is consumed by the first
+// read of the session; a second one is a protocol error. Later exchanges get no such allowance.
+func TestQAEmptyReadAfterTheDrain(t *testing.T) {
+	for _, c := range []struct {
+		name   string
+		empty  int
+		lostOK bool
+	}{{"no empty packet", 0, false}, {"one empty packet", 1, false}, {"two empty packets", 2, true}} {
+		t.Run(c.name, func(t *testing.T) {
+			setSeq(0)
+			first := true
+			f := newFake(descSpec{}, func(f *fakeDevice, m []byte) {
+				if first {
+					first = false
+					for range c.empty {
+						f.sendRaw([]byte{})
+					}
+				}
+				cardHandler(echoSW)(f, m)
+			})
+			r, err := Open(f, Options{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			st, err := r.SlotStatus(testBudget)
+			if c.lostOK {
+				lostWith(t, err, ErrProtocol)
+				assertWiped(t, r, "after the loss")
+				untouched(t, r, f, err)
+				return
+			}
+			if err != nil || st != SlotActive {
+				t.Fatalf("%v %v", st, err)
+			}
+		})
+	}
+	t.Run("not for the second exchange", func(t *testing.T) {
+		n := 0
+		r, f, err := openFake(Options{}, func(f *fakeDevice, m []byte) {
+			n++
+			if n == 2 {
+				f.sendRaw([]byte{})
+			}
+			cardHandler(echoSW)(f, m)
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := r.SlotStatus(testBudget); err != nil {
+			t.Fatal(err)
+		}
+		_, err = r.SlotStatus(testBudget)
+		lostWith(t, err, ErrProtocol)
+		untouched(t, r, f, err)
+	})
+}
+
+// A drain read needs a whole DrainReadTimeout (or the transfer timeout, when that is shorter) left in the budget. With less, the session
+// is lost with ErrBudgetExhausted before any read, and the drain is not marked done. At the amount itself the call already has
+// microseconds spent, so it is refused as well; a few milliseconds above it, the call goes through.
+func TestQADrainNeedsAWholeReadInTheBudget(t *testing.T) {
+	for _, c := range []struct {
+		name string
+		xfer time.Duration
+		to   time.Duration // the timeout of a drain read
+	}{{"default transfer timeout", 0, DrainReadTimeout}, {"short transfer timeout", 5 * time.Millisecond, 5 * time.Millisecond}} {
+		for _, b := range []struct {
+			name   string
+			budget time.Duration
+			ok     bool
+		}{
+			{"1 ns below", c.to - 1, false},
+			{"1 ms below", c.to - time.Millisecond, false},
+			{"at it", c.to, false},
+			{"5 ms above", c.to + 5*time.Millisecond, true},
+		} {
+			t.Run(c.name+"/"+b.name, func(t *testing.T) {
+				f := newFake(descSpec{}, cardHandler(echoSW))
+				r, err := Open(f, Options{TransferTimeout: c.xfer})
+				if err != nil {
+					t.Fatal(err)
+				}
+				mark := f.mark()
+				_, err = r.SlotStatus(b.budget)
+				if b.ok {
+					if err != nil {
+						t.Fatal(err)
+					}
+					if f.timeouts[0] != c.to {
+						t.Errorf("the drain read had a timeout of %v, want %v", f.timeouts[0], c.to)
+					}
+					return
+				}
+				lostWith(t, err, ErrBudgetExhausted)
+				if len(f.callsAfter(mark)) != 0 {
+					t.Errorf("the port was used: %v", f.callsAfter(mark))
+				}
+				if r.drained {
+					t.Error("the drain was marked done after a read that was not made")
+				}
+				untouched(t, r, f, err)
+			})
+		}
+	}
+}
+
+// A shortened drain read proves nothing: with a budget that leaves one whole read for the first, the second read of a drain that
+// has more to read is refused when the budget runs short in between, and the session is lost, not called quiet.
+func TestQADrainDoesNotCallAShortenedReadQuiet(t *testing.T) {
+	f := newFake(descSpec{}, cardHandler(echoSW))
+	for i := range 3 {
+		f.send(msg(rspDataBlock, byte(i+1), stOK, 0, 0, qaResp))
+	}
+	f.onIn = func(*fakeDevice) { time.Sleep(15 * time.Millisecond) } // each drain read costs 15 ms of the budget
+	r, _ := Open(f, Options{})
+	_, err := r.SlotStatus(DrainReadTimeout + 20*time.Millisecond)
+	lostWith(t, err, ErrBudgetExhausted)
+	if r.drained || f.nOut != 0 {
+		t.Errorf("drained %v, writes %d", r.drained, f.nOut)
+	}
+	assertWiped(t, r, "after the drain that ran out of budget")
+}
+
+// A typed nil *usbccid.Device is a nil Port, not a Port that panics at its first call.
+func TestQAOpenWithATypedNilDevice(t *testing.T) {
+	var d *usbccid.Device
+	r, err := Open(d, Options{})
+	if r != nil || !errors.Is(err, ErrNotOpen) {
+		t.Fatalf("%v %v", r, err)
+	}
+}
