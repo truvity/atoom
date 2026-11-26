@@ -826,10 +826,10 @@ func TestQAEmptyReadAfterTheDrain(t *testing.T) {
 	})
 }
 
-// A drain read needs a whole DrainReadTimeout (or the transfer timeout, when that is shorter) left in the budget. With less, the call is
-// refused with ErrBudgetExhausted before any read, the session is NOT lost (nothing was read or sent), the drain stays pending and
-// happens, once, in the next call that has the budget. At the amount itself the call already has microseconds spent, so it is refused
-// as well; a few milliseconds above it, the call goes through.
+// The drain needs the budget of two whole windows (2 x DrainReadTimeout, or 2 x the transfer timeout when that is shorter) before its
+// first read. With less, the call is refused with ErrBudgetExhausted before any read, the session is NOT lost (nothing was read or
+// sent), the drain stays pending and happens, once, in the next call that has the budget. At the amount itself the call already has
+// microseconds spent, so it is refused as well; a few milliseconds above it, the call goes through.
 func TestQADrainNeedsAWholeReadInTheBudget(t *testing.T) {
 	for _, c := range []struct {
 		name string
@@ -841,10 +841,11 @@ func TestQADrainNeedsAWholeReadInTheBudget(t *testing.T) {
 			budget time.Duration
 			ok     bool
 		}{
-			{"1 ns below", c.to - 1, false},
-			{"1 ms below", c.to - time.Millisecond, false},
-			{"at it", c.to, false},
-			{"5 ms above", c.to + 5*time.Millisecond, true},
+			{"one window", c.to, false},
+			{"1 ns below two windows", 2*c.to - 1, false},
+			{"1 ms below two windows", 2*c.to - time.Millisecond, false},
+			{"at two windows", 2 * c.to, false},
+			{"5 ms above two windows", 2*c.to + 5*time.Millisecond, true},
 		} {
 			t.Run(c.name+"/"+b.name, func(t *testing.T) {
 				f := newFake(descSpec{}, cardHandler(echoSW))
@@ -884,8 +885,8 @@ func TestQADrainNeedsAWholeReadInTheBudget(t *testing.T) {
 	}
 }
 
-// A shortened drain read proves nothing: with a budget that leaves one whole read for the first, the second read of a drain that
-// has more to read is refused when the budget runs short in between, and the session is lost, not called quiet.
+// A shortened drain read proves nothing: with a budget for the two windows at the start, a drain that has more to read is refused its
+// next read when the budget runs short in between (less than one window left), and the session is lost, not called quiet.
 func TestQADrainDoesNotCallAShortenedReadQuiet(t *testing.T) {
 	f := newFake(descSpec{}, cardHandler(echoSW))
 	for i := range 3 {
@@ -893,7 +894,7 @@ func TestQADrainDoesNotCallAShortenedReadQuiet(t *testing.T) {
 	}
 	f.onIn = func(*fakeDevice) { time.Sleep(15 * time.Millisecond) } // each drain read costs 15 ms of the budget
 	r, _ := Open(f, Options{})
-	_, err := r.SlotStatus(DrainReadTimeout + 20*time.Millisecond)
+	_, err := r.SlotStatus(2*DrainReadTimeout + 20*time.Millisecond)
 	lostWith(t, err, ErrBudgetExhausted)
 	if r.drained || f.nOut != 0 {
 		t.Errorf("drained %v, writes %d", r.drained, f.nOut)
