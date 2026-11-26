@@ -277,7 +277,7 @@ func TestQATimeExtensions(t *testing.T) {
 				h := func(f *fakeDevice, m []byte) {
 					if extra && m[0] == op.typ {
 						for i := range n {
-							st := byte(stTimeExt | byte(i%3)) // the card bits are anything
+							st := stTimeExt | byte(i%3) // the card bits are anything
 							var data []byte
 							if i%4 == 0 {
 								data = qaResp[:5]

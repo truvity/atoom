@@ -239,13 +239,13 @@ func TestQALateAnswerAfterTheDrainWithAnotherNumberIsSkipped(t *testing.T) {
 func TestQARestRiskLateAnswerWithTheSameNumberAfterTheDrain(t *testing.T) {
 	setSeq(0)
 	late := []byte{0x6A, 0x82}
-	real := []byte{0x90, 0x00}
+	genuine := []byte{0x90, 0x00}
 	first := true
 	f := newFake(descSpec{}, func(f *fakeDevice, m []byte) {
 		if m[0] == msgXfrBlock && first {
 			first = false
-			f.send(msg(rspDataBlock, m[6], stOK, 0, 0, late)) // the late answer: the same number and type
-			f.send(msg(rspDataBlock, m[6], stOK, 0, 0, real)) // the real one
+			f.send(msg(rspDataBlock, m[6], stOK, 0, 0, late))    // the late answer: the same number and type
+			f.send(msg(rspDataBlock, m[6], stOK, 0, 0, genuine)) // the real one
 			return
 		}
 		cardHandler(echoSW)(f, m)
@@ -658,7 +658,7 @@ func TestQAPanicInThePortLosesTheSession(t *testing.T) {
 			if fmt.Sprint(got) != fmt.Sprint(c.value) {
 				t.Fatalf("recovered %v (%T), want the port's own value %v", got, got, c.value)
 			}
-			if e, ok := c.value.(error); ok && got != error(e) {
+			if _, ok := c.value.(error); ok && got != c.value {
 				t.Errorf("the error value was changed on its way: %v", got)
 			}
 			f.inFail, f.outFail, f.onOut = nil, nil, nil

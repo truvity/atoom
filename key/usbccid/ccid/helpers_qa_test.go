@@ -32,7 +32,7 @@ func leakForms(s []byte) []string {
 		inner := func(v string) string { return strings.Trim(v, "[]{}\"") }
 		out = append(out,
 			fmt.Sprintf("%x", w), fmt.Sprintf("%X", w), fmt.Sprintf("% x", w), fmt.Sprintf("% X", w),
-			inner(fmt.Sprint(w)), inner(fmt.Sprintf("%q", w)), inner(fmt.Sprintf("%#v", w)), string(w),
+			inner(fmt.Sprintf("%v", w)), inner(fmt.Sprintf("%q", w)), inner(fmt.Sprintf("%#v", w)), string(w),
 			fmt.Sprintf("0x%02x 0x%02x 0x%02x 0x%02x", w[0], w[1], w[2], w[3]),
 			fmt.Sprintf("0x%02X, 0x%02X, 0x%02X, 0x%02X", w[0], w[1], w[2], w[3]),
 		)
