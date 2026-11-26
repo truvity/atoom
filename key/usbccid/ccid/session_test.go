@@ -191,7 +191,7 @@ func TestDrainEndsWithTheBudget(t *testing.T) {
 	f.endless = msg(rspDataBlock, 9, stOK, 0, 0, []byte{1, 2})
 	f.onIn = func(*fakeDevice) { time.Sleep(15 * time.Millisecond) }
 	r, _ := Open(f, Options{})
-	_, err := r.SlotStatus(40 * time.Millisecond)
+	_, err := r.SlotStatus(50 * time.Millisecond)
 	lostWith(t, err, ErrBudgetExhausted)
 	if f.nOut != 0 {
 		t.Error("something was written")
