@@ -1,4 +1,4 @@
-//go:build linux && (amd64 || arm64)
+//go:build linux && !android && (amd64 || arm64)
 
 package usbccid
 
@@ -21,7 +21,7 @@ import (
 
 func TestQAFilesPerSystem(t *testing.T) {
 	shared := []string{"candidate.go", "doc.go", "errors.go", "port.go"}
-	for _, sys := range []struct{ goos, goarch string }{{"darwin", "arm64"}, {"darwin", "amd64"}, {"windows", "amd64"}, {"freebsd", "amd64"}, {"linux", "arm64"}, {"linux", "amd64"}, {"linux", "riscv64"}, {"linux", "386"}, {"linux", "arm"}, {"linux", "ppc64le"}, {"linux", "s390x"}, {"linux", "loong64"}} {
+	for _, sys := range []struct{ goos, goarch string }{{"darwin", "arm64"}, {"darwin", "amd64"}, {"windows", "amd64"}, {"freebsd", "amd64"}, {"linux", "arm64"}, {"linux", "amd64"}, {"linux", "riscv64"}, {"linux", "386"}, {"linux", "arm"}, {"linux", "ppc64le"}, {"linux", "s390x"}, {"linux", "loong64"}, {"android", "arm64"}, {"android", "amd64"}} {
 		for _, cgo := range []bool{false, true} {
 			ctx := gobuild.Default
 			ctx.GOOS, ctx.GOARCH, ctx.CgoEnabled = sys.goos, sys.goarch, cgo
@@ -34,7 +34,7 @@ func TestQAFilesPerSystem(t *testing.T) {
 				t.Errorf("%s/%s: cgo files %v, imports C: the module must be pure Go", sys.goos, sys.goarch, pkg.CgoFiles)
 			}
 			var want, wantTests []string
-			if sys.goos == "linux" && (sys.goarch == "amd64" || sys.goarch == "arm64") {
+			if sys.goos == "linux" && (sys.goarch == "amd64" || sys.goarch == "arm64") { // android satisfies the linux tag and gets the stub
 				want = append(slices.Clone(shared), "device_linux.go", "discover_linux.go", "layout_linux.go")
 				if !slices.Contains(pkg.Imports, "golang.org/x/sys/unix") {
 					t.Errorf("linux imports %v", pkg.Imports)
@@ -121,7 +121,7 @@ func fieldTypes(l *ast.FieldList) string {
 // Every source file of the real implementation (named _linux.go) carries the one constraint, so that a file added later cannot make
 // the package fail to build on linux/riscv64; every test file for linux carries it too, so that the test binary builds there.
 func TestQAEveryLinuxFileCarriesTheConstraint(t *testing.T) {
-	const realBuild = "//go:build linux && (amd64 || arm64)\n"
+	const realBuild = "//go:build linux && !android && (amd64 || arm64)\n"
 	files, err := os.ReadDir(".")
 	if err != nil {
 		t.Fatal(err)
@@ -145,7 +145,7 @@ func TestQAEveryLinuxFileCarriesTheConstraint(t *testing.T) {
 				t.Errorf("%s starts with %q, want %q", name, first, realBuild)
 			}
 		case name == "device_other.go" || name == "notsupported_test.go":
-			if first != "//go:build !(linux && (amd64 || arm64))\n" {
+			if first != "//go:build !(linux && !android && (amd64 || arm64))\n" {
 				t.Errorf("%s starts with %q", name, first)
 			}
 		default:
@@ -211,8 +211,8 @@ func TestQAOtherSystemsEntryPointsOnlyReturnErrNotSupported(t *testing.T) {
 		t.Fatal(err)
 	}
 	src, _ := os.ReadFile("device_other.go")
-	if !strings.HasPrefix(string(src), "//go:build !(linux && (amd64 || arm64))\n") {
-		t.Errorf("device_other.go starts with %q, want the constraint //go:build !(linux && (amd64 || arm64))", strings.SplitN(string(src), "\n", 2)[0])
+	if !strings.HasPrefix(string(src), "//go:build !(linux && !android && (amd64 || arm64))\n") {
+		t.Errorf("device_other.go starts with %q, want the constraint //go:build !(linux && !android && (amd64 || arm64))", strings.SplitN(string(src), "\n", 2)[0])
 	}
 	n := 0
 	for _, d := range f.Decls {
@@ -257,7 +257,7 @@ func TestQANotSupportedTestNamesEveryEntryPoint(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.HasPrefix(string(src), "//go:build !(linux && (amd64 || arm64))\n") {
+	if !strings.HasPrefix(string(src), "//go:build !(linux && !android && (amd64 || arm64))\n") {
 		t.Errorf("notsupported_test.go is built where it should not be: %q", strings.SplitN(string(src), "\n", 2)[0])
 	}
 	f, err := parser.ParseFile(fset, "notsupported_test.go", src, 0)

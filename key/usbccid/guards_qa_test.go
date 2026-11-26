@@ -1,4 +1,4 @@
-//go:build linux && (amd64 || arm64)
+//go:build linux && !android && (amd64 || arm64)
 
 package usbccid
 
@@ -180,8 +180,8 @@ func TestQAClaimTableOverEveryNumber(t *testing.T) {
 	}
 }
 
-// A handle whose descriptors hold no CCID interface claims nothing and moves nothing, whatever it is asked; one that holds a CCID
-// interface without bulk endpoints claims it (the class decides) and moves nothing.
+// A handle whose descriptors hold no usable CCID interface claims nothing and moves nothing, whatever it is asked: no CCID interface,
+// or one that lacks a bulk OUT or a bulk IN endpoint.
 func TestQAHandleWithoutAUsableCCIDInterface(t *testing.T) {
 	for name, desc := range map[string][]byte{
 		"no CCID interface": qaBlob(1, 2, qaCfg(2, qaIface(0, 0, qaClassHID, qaEP(qaHIn, 3)), qaIface(2, 0, 0xFF, qaEP(qaVOut, 2), qaEP(qaVIn, 2)))),
@@ -208,15 +208,44 @@ func TestQAHandleWithoutAUsableCCIDInterface(t *testing.T) {
 			}
 		})
 	}
-	k := &qaKernel{}
-	d, _ := qaDevice(t, qaBlob(1, 2, qaCfg(1, qaIface(0, 0, qaClassCCID, qaEP(0x81, 3)))), k)
-	if err := d.Claim(0); err != nil {
-		t.Fatal(err)
-	}
-	for ep := range 256 {
-		if _, err := d.BulkIn(uint8(ep), make([]byte, 1), time.Second); err == nil {
-			t.Fatalf("read from %#02x got through", ep)
-		}
+	// A CCID-class interface is claimed only when it has both a bulk OUT and a bulk IN endpoint.
+	for _, c := range []struct {
+		name string
+		eps  [][]byte
+		ok   bool
+	}{
+		{"no endpoint", nil, false},
+		{"an interrupt endpoint only", [][]byte{qaEP(0x81, 3)}, false},
+		{"only a bulk IN", [][]byte{qaEP(0x82, 2)}, false},
+		{"only a bulk OUT", [][]byte{qaEP(0x02, 2)}, false},
+		{"two bulk IN", [][]byte{qaEP(0x82, 2), qaEP(0x83, 2)}, false},
+		{"two bulk OUT", [][]byte{qaEP(0x02, 2), qaEP(0x03, 2)}, false},
+		{"a bulk OUT and an interrupt IN", [][]byte{qaEP(0x02, 2), qaEP(0x83, 3)}, false},
+		{"a bulk OUT and an interrupt OUT with an IN address", [][]byte{qaEP(0x02, 2), qaEP(0x81, 3)}, false},
+		{"both bulk endpoints", [][]byte{qaEP(0x02, 2), qaEP(0x82, 2)}, true},
+		{"both bulk endpoints and an interrupt endpoint", [][]byte{qaEP(0x02, 2), qaEP(0x82, 2), qaEP(0x83, 3)}, true},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			k := &qaKernel{}
+			d, _ := qaDevice(t, qaBlob(1, 2, qaCfg(1, qaIface(0, 0, qaClassCCID, c.eps...))), k)
+			err := d.Claim(0)
+			switch {
+			case c.ok && err != nil:
+				t.Errorf("claim: %v", err)
+			case !c.ok && (!errors.Is(err, ErrNoSuchInterface) || k.count() != 0):
+				t.Errorf("claim: %v with %d kernel calls, want ErrNoSuchInterface and none", err, k.count())
+			}
+			if !c.ok {
+				for ep := range 256 {
+					if _, err := d.BulkIn(uint8(ep), make([]byte, 1), time.Second); err == nil {
+						t.Fatalf("read from %#02x got through", ep)
+					}
+					if _, err := d.BulkOut(uint8(ep), []byte{1}, time.Second); err == nil {
+						t.Fatalf("write to %#02x got through", ep)
+					}
+				}
+			}
+		})
 	}
 }
 
@@ -284,48 +313,148 @@ func TestQAZeroDeviceIsClosedAndClosesNothing(t *testing.T) {
 	}
 }
 
-// The reopen through /proc/self/fd has no seam (the path is built in openChecked), so a missing /proc/self/fd cannot be arranged: what
-// can be held is the source of the decision. ENOENT, ENOTDIR and ENODEV from the reopen all go to one check, an access to
-// /proc/self/fd, which gives ErrNoProcSelfFd when it is missing and ErrGone when it is there; and neither error wraps the errno, so
-// neither reads as os.ErrNotExist.
-func TestQAProcReopenDecisionByTheSource(t *testing.T) {
-	src, err := os.ReadFile("device_linux.go")
+// The reopen through /proc/self/fd decides between a missing /proc/self/fd and a device that went between the two opens. The test seam
+// is the unexported variable procFdDir: here it points at a directory that does not exist (ErrNoProcSelfFd, which does not read as a
+// missing node), at a directory that exists and has no entry for the descriptor, and at something that is not a directory (both
+// ErrGone). Not parallel with other tests: the variable is restored in Cleanup.
+func TestQAProcReopenDecision(t *testing.T) {
+	saved := procFdDir
+	t.Cleanup(func() { procFdDir = saved })
+	if saved != "/proc/self/fd" {
+		t.Fatalf("procFdDir is %q by default, want /proc/self/fd", saved)
+	}
+	node := filepath.Join(t.TempDir(), "node")
+	if err := os.WriteFile(node, qaDefaultDesc(), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	notDir := filepath.Join(t.TempDir(), "file")
+	if err := os.WriteFile(notDir, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	before := openFDs(t)
+	cases := []struct {
+		name    string
+		dir     string
+		want    error
+		notWant error
+	}{
+		{"a directory that does not exist", filepath.Join(t.TempDir(), "missing"), ErrNoProcSelfFd, ErrGone},
+		{"a path below a file", filepath.Join(notDir, "below"), ErrNoProcSelfFd, ErrGone},
+		{"a directory that exists and has no entry for the descriptor", t.TempDir(), ErrGone, ErrNoProcSelfFd},
+		{"something that exists and is not a directory", notDir, ErrGone, ErrNoProcSelfFd},
+	}
+	for _, c := range cases {
+		procFdDir = c.dir
+		d, err := open(node, false)
+		if d != nil || !errors.Is(err, c.want) || errors.Is(err, c.notWant) {
+			t.Errorf("%s: %v %v, want %v", c.name, d, err, c.want)
+			continue
+		}
+		if errors.Is(err, os.ErrNotExist) || errors.Is(err, unix.ENOENT) || errors.Is(err, unix.ENOTDIR) || errors.Is(err, ErrNotUSBNode) || errors.Is(err, ErrBadDescriptors) {
+			t.Errorf("%s: %v reads as something else", c.name, err)
+		}
+		if !strings.Contains(err.Error(), node) {
+			t.Errorf("%s: the refusal does not name the node: %v", c.name, err)
+		}
+	}
+	if after := openFDs(t); after != before {
+		t.Errorf("descriptors left open: %d -> %d", before, after)
+	}
+	procFdDir = saved
+	if d, err := open(node, false); err != nil {
+		t.Errorf("after the variable is restored: %v", err)
+	} else {
+		_ = d.Close()
+	}
+}
+
+// procFdDir is unexported and nothing but the tests sets it: in the files that are not tests it is declared once and assigned never.
+func TestQAProcFdDirIsSetByNothingExported(t *testing.T) {
+	files, err := filepath.Glob("*.go")
 	if err != nil {
 		t.Fatal(err)
 	}
 	fset := token.NewFileSet()
-	f, err := parser.ParseFile(fset, "device_linux.go", src, 0)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var found bool
-	for _, d := range f.Decls {
-		fd, ok := d.(*ast.FuncDecl)
-		if !ok || fd.Name.Name != "openChecked" {
+	decls, sets := 0, 0
+	for _, f := range files {
+		if strings.HasSuffix(f, "_test.go") {
 			continue
 		}
-		found = true
-		text := string(src[fset.Position(fd.Pos()).Offset:fset.Position(fd.End()).Offset])
-		for _, want := range []string{"unix.ENOENT", "unix.ENOTDIR", "unix.ENODEV", `unix.Access("/proc/self/fd", unix.F_OK)`, "ErrNoProcSelfFd", "ErrGone"} {
-			if !strings.Contains(text, want) {
-				t.Errorf("openChecked lacks %s", want)
+		file, err := parser.ParseFile(fset, f, nil, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		ast.Inspect(file, func(n ast.Node) bool {
+			switch x := n.(type) {
+			case *ast.ValueSpec:
+				for _, id := range x.Names {
+					if id.Name == "procFdDir" {
+						decls++
+					}
+				}
+			case *ast.AssignStmt:
+				for _, l := range x.Lhs {
+					if id, ok := l.(*ast.Ident); ok && id.Name == "procFdDir" {
+						sets++
+					}
+				}
+			case *ast.IncDecStmt:
+				if id, ok := x.X.(*ast.Ident); ok && id.Name == "procFdDir" {
+					sets++
+				}
+			case *ast.UnaryExpr:
+				if id, ok := x.X.(*ast.Ident); ok && id.Name == "procFdDir" && x.Op == token.AND {
+					sets++
+				}
 			}
-		}
-		for _, line := range strings.Split(text, "\n") {
-			if strings.Contains(line, "Errorf(") && (strings.Contains(line, "ErrNoProcSelfFd") || strings.Contains(line, "ErrGone")) &&
-				(strings.Count(line, "%w") != 1 || !strings.HasSuffix(strings.TrimSpace(strings.SplitN(line, "//", 2)[0]), ", err)")) {
-				t.Errorf("the refusal must wrap its sentinel only, and hold the errno as text: %s", strings.TrimSpace(line))
-			}
-		}
+			return true
+		})
 	}
-	if !found {
-		t.Fatal("openChecked is gone")
+	if decls != 1 || sets != 0 {
+		t.Errorf("procFdDir is declared %d times and assigned or addressed %d times in the library", decls, sets)
 	}
-	// The sentinels do not read as a missing node.
-	for _, e := range []error{ErrNoProcSelfFd, ErrGone} {
-		if errors.Is(e, os.ErrNotExist) || errors.Is(e, unix.ENOENT) {
-			t.Errorf("%v reads as a node that does not exist", e)
-		}
+}
+
+// Discover reads sysfs attributes and not the descriptors, so it lists a device that Open then refuses: a made-up tree lists a device
+// as a candidate, and the made-up node at its node path has descriptors that declare two configurations. The node is opened with the
+// test-only path (never a real node). Candidate.Open on the same node refuses it as well (it is no character device of the USB major
+// number, which is checked first).
+func TestQADiscoverListsWhatOpenRefuses(t *testing.T) {
+	q := newQATree(t)
+	q.good("1-1", "", "7")
+	devDir := t.TempDir()
+	cands, err := Discover(q.scan, devDir, Filter{})
+	if err != nil || len(cands) != 1 {
+		t.Fatalf("Discover: %v %v", cands, err)
+	}
+	c := cands[0]
+	if err := os.MkdirAll(filepath.Dir(c.NodePath), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(c.NodePath, qaBlobN(c.VendorID, c.ProductID, 2, qaCfg(1, qaIface(byte(c.Interface), 0, qaClassCCID, qaEP(c.BulkOut, 2), qaEP(c.BulkIn, 2))), qaCfg(1, qaIface(0, 0, 0xFF))), 0o600); err != nil { //nolint:gosec // a made-up interface number
+		t.Fatal(err)
+	}
+	before := openFDs(t)
+	if d, err := open(c.NodePath, false); !errors.Is(err, ErrSeveralConfigurations) || d != nil {
+		t.Errorf("the node of a listed candidate with two configurations: %v %v", d, err)
+	}
+	if d, err := c.Open(); err == nil || d != nil {
+		t.Errorf("Candidate.Open: %v %v", d, err)
+	}
+	// The same candidate over a node with one configuration is accepted by the test-only path, and verify agrees with it.
+	if err := os.WriteFile(c.NodePath, qaBlob(c.VendorID, c.ProductID, qaCfg(1, qaIface(byte(c.Interface), 0, qaClassCCID, qaEP(c.BulkOut, 2), qaEP(c.BulkIn, 2)))), 0o600); err != nil { //nolint:gosec // a made-up interface number
+		t.Fatal(err)
+	}
+	d, err := open(c.NodePath, false)
+	if err != nil {
+		t.Fatalf("the same node with one configuration: %v", err)
+	}
+	if err := d.verify(c); err != nil {
+		t.Errorf("verify: %v", err)
+	}
+	_ = d.Close()
+	if after := openFDs(t); after != before {
+		t.Errorf("descriptors left open: %d -> %d", before, after)
 	}
 }
 
