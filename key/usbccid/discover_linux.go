@@ -1,4 +1,4 @@
-//go:build linux && (amd64 || arm64)
+//go:build linux && !android && (amd64 || arm64)
 
 package usbccid
 
@@ -36,6 +36,10 @@ const maxNumber = 999
 // error; only an unreadable sysfsDir is. A device is skipped when the bus number in its port path disagrees with its busnum file,
 // when the bus number or the device number is above 999 (the node path has three digits each), or when an endpoint number is not 1
 // to 15. Of a device with several CCID interfaces the first by number that has both bulk endpoints is described.
+//
+// A candidate is a device that looks like a CCID device in sysfs. Discover reads sysfs attributes and not the descriptors of the
+// device, so it also lists devices that Open then refuses (several configurations, descriptors that are not simple): whether this
+// layer accepts a device is decided at Open, from the device's own descriptors.
 //
 // The candidates carry no card serial number: see Candidate.
 func Discover(sysfsDir, devDir string, f Filter) ([]Candidate, error) {

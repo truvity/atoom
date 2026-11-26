@@ -1,10 +1,10 @@
-//go:build !(linux && (amd64 || arm64))
+//go:build !(linux && !android && (amd64 || arm64))
 
 package usbccid
 
 import "time"
 
-// Device is one open usbfs node. On this system (anything but Linux on amd64 or arm64) there is none: Open returns ErrNotSupported and the methods of a Device that was
+// Device is one open usbfs node. On this system (anything but Linux, not Android, on amd64 or arm64) there is none: Open returns ErrNotSupported and the methods of a Device that was
 // never opened do the same. The type is here so that a program that links this package compiles.
 type Device struct{}
 

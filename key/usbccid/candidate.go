@@ -12,7 +12,9 @@ const (
 // ClassCCID is the interface class of a smart-card (CCID) interface.
 const ClassCCID = 0x0B
 
-// Candidate is one USB device with a CCID interface, as sysfs describes it. It says nothing about the card in the reader, and
+// Candidate is one USB device with a CCID interface, as sysfs describes it: a device that looks like a CCID device in sysfs. Whether
+// this layer accepts it is decided at Open, from the device's own descriptors, which can refuse it (ErrSeveralConfigurations,
+// ErrBadDescriptors). It says nothing about the card in the reader, and
 // holding a Candidate holds nothing: the device is not opened.
 //
 // sysfs does not give the serial number of a card (and a USB serial string, if there is one, is not what a card application calls
