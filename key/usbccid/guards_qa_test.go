@@ -4,7 +4,13 @@ package usbccid
 
 import (
 	"errors"
+	"go/ast"
+	"go/parser"
+	"go/token"
 	"math"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -174,15 +180,12 @@ func TestQAClaimTableOverEveryNumber(t *testing.T) {
 	}
 }
 
-// A handle whose descriptors say nothing usable claims nothing and moves nothing, whatever it is asked.
-func TestQAHandleWithoutUsableDescriptors(t *testing.T) {
-	good := qaDefaultDesc()
+// A handle whose descriptors hold no CCID interface claims nothing and moves nothing, whatever it is asked; one that holds a CCID
+// interface without bulk endpoints claims it (the class decides) and moves nothing.
+func TestQAHandleWithoutAUsableCCIDInterface(t *testing.T) {
 	for name, desc := range map[string][]byte{
-		"empty":                        {},
-		"a device descriptor only":     good[:18],
-		"cut inside the configuration": good[:len(good)-5],
-		"no CCID interface":            qaBlob(1, 2, qaCfg(1, qaIface(0, 0, qaClassHID, qaEP(qaHIn, 3)), qaIface(2, 0, 0xFF, qaEP(qaVOut, 2), qaEP(qaVIn, 2)))),
-		"garbage":                      {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25},
+		"no CCID interface": qaBlob(1, 2, qaCfg(2, qaIface(0, 0, qaClassHID, qaEP(qaHIn, 3)), qaIface(2, 0, 0xFF, qaEP(qaVOut, 2), qaEP(qaVIn, 2)))),
+		"no interface":      qaBlob(1, 2, qaCfg(0)),
 	} {
 		t.Run(name, func(t *testing.T) {
 			k := &qaKernel{}
@@ -205,7 +208,6 @@ func TestQAHandleWithoutUsableDescriptors(t *testing.T) {
 			}
 		})
 	}
-	// A CCID class interface that has no bulk endpoint is claimed (the class decides), and no endpoint is then usable.
 	k := &qaKernel{}
 	d, _ := qaDevice(t, qaBlob(1, 2, qaCfg(1, qaIface(0, 0, qaClassCCID, qaEP(0x81, 3)))), k)
 	if err := d.Claim(0); err != nil {
@@ -214,6 +216,115 @@ func TestQAHandleWithoutUsableDescriptors(t *testing.T) {
 	for ep := range 256 {
 		if _, err := d.BulkIn(uint8(ep), make([]byte, 1), time.Second); err == nil {
 			t.Fatalf("read from %#02x got through", ep)
+		}
+	}
+}
+
+// A Device that was never opened holds no descriptor. Every call but Release and Close returns ErrClosed, those two return nil, and
+// nothing is closed. SAFETY: Close is never called on the literal zero value here, because code that does not know the rule closes
+// descriptor 0, the standard input of the test process. Close and Release are called on a Device that is not opened and carries
+// fd -1 (the same state in every other field), which cannot hurt any descriptor; the other methods are called on new(Device). The
+// descriptors of the process, and the file that descriptor 0 refers to, are the same afterwards.
+func TestQAZeroDeviceIsClosedAndClosesNothing(t *testing.T) {
+	var before unix.Stat_t
+	if err := unix.Fstat(0, &before); err != nil {
+		t.Skip("descriptor 0 is not open in this process")
+	}
+	fds := openFDs(t)
+	check := func(name string, d *Device) {
+		if _, err := d.Descriptors(); !errors.Is(err, ErrClosed) {
+			t.Errorf("%s: Descriptors: %v", name, err)
+		}
+		for _, n := range []int{-1, 0, 1, 255, 1000} {
+			if err := d.Claim(n); !errors.Is(err, ErrClosed) || errors.Is(err, ErrNoSuchInterface) {
+				t.Errorf("%s: Claim(%d): %v", name, n, err)
+			}
+		}
+		if _, err := d.BulkOut(0x02, []byte{1}, time.Second); !errors.Is(err, ErrClosed) {
+			t.Errorf("%s: BulkOut: %v", name, err)
+		}
+		if _, err := d.BulkIn(0x82, make([]byte, 1), time.Second); !errors.Is(err, ErrClosed) {
+			t.Errorf("%s: BulkIn: %v", name, err)
+		}
+		if err := d.Release(1); err != nil {
+			t.Errorf("%s: Release: %v", name, err)
+		}
+	}
+	check("new(Device)", new(Device))
+	check("Device{}", &Device{})
+	k := &qaKernel{}
+	// Not opened, with a claim recorded and a system call that counts: Close and Release must neither ask the kernel nor close.
+	unopened := &Device{fd: -1, claimed: map[int]bool{qaCCID: true}, ioctl: k.ioctl}
+	check("not opened", unopened)
+	for range 2 {
+		if err := unopened.Close(); err != nil {
+			t.Errorf("Close of a Device that was never opened: %v", err)
+		}
+		if err := unopened.Release(qaCCID); err != nil {
+			t.Errorf("Release of a Device that was never opened: %v", err)
+		}
+	}
+	if k.count() != 0 {
+		t.Errorf("%d kernel calls from a Device that was never opened", k.count())
+	}
+	var after unix.Stat_t
+	if err := unix.Fstat(0, &after); err != nil || after.Dev != before.Dev || after.Ino != before.Ino || after.Rdev != before.Rdev {
+		t.Errorf("descriptor 0 changed: %v", err)
+	}
+	if got := openFDs(t); got != fds {
+		t.Errorf("%d descriptors open before, %d after", fds, got)
+	}
+	// A Device that was opened is not affected: Close closes it once.
+	d, _ := qaDevice(t, nil, k)
+	if err := d.Close(); err != nil {
+		t.Error(err)
+	}
+	if err := unix.Fstat(d.fd, new(unix.Stat_t)); !errors.Is(err, unix.EBADF) {
+		t.Errorf("an opened Device is not closed by Close: %v", err)
+	}
+}
+
+// The reopen through /proc/self/fd has no seam (the path is built in openChecked), so a missing /proc/self/fd cannot be arranged: what
+// can be held is the source of the decision. ENOENT, ENOTDIR and ENODEV from the reopen all go to one check, an access to
+// /proc/self/fd, which gives ErrNoProcSelfFd when it is missing and ErrGone when it is there; and neither error wraps the errno, so
+// neither reads as os.ErrNotExist.
+func TestQAProcReopenDecisionByTheSource(t *testing.T) {
+	src, err := os.ReadFile("device_linux.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	fset := token.NewFileSet()
+	f, err := parser.ParseFile(fset, "device_linux.go", src, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var found bool
+	for _, d := range f.Decls {
+		fd, ok := d.(*ast.FuncDecl)
+		if !ok || fd.Name.Name != "openChecked" {
+			continue
+		}
+		found = true
+		text := string(src[fset.Position(fd.Pos()).Offset:fset.Position(fd.End()).Offset])
+		for _, want := range []string{"unix.ENOENT", "unix.ENOTDIR", "unix.ENODEV", `unix.Access("/proc/self/fd", unix.F_OK)`, "ErrNoProcSelfFd", "ErrGone"} {
+			if !strings.Contains(text, want) {
+				t.Errorf("openChecked lacks %s", want)
+			}
+		}
+		for _, line := range strings.Split(text, "\n") {
+			if strings.Contains(line, "Errorf(") && (strings.Contains(line, "ErrNoProcSelfFd") || strings.Contains(line, "ErrGone")) &&
+				(strings.Count(line, "%w") != 1 || !strings.HasSuffix(strings.TrimSpace(strings.SplitN(line, "//", 2)[0]), ", err)")) {
+				t.Errorf("the refusal must wrap its sentinel only, and hold the errno as text: %s", strings.TrimSpace(line))
+			}
+		}
+	}
+	if !found {
+		t.Fatal("openChecked is gone")
+	}
+	// The sentinels do not read as a missing node.
+	for _, e := range []error{ErrNoProcSelfFd, ErrGone} {
+		if errors.Is(e, os.ErrNotExist) || errors.Is(e, unix.ENOENT) {
+			t.Errorf("%v reads as a node that does not exist", e)
 		}
 	}
 }
@@ -334,5 +445,67 @@ func TestQACountAboveTheBufferLatches(t *testing.T) {
 		if n, err := d.BulkIn(qaIn, make([]byte, 8), time.Second); err != nil || n != int(r) {
 			t.Errorf("count %d for a buffer of 8: %d %v", r, n, err)
 		}
+	}
+}
+
+// The reviewer's two cases. (a) A device that declares two configurations, where interface 0 is a CCID interface in the first and
+// another class in the second: it does not open at all (ErrSeveralConfigurations), so there is no handle to claim with and no kernel
+// call can be made. (b) A CCID interface that lists a bulk address that another interface (an interrupt endpoint, same address) also
+// lists: it does not open (an address listed twice), and even a layout that had such an address, built by hand, makes no kernel call
+// for it, after the claim as well.
+func TestQAReviewerCases(t *testing.T) {
+	path := func(b []byte) string {
+		p := filepath.Join(t.TempDir(), "node")
+		if err := os.WriteFile(p, b, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		return p
+	}
+	ccid0 := qaIface(0, 0, qaClassCCID, qaEP(0x02, 2), qaEP(0x82, 2))
+	other0 := qaIface(0, 0, 0xFF, qaEP(0x05, 2))
+	before := openFDs(t)
+	if d, err := open(path(qaBlobN(1, 2, 2, qaCfg(1, ccid0), qaCfg(1, other0))), false); !errors.Is(err, ErrSeveralConfigurations) || d != nil {
+		t.Errorf("(a) two configurations: %v %v", d, err)
+	}
+	if d, err := open(path(qaSet(ccid0, qaIface(1, 0, qaClassHID, qaEP(0x02, 3)))), false); !errors.Is(err, ErrBadDescriptors) || d != nil {
+		t.Errorf("(b) an address listed by two interfaces: %v %v", d, err)
+	}
+	if after := openFDs(t); after != before {
+		t.Errorf("descriptors leaked: %d -> %d", before, after)
+	}
+	// (b) again, below Open: a layout that lists the address twice (as a bug of the parser would leave it) is not used for that address.
+	l := layout{vendor: 1, product: 2, ifaces: []ifaceDesc{
+		{number: 0, class: qaClassCCID, eps: []endpoint{{addr: 0x02, attrs: 2}, {addr: 0x82, attrs: 2}}},
+		{number: 1, class: qaClassHID, eps: []endpoint{{addr: 0x02, attrs: 3}}},
+		{number: 2, class: qaClassCCID, eps: []endpoint{{addr: 0x04, attrs: 2}, {addr: 0x04, attrs: 2}, {addr: 0x84, attrs: 2}}},
+		{number: 3, class: 0xFF, eps: []endpoint{{addr: 0x16, attrs: 3}, {addr: 0x86, attrs: 2}}},
+		{number: 4, class: qaClassCCID, eps: []endpoint{{addr: 0x06, attrs: 2}, {addr: 0x96, attrs: 3}}},
+	}}
+	k := &qaKernel{}
+	d := &Device{opened: true, fd: -1, lay: l, claimed: map[int]bool{}, ioctl: k.ioctl}
+	for _, n := range []int{0, 2} {
+		if err := d.Claim(n); err != nil {
+			t.Fatal(err)
+		}
+	}
+	base := k.count()
+	buf := make([]byte, 4)
+	for name, err := range map[string]error{
+		"0x02 listed by a CCID bulk and an interrupt endpoint": func() error { _, e := d.BulkOut(0x02, buf, time.Second); return e }(),
+		"0x04 listed twice by one interface":                   func() error { _, e := d.BulkOut(0x04, buf, time.Second); return e }(),
+		"0x06 owned by an unclaimed interface":                 func() error { _, e := d.BulkOut(0x06, buf, time.Second); return e }(),
+		"0x86 owned by a vendor interface":                     func() error { _, e := d.BulkIn(0x86, buf, time.Second); return e }(),
+		// 0x16 has a reserved bit: it holds the address 0x06 for the kernel's lookup, which interface 4 lists as well
+		"0x06 held also by an address with a reserved bit": func() error { _, e := d.BulkOut(0x06, buf, time.Second); return e }(),
+	} {
+		if err == nil || errors.Is(err, ErrGone) {
+			t.Errorf("%s: %v", name, err)
+		}
+	}
+	if k.count() != base {
+		t.Errorf("%d kernel calls for addresses that are not owned by exactly one claimed interface", k.count()-base)
+	}
+	if _, err := d.BulkIn(0x82, buf, time.Second); err != nil {
+		t.Errorf("an address that is listed once: %v", err)
 	}
 }
