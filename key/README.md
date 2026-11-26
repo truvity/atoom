@@ -24,6 +24,7 @@ Each is its own Go module with its own README and documentation; a consumer that
 | [awskms](awskms/README.md) | driver: asymmetric keys in AWS KMS, found by alias; library (links into a Lambda function) and a thin main; no attestation | the port, the kit (tests only), the AWS SDK |
 | [slotplan](slotplan/README.md) | the check of a card slot map: which slot each purpose lives in, which the card driver uses to place the purposes of its host; its `Reference` is a reference map that holds the purposes of sluis, which no driver takes a slot from | nothing |
 | [pinrelease](pinrelease/README.md) | the wire format of the PIN release between boards: signed texts and a sealed PIN | nothing |
+| [usbccid](usbccid/README.md) | the USB layer of a card that speaks CCID over direct USB ([record 0026](../docs/decisions/0026-one-yubikey-driver-over-direct-usb.md)): discovery of the devices with a CCID interface from sysfs, one usbfs node, one claimed interface, bulk transfers with a timeout; Linux only, pure Go | `golang.org/x/sys`, no atoom module |
 
 ## A driver of your own
 
