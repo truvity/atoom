@@ -5,6 +5,12 @@ libraries changed. `just release-prepare X.Y.Z` writes the section.
 
 <!-- release-prepare: new sections go below this line -->
 
+## Unreleased
+
+### Added
+
+- **`key/signer`**, in the module `key`: a `crypto.Signer` over a client of the key port, for code that takes a `crypto.Signer` and a key that stays in the store. It signs a digest for `ES256`, `ES384` and `RS256` and checks each answer against the key it read at the start ([the key port](key/docs/key-port.md#a-cryptosigner)).
+
 ## 0.9.0 - 2026-11-26
 
 One version for the whole repository: every library is tagged 0.9.0, changed or not.
