@@ -11,8 +11,8 @@ import (
 	"github.com/truvity/atoom/key/usbccid"
 )
 
-// The follow-up rules: every read is a whole number of packets, the drain needs two quiet windows and is bounded in time, one Port
-// holds one Reader, and the two cases of the review (the budget between the header and the body, a Port that counts too many bytes).
+// Every read is a whole number of packets, the drain needs two quiet windows and is bounded in time, one Port holds one Reader, and
+// two further cases: the budget that runs out between the header and the body, and a Port that counts too many bytes.
 
 // ---- rule 1: whole packets ----
 
@@ -354,7 +354,7 @@ func TestQASecondOpenThatFailsBeforeTheClaimClosesTheSharedPort(t *testing.T) {
 	lostWith(t, err, usbccid.ErrClosed)
 }
 
-// ---- the two cases of the review ----
+// ---- the budget between the header and the body, and a Port that counts too many bytes ----
 
 // The budget runs out between the header of an answer and its body: the session is lost with the budget as the cause, and the body is
 // not read.
