@@ -403,3 +403,41 @@ func TestQATimeExtensionsInsideChains(t *testing.T) {
 		t.Errorf("%d messages sent", sent)
 	}
 }
+
+// A stale answer and a time extension are dropped from the read buffer at once, not at the end of the call: before the next read, the
+// buffer holds none of their bytes (they may carry the answer of a card that this call never asked for).
+func TestQAStaleAnswersAndTimeExtensionsAreClearedAtOnce(t *testing.T) {
+	for _, kind := range []string{"stale", "time extension"} {
+		t.Run(kind, func(t *testing.T) {
+			armed := false
+			r, f := openPowered(t, Options{}, func(f *fakeDevice, m []byte) {
+				if armed && m[0] == msgXfrBlock {
+					data := bytes.Repeat(qaResp, 3)
+					if kind == "stale" {
+						f.send(msg(rspDataBlock, m[6]-1, stOK, 0, 0, data))
+					} else {
+						f.send(msg(rspDataBlock, m[6], stTimeExt, 1, 0, data))
+					}
+					f.send(msg(rspDataBlock, m[6], stOK, 0, 0, []byte{0x90, 0}))
+					return
+				}
+				cardHandler(echoSW)(f, m)
+			})
+			var dirty []int
+			reads := 0
+			f.onIn = func(*fakeDevice) {
+				reads++
+				if reads > 1 && !allZero(r.rbuf) { // the second read of the call: the first message was dropped
+					dirty = append(dirty, reads)
+				}
+			}
+			armed = true
+			if _, err := r.Transmit(qaCmd, testBudget); err != nil {
+				t.Fatal(err)
+			}
+			if len(dirty) != 0 {
+				t.Errorf("a dropped %s message was still in the read buffer at the reads %v", kind, dirty)
+			}
+		})
+	}
+}
