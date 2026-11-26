@@ -279,8 +279,8 @@ func TestCandidateChoosesAmongSeveralInterfaces(t *testing.T) {
 	if _, err := parseDescriptors(b, nil); !errors.Is(err, ErrSeveralInterfaces) {
 		t.Fatalf("no candidate: %v", err)
 	}
-	c2 := usbccid.Candidate{Interface: 2, BulkOut: 0x02, BulkIn: 0x82}
-	c3 := usbccid.Candidate{Interface: 3, BulkOut: 0x06, BulkIn: 0x86}
+	c2 := usbccid.Candidate{VendorID: 0x7777, ProductID: 1, Interface: 2, BulkOut: 0x02, BulkIn: 0x82}
+	c3 := usbccid.Candidate{VendorID: 0x7777, ProductID: 1, Interface: 3, BulkOut: 0x06, BulkIn: 0x86}
 	for _, c := range []usbccid.Candidate{c2, c3} {
 		l, err := parseDescriptors(b, &c)
 		if err != nil || l.iface != c.Interface || l.bulkOut != c.BulkOut || l.bulkIn != c.BulkIn {
@@ -292,17 +292,20 @@ func TestCandidateChoosesAmongSeveralInterfaces(t *testing.T) {
 func TestCandidateMustAgreeWithTheDescriptors(t *testing.T) {
 	b := descSpec{}.build()
 	for name, c := range map[string]usbccid.Candidate{
-		"interface not there":     {Interface: 5, BulkOut: 0x02, BulkIn: 0x82},
-		"interface of a HID":      {Interface: 0, BulkOut: 0x02, BulkIn: 0x82},
-		"other bulk out endpoint": {Interface: 2, BulkOut: 0x04, BulkIn: 0x82},
-		"other bulk in endpoint":  {Interface: 2, BulkOut: 0x02, BulkIn: 0x84},
+		"interface not there":     {VendorID: 0x7777, ProductID: 1, Interface: 5, BulkOut: 0x02, BulkIn: 0x82},
+		"interface of a HID":      {VendorID: 0x7777, ProductID: 1, Interface: 0, BulkOut: 0x02, BulkIn: 0x82},
+		"other bulk out endpoint": {VendorID: 0x7777, ProductID: 1, Interface: 2, BulkOut: 0x04, BulkIn: 0x82},
+		"other bulk in endpoint":  {VendorID: 0x7777, ProductID: 1, Interface: 2, BulkOut: 0x02, BulkIn: 0x84},
+		"other vendor id":         {VendorID: 0x7778, ProductID: 1, Interface: 2, BulkOut: 0x02, BulkIn: 0x82},
+		"other product id":        {VendorID: 0x7777, ProductID: 2, Interface: 2, BulkOut: 0x02, BulkIn: 0x82},
+		"no ids":                  {Interface: 2, BulkOut: 0x02, BulkIn: 0x82},
 	} {
 		if _, err := parseDescriptors(b, &c); !errors.Is(err, usbccid.ErrWrongDevice) {
 			t.Errorf("%s: err = %v", name, err)
 		}
 	}
 	// A matching candidate does not excuse a bad class descriptor.
-	c := usbccid.Candidate{Interface: 2, BulkOut: 0x02, BulkIn: 0x82}
+	c := usbccid.Candidate{VendorID: 0x7777, ProductID: 1, Interface: 2, BulkOut: 0x02, BulkIn: 0x82}
 	if _, err := parseDescriptors(descSpec{maxSlot: 2}.build(), &c); !errors.Is(err, ErrSeveralSlots) {
 		t.Errorf("err = %v", err)
 	}
@@ -324,7 +327,7 @@ func TestParseNeverPanics(t *testing.T) {
 			b = b[:rng.IntN(len(b)+1)]
 		}
 		_, _ = parseDescriptors(b, nil)
-		_, _ = parseDescriptors(b, &usbccid.Candidate{Interface: 2, BulkOut: 2, BulkIn: 0x82})
+		_, _ = parseDescriptors(b, &usbccid.Candidate{VendorID: 0x7777, ProductID: 1, Interface: 2, BulkOut: 2, BulkIn: 0x82})
 	}
 	// Descriptor lengths of 0 and 1 inside a configuration must be refused.
 	for _, bad := range []byte{0, 1} {

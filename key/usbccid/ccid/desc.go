@@ -78,9 +78,12 @@ type endpointInfo struct {
 // The texts of the refusals name the rule that failed and the facts of the device (numbers of the descriptors). A descriptor holds no
 // secret.
 func parseDescriptors(b []byte, cand *usbccid.Candidate) (*layout, error) {
-	ifs, err := walk(b)
+	ifs, vid, pid, err := walk(b)
 	if err != nil {
 		return nil, err
+	}
+	if cand != nil && (cand.VendorID != vid || cand.ProductID != pid) {
+		return nil, fmt.Errorf("%w: the device descriptor says %04x:%04x, and the candidate says %04x:%04x", usbccid.ErrWrongDevice, vid, pid, cand.VendorID, cand.ProductID)
 	}
 	var withBulk []*ifaceInfo
 	for i := range ifs {
@@ -157,19 +160,19 @@ func parseDescriptors(b []byte, cand *usbccid.Candidate) (*layout, error) {
 
 // walk reads the descriptors under the rules of the layer below (one configuration, whose length is the number of bytes present,
 // every interface at alternate setting 0) and returns the interfaces of class 0x0B.
-func walk(b []byte) ([]ifaceInfo, error) {
+func walk(b []byte) (ifs []ifaceInfo, vid, pid uint16, err error) {
 	if len(b) < 18 || b[0] != 18 || b[1] != descDevice {
-		return nil, fmt.Errorf("%w: the data does not start with a device descriptor", usbccid.ErrBadDescriptors)
+		return nil, 0, 0, fmt.Errorf("%w: the data does not start with a device descriptor", usbccid.ErrBadDescriptors)
 	}
 	if b[17] != 1 {
-		return nil, usbccid.ErrSeveralConfigurations
+		return nil, 0, 0, usbccid.ErrSeveralConfigurations
 	}
 	cfg := b[18:]
 	if len(cfg) < 9 || cfg[0] < 9 || int(cfg[0]) > len(cfg) || cfg[1] != descConfig {
-		return nil, fmt.Errorf("%w: no configuration descriptor follows the device descriptor", usbccid.ErrBadDescriptors)
+		return nil, 0, 0, fmt.Errorf("%w: no configuration descriptor follows the device descriptor", usbccid.ErrBadDescriptors)
 	}
 	if int(le16(cfg[2:])) != len(cfg) {
-		return nil, fmt.Errorf("%w: the length of the configuration is not the number of bytes present", usbccid.ErrBadDescriptors)
+		return nil, 0, 0, fmt.Errorf("%w: the length of the configuration is not the number of bytes present", usbccid.ErrBadDescriptors)
 	}
 	var (
 		out      []ifaceInfo
@@ -180,20 +183,20 @@ func walk(b []byte) ([]ifaceInfo, error) {
 	for p := cfg[cfg[0]:]; len(p) > 0; {
 		n := int(p[0])
 		if n < 2 || n > len(p) {
-			return nil, fmt.Errorf("%w: a descriptor is shorter than its header or runs past the end", usbccid.ErrBadDescriptors)
+			return nil, 0, 0, fmt.Errorf("%w: a descriptor is shorter than its header or runs past the end", usbccid.ErrBadDescriptors)
 		}
 		d := p[:n]
 		p = p[n:]
 		switch d[1] {
 		case descInterface:
 			if n < 9 {
-				return nil, fmt.Errorf("%w: an interface descriptor is shorter than 9 bytes", usbccid.ErrBadDescriptors)
+				return nil, 0, 0, fmt.Errorf("%w: an interface descriptor is shorter than 9 bytes", usbccid.ErrBadDescriptors)
 			}
 			if d[3] != 0 {
-				return nil, fmt.Errorf("%w: an interface has an alternate setting other than 0", usbccid.ErrBadDescriptors)
+				return nil, 0, 0, fmt.Errorf("%w: an interface has an alternate setting other than 0", usbccid.ErrBadDescriptors)
 			}
 			if numbers[d[2]] {
-				return nil, fmt.Errorf("%w: an interface number is listed twice", usbccid.ErrBadDescriptors)
+				return nil, 0, 0, fmt.Errorf("%w: an interface number is listed twice", usbccid.ErrBadDescriptors)
 			}
 			numbers[d[2]] = true
 			cur = nil
@@ -207,13 +210,13 @@ func walk(b []byte) ([]ifaceInfo, error) {
 			}
 		case descEndpoint:
 			if n < 7 {
-				return nil, fmt.Errorf("%w: an endpoint descriptor is shorter than 7 bytes", usbccid.ErrBadDescriptors)
+				return nil, 0, 0, fmt.Errorf("%w: an endpoint descriptor is shorter than 7 bytes", usbccid.ErrBadDescriptors)
 			}
 			if d[2]&0x0F == 0 || d[2]&0x70 != 0 {
-				return nil, fmt.Errorf("%w: an endpoint address is not a number 1 to 15 with the reserved bits clear", usbccid.ErrBadDescriptors)
+				return nil, 0, 0, fmt.Errorf("%w: an endpoint address is not a number 1 to 15 with the reserved bits clear", usbccid.ErrBadDescriptors)
 			}
 			if endpoint[d[2]] {
-				return nil, fmt.Errorf("%w: an endpoint address is listed twice", usbccid.ErrBadDescriptors)
+				return nil, 0, 0, fmt.Errorf("%w: an endpoint address is listed twice", usbccid.ErrBadDescriptors)
 			}
 			endpoint[d[2]] = true
 			if cur == nil {
@@ -233,9 +236,9 @@ func walk(b []byte) ([]ifaceInfo, error) {
 		}
 	}
 	if int(cfg[4]) != len(numbers) {
-		return nil, fmt.Errorf("%w: bNumInterfaces is not the number of interfaces listed", usbccid.ErrBadDescriptors)
+		return nil, 0, 0, fmt.Errorf("%w: bNumInterfaces is not the number of interfaces listed", usbccid.ErrBadDescriptors)
 	}
-	return out, nil
+	return out, le16(b[8:]), le16(b[10:]), nil
 }
 
 // parseClass reads the class descriptor and refuses one that is not exactly 54 bytes of the type 0x21.

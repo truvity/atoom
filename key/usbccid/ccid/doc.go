@@ -45,13 +45,35 @@
 //
 // # The lost session
 //
-// A transfer that timed out, a transfer that failed, a short write, a message that breaks the protocol, an exchange whose budget ran out
-// and a card-level failure in the middle of a chain all leave the stream between the host and the reader out of step: the layer below
+// A transfer that timed out, a transfer that failed, a short write, a message that breaks the protocol, an exchange whose budget ran out,
+// a panic of the Port and a card-level failure in the middle of a chain all leave the stream between the host and the reader out of step: the layer below
 // says a late answer may arrive on the next read, and that what a timed-out read had moved is lost. This layer then marks the session
 // LOST. The error of that call wraps ErrSessionLost and the cause (a usbccid error such as ErrTimeout, ErrStalled, ErrGone or
 // ErrClosed stays reachable with errors.Is, in its own meaning, and ErrBudgetExhausted or ErrProtocol is the cause when the layer
 // found it), and every later call returns the same error without touching the port. The caller closes the Reader and opens it
 // again. The ErrStalled, ErrGone and ErrClosed of the Port end the session in the same way.
+//
+// # Sequence numbers and the first exchange
+//
+// A late answer of an earlier session can still sit in the device's IN queue when a new session begins: the earlier one lost its
+// exchange on the budget while the card waited for a person, the person acted later, and the card's answer came after the caller
+// had closed and opened again. Two rules keep such an answer from being taken for an answer of the new session.
+//
+//   - The sequence numbers come from ONE counter of the process, shared by every Reader and seeded at random (crypto/rand) at its first
+//     use. A new Reader never starts where an old one was, and never at a place that can be guessed. Two Readers alive at once take
+//     turns from the counter, so each sees its own numbers with gaps; every answer is matched against the number of the message it
+//     answers, and the numbers are unique in any window of 256 messages of the process.
+//   - The first exchange of a session, whichever call it belongs to, DRAINS the IN pipe before it sends anything: it reads (and drops
+//     and clears) what is there, each read with a timeout of DrainReadTimeout (20 ms), until a read times out, which means that the pipe
+//     is quiet; an empty packet that ended an earlier message is dropped with the rest, so the first read of a message after the drain
+//     starts clean. It makes at most MaxDrainReads (8) reads and takes at most MaxDrainTime (250 ms); a device that is not quiet by then
+//     keeps sending without being asked, and the session is lost with ErrProtocol. ErrStalled, ErrGone and ErrClosed in the drain end
+//     the session as everywhere. On a quiet device it costs one timed-out read (DrainReadTimeout), and its time counts against the
+//     budget of that call. The drain only reads, so Open itself still sends and reads nothing: it runs at the first exchange.
+//
+// What stays: an answer that arrives AFTER the drain, with a number that happens to be the one of a message of this session, is
+// accepted if it has the type that message expects. The chance is one in 256 at most for each such late message, and only for the same
+// message type, and the layer above covers it by the rules of "What the layer above must not assume".
 //
 // # What it never does
 //
@@ -79,15 +101,16 @@
 // # The limits
 //
 // MaxShortCommandAPDU (261) and MaxCommandAPDU (65544) bound a command, MaxResponseAPDU (65538) a response over all its blocks,
-// MaxStaleAnswers (3) the skipped answers of one exchange, MaxATR (33) the answer to reset, MaxBudget (90 s) the budget of one
+// MaxStaleAnswers (3) the skipped answers of one exchange, MaxATR (33) the answer to reset, MaxDrainReads (8), MaxDrainTime (250 ms)
+// and DrainReadTimeout (20 ms) the drain, MaxBudget (90 s) the budget of one
 // exchange, MinMessageLength (271) the smallest message length a reader may declare, and MaxMessageLength (65536) the message size
 // held. The time-extension messages of one exchange have no count of their own: the budget bounds them. Each refusal names its limit.
 //
 // # Errors and secrets
 //
 // The errors are values to test with errors.Is: the refusals of Open (ErrNoInterface, ErrBadClass, ErrExchangeLevel and the others),
-// ErrSessionLost with its causes, the argument errors (ErrBadBudget, ErrAPDUTooShort, ErrAPDUTooLong, ErrNotPowered, ErrBadATR) that
-// leave the session as it was, and the card-level failures of the reader's answer (ErrNoCard, ErrCardMute, ErrCardParity,
+// ErrSessionLost with its causes, the argument and state errors (ErrBadBudget, ErrAPDUTooShort, ErrAPDUTooLong, ErrNotPowered, ErrStillActive, ErrBadATR, ErrNotOpen
+// for the zero Reader, a nil Reader and a nil Port) that leave the session as it was, and the card-level failures of the reader's answer (ErrNoCard, ErrCardMute, ErrCardParity,
 // ErrCardProtocol, ErrSlotBusy, ErrReaderFault, ErrCommandNotSupported, ErrBadParameter, all of them ErrCommandFailed), where
 // errors.As to *CommandError gives bError and bmICCStatus. The text of an error holds counts, header numbers and status bytes, and
 // never a byte of a command or of a response: a command can carry a PIN.
@@ -105,12 +128,21 @@
 //   - A lost session cannot be repaired. After ErrSessionLost nothing is sent until the caller closes the Reader and opens it again
 //     (a new Port from the usbccid layer, a new claim, a new PowerOn). The layer above treats whatever it held of the card (a
 //     selected application, a verified PIN, a secure channel) as gone.
-//   - A lost session says nothing about the card: the card may have done the work, or half of it. A command that must not run twice is
-//     not repeated after an ErrSessionLost without the layer above finding out by its own means.
+//   - A session begins with PowerOn, and the layer above never treats the first answers of a session as proof of anything that
+//     happened before it. A late answer of an earlier session is dropped by the drain and by the sequence counter, but the rest risk
+//     (above) is not nil: a verified PIN, a signature or a selected application is established only by an exchange of this session
+//     that the layer above made after PowerOn, with data that it chose fresh for it.
+//   - After ANY error, not only a lost session (also a *CommandError such as a mute card or an aborted command, a refused answer,
+//     ErrNotPowered after a success that said the card was off), the card may have carried out the command. A PIN verification or a
+//     signature is never to be assumed not to have happened. Success means only that a well-formed answer with the right sequence
+//     number arrived; the reader knows nothing of status words, and a response of 6A82 is a success here. A command that must not run
+//     twice is not repeated after an error without the layer above finding out by its own means.
+//   - A device that sends time-extension messages without end costs a busy loop up to the budget: the budget is the only bound on
+//     them (there is no count). The caller gives a budget that it can afford to spend.
+//   - A card status in an answer that says "not active" (also on a success) makes the Reader refuse Transmit until PowerOn succeeds
+//     again, and the answer that carried it is not returned.
 //   - Time spent waiting for a person counts against the budget of the exchange. A command that needs a touch must be given a budget
 //     that covers the touch and the transfers; when the budget runs out first, the session is lost and the card may still be waiting.
-//   - A card-level failure with a bmICCStatus other than 0 (the card is inactive or gone) makes the Reader refuse Transmit with
-//     ErrNotPowered until PowerOn succeeds again. The caller powers on again and selects its application again.
 //   - Whether a power cycle (PowerOff then PowerOn, or a new session) ends a verified PIN state on a given card is not known from this
 //     layer. The reader reports what the card and the reader answered, and nothing else: that must be measured on a real card.
 //   - The reader does not decide which card is meant. The serial number of a card comes from the card application, and the layer above

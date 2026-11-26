@@ -1,10 +1,12 @@
 package ccid
 
 import (
+	"crypto/rand"
 	"encoding/binary"
 	"errors"
 	"fmt"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/truvity/atoom/key/usbccid"
@@ -38,6 +40,17 @@ const (
 	// waits for a person keeps sending time-extension messages, so no single transfer waits that long without an answer. The
 	// timeout of a transfer is also cut to what is left of the budget.
 	DefaultTransferTimeout = 10 * time.Second
+
+	// MaxDrainReads is the number of reads that the drain at the first exchange of a session makes before it gives up: eight. A device
+	// that has not gone quiet by then keeps sending without being asked, and the session is lost with ErrProtocol.
+	MaxDrainReads = 8
+
+	// MaxDrainTime is the time the drain may take in all: 250 milliseconds.
+	MaxDrainTime = 250 * time.Millisecond
+
+	// DrainReadTimeout is the timeout of one read of the drain: 20 milliseconds. It is the cost of the drain on a quiet device (one
+	// read that times out).
+	DrainReadTimeout = 20 * time.Millisecond
 
 	// MinMessageLength is the smallest dwMaxCCIDMessageLength this layer accepts: the 10-byte header and the largest short APDU
 	// (CCID 1.1 requires at least this at short APDU level). A reader that declares less contradicts its exchange level.
@@ -78,8 +91,9 @@ const (
 type Options struct {
 	// Candidate, when set, is the device that Discover found. The descriptors of the Port must then hold that CCID interface with
 	// those bulk endpoints (else an error that wraps usbccid.ErrWrongDevice), and the reader uses that interface when the device has
-	// several. When nil, the descriptors must hold exactly one CCID interface (else ErrSeveralInterfaces). The reader takes the
-	// interface and the endpoints from the descriptors, and never guesses them.
+	// several; the vendor and product id of the device descriptor must be the candidate's too (a Port may have been opened without the
+	// USB layer's own check). When nil, the descriptors must hold exactly one CCID interface (else ErrSeveralInterfaces). The reader
+	// takes the interface and the endpoints from the descriptors, and never guesses them.
 	Candidate *usbccid.Candidate
 
 	// TransferTimeout bounds each bulk transfer, and is cut to what is left of the budget of the exchange. Zero means
@@ -140,20 +154,26 @@ type Reader struct {
 	limit   int // largest command APDU
 	wbuf    []byte
 	rbuf    []byte
-	seq     uint8
 	lost    error
 	closed  bool
 	powered bool
+	// drained is true once the reader has emptied the IN pipe of what an earlier session left (see drain). It happens at the first
+	// exchange, before the first message of the session is sent.
+	drained bool
 	// emptyOK is true when the last message read filled a whole number of packets: the reader may have sent the empty packet that
 	// ends it, which the next read then returns as zero bytes. That one empty read is consumed, and is no answer.
 	emptyOK bool
 }
 
 // Open takes ownership of the Port p, reads its descriptors, checks that the device is of the simple kind this layer accepts and
-// claims its CCID interface. It sends nothing to the reader: the caller asks for the slot status and powers the card on. On every
-// error it closes the Port. A claim refused because another holder has the interface returns an error that wraps usbccid.ErrBusy;
+// claims its CCID interface. It sends nothing to the reader and reads nothing from it: the caller asks for the slot status and
+// powers the card on, and the first exchange of the session drains the IN pipe before it sends (see the package comment). A nil Port
+// is ErrNotOpen. On every error it closes the Port. A claim refused because another holder has the interface returns an error that wraps usbccid.ErrBusy;
 // the reader does not retry.
 func Open(p usbccid.Port, o Options) (*Reader, error) {
+	if p == nil {
+		return nil, fmt.Errorf("%w: the Port is nil", ErrNotOpen)
+	}
 	r, err := open(p, o)
 	if err != nil {
 		_ = p.Close()
@@ -178,7 +198,8 @@ func open(p usbccid.Port, o Options) (*Reader, error) {
 	if err != nil {
 		return nil, err
 	}
-	maxMsg := min(int(l.class.maxMessageLength), MaxMessageLength)
+	// The length is declared by the device: take the minimum in uint32, and only then convert (a 32-bit int would turn 0x80000000 negative).
+	maxMsg := int(min(l.class.maxMessageLength, uint32(MaxMessageLength)))
 	r := &Reader{port: p, lay: *l, xfer: xfer, maxMsg: maxMsg, limit: MaxShortCommandAPDU}
 	if l.class.extended() {
 		r.limit = MaxCommandAPDU
@@ -195,6 +216,9 @@ func open(p usbccid.Port, o Options) (*Reader, error) {
 
 // Info returns what the descriptors say about the interface the reader uses.
 func (r *Reader) Info() Info {
+	if r == nil {
+		return Info{}
+	}
 	return Info{
 		Interface:        r.lay.iface,
 		BulkOut:          r.lay.bulkOut,
@@ -220,6 +244,9 @@ func (r *Reader) Close() error {
 	}
 	r.closed = true
 	r.wipe()
+	if r.port == nil { // the zero Reader holds nothing
+		return nil
+	}
 	e1 := r.port.Release(r.lay.iface)
 	e2 := r.port.Close()
 	return errors.Join(e1, e2)
@@ -227,6 +254,9 @@ func (r *Reader) Close() error {
 
 // SlotStatus asks the reader for the state of the slot (GetSlotStatus). It does not touch the card.
 func (r *Reader) SlotStatus(budget time.Duration) (SlotState, error) {
+	if r == nil {
+		return 0, ErrNotOpen
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	defer r.wipe()
@@ -238,7 +268,6 @@ func (r *Reader) SlotStatus(budget time.Duration) (SlotState, error) {
 	if err != nil {
 		return 0, err
 	}
-	r.powered = r.powered && st == SlotActive
 	return st, nil
 }
 
@@ -250,6 +279,9 @@ func (r *Reader) SlotStatus(budget time.Duration) (SlotState, error) {
 // application, and it must be measured on a real card; nothing here claims it. A caller that needs the PIN state gone calls PowerOff
 // and PowerOn and then checks the card's own answer, or closes the Reader and opens it again, and measures which of them works.
 func (r *Reader) PowerOn(budget time.Duration) ([]byte, error) {
+	if r == nil {
+		return nil, ErrNotOpen
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	defer r.wipe()
@@ -273,16 +305,23 @@ func (r *Reader) PowerOn(budget time.Duration) ([]byte, error) {
 		// The failure answers the only message sent, so the stream is in order.
 		return nil, ce
 	}
+	if a.state != 0 {
+		// A success that says the card is not active is no power-on: the answer to reset is not returned.
+		return nil, fmt.Errorf("ccid: IccPowerOn: the answer says %s: %w", SlotState(a.state), ErrNotPowered)
+	}
 	if n := len(a.data); n < 2 || n > MaxATR {
 		return nil, fmt.Errorf("%w: %d bytes", ErrBadATR, n)
 	}
-	r.powered = a.state == 0
+	r.powered = true
 	return append([]byte(nil), a.data...), nil
 }
 
 // PowerOff powers the card off (IccPowerOff). The reader answers with the slot status; a slot with no card answers that no card is
 // present, which is ErrNoCard (the card is off, whatever the reason). A caller can send it to a card that is not powered.
 func (r *Reader) PowerOff(budget time.Duration) error {
+	if r == nil {
+		return ErrNotOpen
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	defer r.wipe()
@@ -291,12 +330,15 @@ func (r *Reader) PowerOff(budget time.Duration) error {
 		return err
 	}
 	r.powered = false
-	_, ce, err := r.exchange("IccPowerOff", msgIccPowerOff, 0, nil, rspSlotStatus, dl)
+	a, ce, err := r.exchange("IccPowerOff", msgIccPowerOff, 0, nil, rspSlotStatus, dl)
 	if err != nil {
 		return err
 	}
 	if ce != nil {
 		return ce
+	}
+	if a.state == uint8(SlotActive) {
+		return fmt.Errorf("ccid: IccPowerOff: %w", ErrStillActive)
 	}
 	return nil
 }
@@ -314,10 +356,19 @@ func (r *Reader) PowerOff(budget time.Duration) error {
 // only message of a command and leaves the session in order; the same failure inside a chain ends the session. Every other error ends
 // the session. The text of an error never holds a byte of a command or of a response.
 //
+// After ANY error, not only a lost session (also a *CommandError such as a mute card or an aborted command), the card may have
+// carried out the command: a PIN verification or a signature is never to be assumed not to have happened. Success means only that a
+// well-formed answer with the right sequence number arrived, of two bytes or more; the reader knows nothing of status words. A
+// successful answer whose card status says that the card is not active is not returned: the error is ErrNotPowered. A device that
+// sends time extensions without end costs a busy loop up to the budget, which is the only bound on them.
+//
 // The returned response is the caller's: this layer keeps no copy of it. The command is copied into a buffer of the reader, which is
 // cleared before the call returns; the bytes of the caller's slice, of the Port's and of the kernel's copies are not this layer's to
 // clear.
 func (r *Reader) Transmit(apdu []byte, budget time.Duration) ([]byte, error) {
+	if r == nil {
+		return nil, ErrNotOpen
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	defer r.wipe()
@@ -346,6 +397,9 @@ func (r *Reader) begin(budget time.Duration) (time.Time, error) {
 	if r.closed {
 		return time.Time{}, usbccid.ErrClosed
 	}
+	if r.port == nil { // the zero Reader
+		return time.Time{}, ErrNotOpen
+	}
 	if r.lost != nil {
 		return time.Time{}, r.lost
 	}
@@ -371,19 +425,23 @@ func (r *Reader) lose(cause error) error {
 	return r.lost
 }
 
-// slotStatus runs GetSlotStatus. A failure of the reader is a *CommandError that ends nothing (it answers the only message).
+// slotStatus runs GetSlotStatus and keeps the power state in step with what the reader says: a card that is not active is not
+// powered, whether the answer is a success or a failure. A failure of the reader is a *CommandError that ends nothing (it answers the
+// only message).
 func (r *Reader) slotStatus(dl time.Time) (SlotState, error) {
 	a, ce, err := r.exchange("GetSlotStatus", msgGetSlotState, 0, nil, rspSlotStatus, dl)
 	if err != nil {
 		return 0, err
 	}
 	if ce != nil {
+		if ce.ICCStatus != 0 {
+			r.powered = false
+		}
 		return 0, ce
 	}
-	if a.state > uint8(SlotEmpty) {
-		return 0, r.lose(fmt.Errorf("%w: GetSlotStatus: bmICCStatus %d is reserved", ErrProtocol, a.state))
-	}
-	return SlotState(a.state), nil
+	st := SlotState(a.state)
+	r.powered = r.powered && st == SlotActive
+	return st, nil
 }
 
 // xfr sends the command in one or more XfrBlock messages and collects the response. A failure answered in the middle of a chain, or
@@ -419,9 +477,22 @@ func (r *Reader) xfr(apdu []byte, dl time.Time) ([]byte, error) {
 		if ce != nil {
 			return nil, r.failXfr(ce, nchunks == 1)
 		}
-		if i < nchunks-1 && (a.chain != chainEmptyAck || len(a.data) != 0) {
-			return nil, r.lose(fmt.Errorf("%w: the reader did not ask for the next command block (bChainParameter 0x%02X)", ErrProtocol, a.chain))
+		if i < nchunks-1 {
+			if a.chain != chainEmptyAck || len(a.data) != 0 {
+				return nil, r.lose(fmt.Errorf("%w: the reader did not ask for the next command block (bChainParameter 0x%02X)", ErrProtocol, a.chain))
+			}
+			if a.state != 0 {
+				return nil, r.cardOff(a, false)
+			}
 		}
+	}
+	// The first block of a response is the whole response or the beginning of a chain; a middle block, an end block or an
+	// acknowledgement of a command block cannot be the first.
+	if a.chain != chainWhole && a.chain != chainBegin {
+		return nil, r.lose(fmt.Errorf("%w: bChainParameter 0x%02X in the first response block", ErrProtocol, a.chain))
+	}
+	if a.state != 0 {
+		return nil, r.cardOff(a, nchunks == 1 && a.chain == chainWhole)
 	}
 	out, err := r.collect(nil, a.data)
 	if err != nil {
@@ -435,6 +506,9 @@ func (r *Reader) xfr(apdu []byte, dl time.Time) ([]byte, error) {
 		if ce != nil {
 			return out, r.failXfr(ce, false)
 		}
+		if a.state != 0 {
+			return out, r.cardOff(a, false)
+		}
 		if out, err = r.collect(out, a.data); err != nil {
 			return out, err
 		}
@@ -442,7 +516,21 @@ func (r *Reader) xfr(apdu []byte, dl time.Time) ([]byte, error) {
 	if c := a.chain; c != chainWhole && c != chainEnd {
 		return out, r.lose(fmt.Errorf("%w: unexpected bChainParameter 0x%02X in the last response block", ErrProtocol, c))
 	}
+	if len(out) < 2 {
+		return out, r.lose(fmt.Errorf("%w: a response of %d bytes: a response APDU ends in two status bytes", ErrProtocol, len(out)))
+	}
 	return out, nil
+}
+
+// cardOff handles a successful answer whose card status says that the card is not active: the card is not powered any more, and the
+// answer is not returned. The session stays in order only when the answer ended the command.
+func (r *Reader) cardOff(a answer, inOrder bool) error {
+	r.powered = false
+	err := fmt.Errorf("ccid: XfrBlock: the answer says %s: %w", SlotState(a.state), ErrNotPowered)
+	if inOrder {
+		return err
+	}
+	return r.lose(err)
 }
 
 // failXfr returns the failure of a command. It leaves the session in order only when the reader answered the only message of the
@@ -484,8 +572,19 @@ type answer struct {
 // messages. A failed command status comes back as a *CommandError, with a nil error, and leaves the decision to the caller. Every
 // other failure has ended the session already.
 func (r *Reader) exchange(op string, typ byte, level uint16, payload []byte, want byte, dl time.Time) (answer, *CommandError, error) {
-	r.seq++
-	seq := r.seq
+	// A panic inside the Port leaves the stream in an unknown state: mark the session lost, and let the panic go on with its value.
+	defer func() {
+		if p := recover(); p != nil {
+			_ = r.lose(fmt.Errorf("ccid: %s: the port panicked", op))
+			panic(p)
+		}
+	}()
+	if !r.drained {
+		if err := r.drain(op, dl); err != nil {
+			return answer{}, nil, err
+		}
+	}
+	seq := nextSeq()
 	n := headerLen + len(payload)
 	msg := r.wbuf[:n]
 	msg[0] = typ
@@ -527,6 +626,9 @@ func (r *Reader) exchange(op string, typ byte, level uint16, payload []byte, wan
 		if h[5] != 0 {
 			return answer{}, nil, r.lose(fmt.Errorf("%w: %s: the answer is for slot %d, and this layer serves slot 0", ErrProtocol, op, h[5]))
 		}
+		if h[7]&3 == 3 && h[7]>>6 < 2 {
+			return answer{}, nil, r.lose(fmt.Errorf("%w: %s: bmICCStatus 3 is reserved", ErrProtocol, op))
+		}
 		switch h[7] >> 6 { // bmCommandStatus
 		case 0:
 			return answer{state: h[7] & 3, chain: h[9], data: r.rbuf[headerLen:total]}, nil, nil
@@ -538,6 +640,64 @@ func (r *Reader) exchange(op string, typ byte, level uint16, payload []byte, wan
 			return answer{}, nil, r.lose(fmt.Errorf("%w: %s: bmCommandStatus 3 is reserved", ErrProtocol, op))
 		}
 	}
+}
+
+// drain empties the IN pipe before the first message of the session is sent. An answer that an earlier session left there (it was lost
+// while the card waited for a person, and the person acted later) must not be taken for an answer of this one. It only reads, so
+// Open still sends nothing; it runs at the first exchange of the session, whichever call that is, and its time counts against that
+// call's budget. It reads whole messages into the read buffer, each read with a timeout of DrainReadTimeout (and no more than the
+// transfer timeout or what is left of the budget), discards and clears what arrives, and stops at the first read that times out: the
+// pipe is quiet. An empty packet that ended an earlier message is read and dropped here, so the first read of a message after the
+// drain starts clean. At most MaxDrainReads reads and MaxDrainTime in all: a device that is not quiet by then keeps sending without
+// being asked, and the session is lost with ErrProtocol. On a quiet device the cost is one timed-out read, DrainReadTimeout.
+func (r *Reader) drain(op string, dl time.Time) error {
+	buf := r.rbuf[:min(len(r.rbuf), MaxMessageLength)]
+	start := time.Now()
+	for reads := 0; ; reads++ {
+		if reads >= MaxDrainReads || time.Since(start) > MaxDrainTime {
+			return r.lose(fmt.Errorf("%w: %s: the IN pipe is not quiet after %d reads (MaxDrainReads, MaxDrainTime): the device sends without being asked", ErrProtocol, op, reads))
+		}
+		to, _, err := r.timeout(dl)
+		if err != nil {
+			return r.lose(fmt.Errorf("ccid: %s: drain: %w", op, err))
+		}
+		to = min(to, DrainReadTimeout)
+		n, err := r.port.BulkIn(r.lay.bulkIn, buf, to)
+		clear(buf)
+		switch {
+		case err == nil:
+			if n < 0 || n > len(buf) {
+				return r.lose(fmt.Errorf("%w: %s: the port returned %d bytes for a buffer of %d", ErrProtocol, op, n, len(buf)))
+			}
+		case errors.Is(err, usbccid.ErrTimeout):
+			r.drained, r.emptyOK = true, false
+			return nil
+		default:
+			return r.lose(portError(op, "drain", err, false))
+		}
+	}
+}
+
+// seqs is the one counter of sequence numbers of the process, shared by every Reader and seeded at random at first use. A Reader
+// that opens after a lost session therefore never starts where the old one was, and never at a place that can be guessed: a late
+// answer of the old session carries a number that the new one will not use for another 255 messages of this process.
+var seqs struct {
+	once sync.Once
+	n    atomic.Uint32
+}
+
+// nextSeq returns the next sequence number of the process. Two Readers alive at once take turns from the same counter, so each sees
+// its own numbers with gaps (the numbers are unique in any window of 256 messages of the process, and every answer is matched against
+// the number of the message it answers).
+func nextSeq() uint8 {
+	seqs.once.Do(func() {
+		var b [1]byte
+		if _, err := rand.Read(b[:]); err != nil { // never fails since Go 1.24; the fallback is the clock
+			b[0] = byte(time.Now().UnixNano()) //nolint:gosec // only a seed
+		}
+		seqs.n.Store(uint32(b[0]))
+	})
+	return uint8(seqs.n.Add(1)) //nolint:gosec // the counter wraps at 256 on purpose
 }
 
 // timeout returns the timeout of the next transfer: the transfer timeout, cut to what is left of the budget. clamped says that the

@@ -79,8 +79,17 @@ var ErrAPDUTooShort = errors.New("ccid: the command APDU is shorter than its 4-b
 var ErrAPDUTooLong = errors.New("ccid: the command APDU is longer than this reader takes (MaxShortCommandAPDU, MaxCommandAPDU)")
 
 // ErrNotPowered is returned by Transmit when the card has not been powered on by this Reader (or was powered off, or the reader
-// reported it removed or inactive).
+// reported it removed or inactive), and by Transmit and PowerOn when an answer that succeeded says in its card status that the card is
+// not active: the answer (the response, the answer to reset) is then not returned.
 var ErrNotPowered = errors.New("ccid: the card is not powered on")
+
+// ErrNotOpen is returned by every method of the zero Reader and of a nil *Reader (Close and Info excepted: Close returns nil, Info the
+// zero Info), and by Open for a nil Port. Use Open.
+var ErrNotOpen = errors.New("ccid: the reader is not open: use Open with a Port")
+
+// ErrStillActive is returned by PowerOff when the reader's answer says that the card is still active. The Reader treats the card as
+// not powered and sends it no command; the session is not lost.
+var ErrStillActive = errors.New("ccid: the reader says the card is still active after power off")
 
 // ErrBadATR is returned by PowerOn when the answer to reset is shorter than 2 bytes or longer than MaxATR. The card is powered on
 // and the session is not lost; the caller decides whether to power it off. The text holds the length and no byte.
