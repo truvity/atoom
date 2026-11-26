@@ -109,6 +109,14 @@ The stores that could become drivers, and what each can prove, are in [key store
 
 Every call carries the deadline and the correlation id of the request it is part of. The rules are on [the call context](../../docs/call-context.md); this page does not repeat them. A Go client: `keyv1alpha1connect.NewKeyStoreServiceClient(hc, url, call.ClientOptions()...)`; the kit's `key/conformance.Dial` does it already.
 
+## A crypto.Signer
+
+Code that takes a `crypto.Signer`, such as the standard library's certificate functions, can use a key that stays in a key store: `signer.New(ctx, client, "purpose")` (`github.com/truvity/atoom/key/signer`) returns one for a purpose of a client of the key port. `New` reads the public key and checks it against the algorithm of the purpose and its `key_id`. Every `Sign` then checks that the answer names the key that `New` read and that the public key verifies the signature, and only then returns it. A key rotated under the Signer is `ErrKeyChanged`, never a signature by another key: make a new Signer.
+
+- **It signs a digest, as `crypto.Signer` does.** The hash must be the one of the algorithm. It knows `ES256`, `ES384` and `RS256` (PKCS#1 v1.5), and returns what the port returns: DER for ECDSA. RSA-PSS is refused, and it does not decrypt.
+- **The context.** `crypto.Signer.Sign` has no context, so the Signer uses the one given to `New`. A host that signs inside a request calls `s.WithContext(requestCtx).Sign`. Each call has a deadline: `WithTimeout`, two minutes by default.
+- **What it proves.** Every signature is by the key that the store named at `New`. A caller that must sign with a known key compares `Public()` or `KeyID()` with its own record.
+
 ## A driver of your own
 
 1. Implement `KeyStoreService` (Go: `keyv1alpha1connect.KeyStoreServiceHandler`; Rust: the generated service trait). A call you do not offer answers `unimplemented`.
