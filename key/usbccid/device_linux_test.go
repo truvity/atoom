@@ -1,4 +1,4 @@
-//go:build linux
+//go:build linux && (amd64 || arm64)
 
 package usbccid
 
@@ -22,9 +22,12 @@ import (
 // t.TempDir(), which answers every request with ENOTTY; and the answers of the kernel (busy, gone, timeout) are scripted through
 // the ioctl hook of Device.
 
-// scripted opens a Device over a file under t.TempDir() that holds desc, and replaces its system call with h. Close closes the file.
+// scripted opens a Device over a file under t.TempDir() that holds desc (the made-up composite device when desc is nil), and replaces its system call with h. Close closes the file.
 func scripted(t *testing.T, desc []byte, h func(req uintptr, arg unsafe.Pointer) (uintptr, unix.Errno)) *Device {
 	t.Helper()
+	if desc == nil {
+		desc = qaDefaultDesc()
+	}
 	path := filepath.Join(t.TempDir(), "node")
 	if err := os.WriteFile(path, desc, 0o600); err != nil {
 		t.Fatal(err)
@@ -132,7 +135,7 @@ func TestMillisecondRounding(t *testing.T) {
 	}{
 		{0, 1}, {-time.Second, 1}, {time.Nanosecond, 1}, {time.Millisecond, 1},
 		{time.Millisecond + 1, 2}, {1500 * time.Microsecond, 2}, {10 * time.Second, 10000},
-		{1000 * time.Hour, 1 << 30},
+		{1000 * time.Hour, 600000}, {maxTimeout, 600000}, {maxTimeout + 1, 600000}, {1<<63 - 1, 600000},
 	}
 	for _, c := range cases {
 		if got := ms(c.in); got != c.want {
@@ -164,7 +167,7 @@ func TestOpenRefusesNonDevices(t *testing.T) {
 
 // A regular file refuses every ioctl with ENOTTY, which runs the real error path (wrapping, no panic, no latch) without a device.
 func TestDeviceAgainstARegularFile(t *testing.T) {
-	desc := []byte{1, 2, 3, 4}
+	desc := qaDefaultDesc()
 	path := filepath.Join(t.TempDir(), "node")
 	if err := os.WriteFile(path, desc, 0o600); err != nil {
 		t.Fatal(err)
@@ -178,36 +181,43 @@ func TestDeviceAgainstARegularFile(t *testing.T) {
 		t.Fatalf("descriptors = %x, %v", got, err)
 	}
 	got[0] = 99
-	if again, _ := d.Descriptors(); again[0] != 1 {
+	if again, _ := d.Descriptors(); again[0] != 18 {
 		t.Error("Descriptors hands out its own buffer")
 	}
 
-	err = d.Claim(2)
+	err = d.Claim(qaCCID)
 	if !errors.Is(err, unix.ENOTTY) || errors.Is(err, ErrBusy) || errors.Is(err, ErrGone) {
 		t.Fatalf("claim on a file: %v, want ENOTTY only", err)
 	}
-	if !strings.Contains(err.Error(), "claim interface 2") {
+	if !strings.Contains(err.Error(), "claim interface 1") {
 		t.Errorf("claim error does not name the interface: %v", err)
 	}
-	if d.claimed[2] {
+	if d.claimed[qaCCID] {
 		t.Error("a failed claim was recorded as held")
 	}
 	if _, err := d.Descriptors(); err != nil {
 		t.Errorf("descriptors after a failed claim (not sticky): %v", err)
 	}
-	n, err := d.BulkOut(0x02, []byte{1, 2, 3}, 10*time.Millisecond)
+	// Nothing is claimed, so a transfer is refused before the kernel is asked.
+	if _, err := d.BulkOut(qaOut, []byte{1, 2, 3}, 10*time.Millisecond); !errors.Is(err, ErrNotClaimed) {
+		t.Errorf("bulk out before a claim: %v", err)
+	}
+	// As if the claim had gone through, the transfers reach the file and meet ENOTTY.
+	d.claimed[qaCCID] = true
+	n, err := d.BulkOut(qaOut, []byte{1, 2, 3}, 10*time.Millisecond)
 	if !errors.Is(err, unix.ENOTTY) || n != 0 || !strings.Contains(err.Error(), "0x02") {
 		t.Errorf("bulk out: n=%d err=%v", n, err)
 	}
-	if _, err := d.BulkIn(0x82, make([]byte, 64), 10*time.Millisecond); !errors.Is(err, unix.ENOTTY) {
+	if _, err := d.BulkIn(qaIn, make([]byte, 64), 10*time.Millisecond); !errors.Is(err, unix.ENOTTY) {
 		t.Errorf("bulk in: %v", err)
 	}
-	if _, err := d.BulkIn(0x82, nil, 10*time.Millisecond); !errors.Is(err, unix.ENOTTY) { // the empty-buffer branch
+	if _, err := d.BulkIn(qaIn, nil, 10*time.Millisecond); !errors.Is(err, ErrBadLength) { // the empty buffer is refused
 		t.Errorf("bulk in, empty buffer: %v", err)
 	}
-	if err := d.Release(2); err != nil {
+	if err := d.Release(qaCCID2); err != nil {
 		t.Errorf("release of an unclaimed interface: %v", err)
 	}
+	delete(d.claimed, qaCCID) // the release would meet ENOTTY: the claim was only pretended
 	if err := d.Close(); err != nil {
 		t.Fatal(err)
 	}
@@ -222,51 +232,59 @@ func checkAllClosed(t *testing.T, p Port) {
 	if _, err := p.Descriptors(); !errors.Is(err, ErrClosed) {
 		t.Errorf("descriptors after close: %v", err)
 	}
-	if err := p.Claim(0); !errors.Is(err, ErrClosed) {
+	if err := p.Claim(qaCCID); !errors.Is(err, ErrClosed) {
 		t.Errorf("claim after close: %v", err)
 	}
-	if _, err := p.BulkOut(0x02, []byte{1}, time.Millisecond); !errors.Is(err, ErrClosed) {
+	if _, err := p.BulkOut(qaOut, []byte{1}, time.Millisecond); !errors.Is(err, ErrClosed) {
 		t.Errorf("bulk out after close: %v", err)
 	}
-	if _, err := p.BulkIn(0x82, make([]byte, 8), time.Millisecond); !errors.Is(err, ErrClosed) {
+	if _, err := p.BulkIn(qaIn, make([]byte, 8), time.Millisecond); !errors.Is(err, ErrClosed) {
 		t.Errorf("bulk in after close: %v", err)
+	}
+	// After Close, Release and Close return nil and every other call returns ErrClosed.
+	if err := p.Release(qaCCID); err != nil {
+		t.Errorf("release after close: %v", err)
+	}
+	if err := p.Close(); err != nil {
+		t.Errorf("close after close: %v", err)
 	}
 }
 
-// BulkOut clears the direction bit and BulkIn sets it, whatever the caller passes; the length, the timeout and the data pointer
-// reach the kernel structure.
+// The endpoint, the length, the timeout and the data pointer reach the kernel structure as they were given.
 func TestBulkArgumentsReachTheKernel(t *testing.T) {
 	var seen []bulkTransfer
 	d := scripted(t, nil, func(req uintptr, arg unsafe.Pointer) (uintptr, unix.Errno) {
-		if req != reqBulk {
-			t.Errorf("request %#x, want the bulk request", req)
+		if req == reqBulk {
+			seen = append(seen, *(*bulkTransfer)(arg))
+			return uintptr(seen[len(seen)-1].Len), 0
 		}
-		bt := *(*bulkTransfer)(arg)
-		seen = append(seen, bt)
-		return uintptr(bt.Len), 0
+		return 0, 0
 	})
-	n, err := d.BulkOut(0x82, []byte{1, 2, 3}, 1500*time.Microsecond)
+	if err := d.Claim(qaCCID); err != nil {
+		t.Fatal(err)
+	}
+	n, err := d.BulkOut(qaOut, []byte{1, 2, 3}, 1500*time.Microsecond)
 	if err != nil || n != 3 {
 		t.Fatalf("BulkOut = %d, %v", n, err)
 	}
-	n, err = d.BulkIn(0x02, make([]byte, 8), time.Second)
+	n, err = d.BulkIn(qaIn, make([]byte, 8), time.Second)
 	if err != nil || n != 8 {
 		t.Fatalf("BulkIn = %d, %v", n, err)
 	}
-	if _, err = d.BulkIn(0x82, nil, time.Second); err != nil {
+	if _, err = d.BulkOut(qaOut, nil, time.Second); err != nil {
 		t.Fatal(err)
 	}
 	if len(seen) != 3 {
 		t.Fatalf("%d requests", len(seen))
 	}
-	if seen[0].Ep != 0x02 || seen[0].Len != 3 || seen[0].Timeout != 2 || seen[0].Data == nil {
-		t.Errorf("BulkOut(0x82) sent %+v, want endpoint 0x02, 3 bytes, 2 ms", seen[0])
+	if seen[0].Ep != qaOut || seen[0].Len != 3 || seen[0].Timeout != 2 || seen[0].Data == nil {
+		t.Errorf("BulkOut sent %+v, want endpoint 0x02, 3 bytes, 2 ms", seen[0])
 	}
-	if seen[1].Ep != 0x82 || seen[1].Len != 8 || seen[1].Timeout != 1000 {
-		t.Errorf("BulkIn(0x02) sent %+v, want endpoint 0x82, 8 bytes, 1000 ms", seen[1])
+	if seen[1].Ep != qaIn || seen[1].Len != 8 || seen[1].Timeout != 1000 {
+		t.Errorf("BulkIn sent %+v, want endpoint 0x82, 8 bytes, 1000 ms", seen[1])
 	}
 	if seen[2].Len != 0 || seen[2].Data != nil {
-		t.Errorf("an empty buffer sent %+v", seen[2])
+		t.Errorf("an empty write sent %+v", seen[2])
 	}
 }
 
@@ -285,25 +303,25 @@ func TestClaimBusyIsErrBusy(t *testing.T) {
 		}
 		return 0, 0
 	})
-	err := d.Claim(2)
+	err := d.Claim(qaCCID)
 	if !errors.Is(err, ErrBusy) || !errors.Is(err, unix.EBUSY) {
 		t.Fatalf("claim of a held interface: %v, want ErrBusy and EBUSY", err)
 	}
-	if errors.Is(err, ErrGone) || !strings.Contains(err.Error(), "interface 2") {
+	if errors.Is(err, ErrGone) || !strings.Contains(err.Error(), "interface 1") {
 		t.Errorf("busy error: %v", err)
 	}
 	if got := claims.Load(); got != 1 {
 		t.Errorf("the claim was tried %d times, want once (no retry)", got)
 	}
-	if d.claimed[2] {
+	if d.claimed[qaCCID] {
 		t.Error("a busy claim was recorded as held")
 	}
-	if err := d.Release(2); err != nil {
+	if err := d.Release(qaCCID); err != nil {
 		t.Errorf("release of what was never claimed: %v", err)
 	}
 	// The holder lets go; the same handle claims now.
 	held = false
-	if err := d.Claim(2); err != nil {
+	if err := d.Claim(qaCCID); err != nil {
 		t.Errorf("claim after the holder left: %v", err)
 	}
 }
@@ -314,18 +332,18 @@ func TestGoneIsLatched(t *testing.T) {
 		t.Run(e.Error(), func(t *testing.T) {
 			var calls atomic.Int32
 			gone := false
-			d := scripted(t, []byte{1}, func(uintptr, unsafe.Pointer) (uintptr, unix.Errno) {
+			d := scripted(t, nil, func(uintptr, unsafe.Pointer) (uintptr, unix.Errno) {
 				calls.Add(1)
 				if gone {
 					return 0, e
 				}
 				return 0, 0
 			})
-			if err := d.Claim(1); err != nil {
+			if err := d.Claim(qaCCID); err != nil {
 				t.Fatal(err)
 			}
 			gone = true
-			_, err := d.BulkIn(0x82, make([]byte, 64), time.Second)
+			_, err := d.BulkIn(qaIn, make([]byte, 64), time.Second)
 			if !errors.Is(err, ErrGone) || !errors.Is(err, e) {
 				t.Fatalf("the failing transfer: %v, want ErrGone and %v", err, e)
 			}
@@ -338,16 +356,16 @@ func TestGoneIsLatched(t *testing.T) {
 			}
 			_, err = d.Descriptors()
 			again("descriptors", err)
-			again("claim", d.Claim(3))
-			_, err = d.BulkOut(0x02, []byte{1}, time.Second)
+			again("claim", d.Claim(qaCCID2))
+			_, err = d.BulkOut(qaOut, []byte{1}, time.Second)
 			again("bulk out", err)
-			_, err = d.BulkIn(0x82, make([]byte, 8), time.Second)
+			_, err = d.BulkIn(qaIn, make([]byte, 8), time.Second)
 			again("bulk in", err)
 			if got := calls.Load(); got != before {
 				t.Errorf("%d system calls after the latch", got-before)
 			}
 			// The kernel dropped the claim with the device: release asks the kernel for nothing.
-			if err := d.Release(1); err != nil {
+			if err := d.Release(qaCCID); err != nil {
 				t.Errorf("release after the device went: %v", err)
 			}
 			if err := d.Close(); err != nil {
@@ -359,7 +377,7 @@ func TestGoneIsLatched(t *testing.T) {
 			if err := d.Close(); err != nil {
 				t.Errorf("second close: %v", err)
 			}
-			if _, err := d.BulkIn(0x82, make([]byte, 8), time.Second); !errors.Is(err, ErrClosed) {
+			if _, err := d.BulkIn(qaIn, make([]byte, 8), time.Second); !errors.Is(err, ErrClosed) {
 				t.Errorf("after close: %v", err)
 			}
 		})
@@ -370,11 +388,11 @@ func TestGoneIsLatched(t *testing.T) {
 func TestFirstFatalErrorStays(t *testing.T) {
 	next := unix.EIO
 	d := scripted(t, nil, func(uintptr, unsafe.Pointer) (uintptr, unix.Errno) { return 0, next })
-	if err := d.Claim(0); !errors.Is(err, ErrGone) || !errors.Is(err, unix.EIO) {
+	if err := d.Claim(qaCCID); !errors.Is(err, ErrGone) || !errors.Is(err, unix.EIO) {
 		t.Fatalf("claim: %v", err)
 	}
 	next = unix.ENODEV
-	if _, err := d.BulkOut(0x02, nil, time.Second); !errors.Is(err, unix.EIO) || errors.Is(err, unix.ENODEV) {
+	if _, err := d.BulkOut(qaOut, nil, time.Second); !errors.Is(err, unix.EIO) || errors.Is(err, unix.ENODEV) {
 		t.Errorf("the first error was replaced: %v", err)
 	}
 }
@@ -382,10 +400,18 @@ func TestFirstFatalErrorStays(t *testing.T) {
 // A timeout, a stall, an overflow and a busy interface leave the device usable; a timeout is ErrTimeout.
 func TestOnlyFatalErrorsAreSticky(t *testing.T) {
 	next := unix.Errno(0)
-	d := scripted(t, nil, func(uintptr, unsafe.Pointer) (uintptr, unix.Errno) { return 0, next })
+	d := scripted(t, nil, func(req uintptr, _ unsafe.Pointer) (uintptr, unix.Errno) {
+		if req != reqBulk {
+			return 0, 0
+		}
+		return 0, next
+	})
+	if err := d.Claim(qaCCID); err != nil {
+		t.Fatal(err)
+	}
 	for _, e := range []unix.Errno{unix.ETIMEDOUT, unix.EPIPE, unix.EBUSY, unix.EOVERFLOW, unix.EINTR} {
 		next = e
-		_, err := d.BulkIn(0x82, make([]byte, 8), time.Millisecond)
+		_, err := d.BulkIn(qaIn, make([]byte, 8), time.Millisecond)
 		if !errors.Is(err, e) || errors.Is(err, ErrGone) {
 			t.Fatalf("%v: %v", e, err)
 		}
@@ -394,7 +420,7 @@ func TestOnlyFatalErrorsAreSticky(t *testing.T) {
 		}
 	}
 	next = 0
-	if _, err := d.BulkIn(0x82, make([]byte, 8), time.Millisecond); err != nil {
+	if _, err := d.BulkIn(qaIn, make([]byte, 8), time.Millisecond); err != nil {
 		t.Errorf("a transfer after the non-fatal errors: %v", err)
 	}
 }
@@ -408,12 +434,12 @@ func TestCloseReleasesAndIsIdempotent(t *testing.T) {
 		}
 		return 0, 0
 	})
-	for _, n := range []int{1, 4} {
+	for _, n := range []int{qaCCID, qaCCID2} {
 		if err := d.Claim(n); err != nil {
 			t.Fatal(err)
 		}
 	}
-	if err := d.Release(1); err != nil {
+	if err := d.Release(qaCCID); err != nil {
 		t.Fatal(err)
 	}
 	if err := d.Close(); err != nil {
@@ -422,8 +448,8 @@ func TestCloseReleasesAndIsIdempotent(t *testing.T) {
 	if err := d.Close(); err != nil {
 		t.Errorf("second close: %v", err)
 	}
-	if len(released) != 2 || released[0] != 1 || released[1] != 4 {
-		t.Errorf("released %v, want [1 4] (one explicit, one by Close, none by the second Close)", released)
+	if len(released) != 2 || released[0] != 1 || released[1] != 3 {
+		t.Errorf("released %v, want [1 3] (one explicit, one by Close, none by the second Close)", released)
 	}
 	checkAllClosed(t, d)
 }
@@ -436,7 +462,7 @@ func TestCloseReportsAReleaseFailureAndClosesTheNode(t *testing.T) {
 		}
 		return 0, 0
 	})
-	if err := d.Claim(0); err != nil {
+	if err := d.Claim(qaCCID); err != nil {
 		t.Fatal(err)
 	}
 	if err := d.Close(); !errors.Is(err, unix.EINVAL) {
@@ -461,14 +487,21 @@ func TestCallsAreSerialised(t *testing.T) {
 		inside.Add(-1)
 		return 0, 0
 	})
+	if err := d.Claim(qaCCID); err != nil {
+		t.Fatal(err)
+	}
 	var wg sync.WaitGroup
 	for range 4 {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
 			for range 5 {
-				_, _ = d.BulkOut(0x02, []byte{1}, time.Second)
-				_, _ = d.BulkIn(0x82, make([]byte, 4), time.Second)
+				if _, err := d.BulkOut(qaOut, []byte{1}, time.Second); err != nil {
+					t.Error(err)
+				}
+				if _, err := d.BulkIn(qaIn, make([]byte, 4), time.Second); err != nil {
+					t.Error(err)
+				}
 			}
 		}()
 	}
@@ -485,18 +518,19 @@ func TestImpossibleArgumentsAreRefusedBeforeTheKernel(t *testing.T) {
 		calls.Add(1)
 		return 0, 0
 	})
-	for _, n := range []int{-1, 256, 1 << 32} {
-		if err := d.Claim(n); !errors.Is(err, unix.EINVAL) {
+	for _, n := range []int{-1, 256, 255, 0, 2, 4, 1 << 32} { // none is a CCID interface of the descriptors
+		if err := d.Claim(n); !errors.Is(err, ErrNoSuchInterface) {
 			t.Errorf("claim %d: %v", n, err)
 		}
 	}
-	if _, err := d.BulkOut(0x02, make([]byte, maxTransfer+1), time.Second); !errors.Is(err, unix.EINVAL) {
+	if err := d.Claim(qaCCID); err != nil {
+		t.Fatal(err)
+	}
+	before := calls.Load()
+	if _, err := d.BulkOut(qaOut, make([]byte, maxTransfer+1), time.Second); !errors.Is(err, ErrBadLength) {
 		t.Errorf("a transfer of %d bytes: %v", maxTransfer+1, err)
 	}
-	if got := calls.Load(); got != 0 {
-		t.Errorf("%d system calls", got)
-	}
-	if err := d.Claim(255); err != nil {
-		t.Errorf("claim 255: %v", err)
+	if got := calls.Load(); got != before {
+		t.Errorf("%d system calls", got-before)
 	}
 }
