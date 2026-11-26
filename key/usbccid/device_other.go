@@ -14,7 +14,7 @@ func Open(_ string) (*Device, error) { return nil, ErrNotSupported }
 // Descriptors returns ErrNotSupported.
 func (*Device) Descriptors() ([]byte, error) { return nil, ErrNotSupported }
 
-// Claim returns ErrNotSupported.
+// Claim returns ErrNotSupported (on a system that supports it, an interface held already is ErrAlreadyClaimed).
 func (*Device) Claim(_ int) error { return ErrNotSupported }
 
 // Release returns nil: a Device of this system holds nothing to release.

@@ -70,12 +70,14 @@
 //     turns from the counter, so each sees its own numbers with gaps; every answer is matched against the number of the message it
 //     answers, and the numbers are unique in any window of 256 messages of the process.
 //   - The first exchange of a session, whichever call it belongs to, DRAINS the IN pipe before it sends anything: it reads (and drops
-//     and clears) what is there, each read with a timeout of DrainReadTimeout (20 ms), until a read times out, which means that the pipe
-//     is quiet; an empty packet that ended an earlier message is dropped with the rest, so the first read of a message after the drain
+//     and clears) what is there, each read with a timeout of DrainReadTimeout (20 ms), until TWO reads in a row time out, which means
+//     that the pipe is quiet (usbfs drops the bytes of a transfer that timed out part-way, so one timed-out read shows only that the
+//     pipe was quiet for one window: a message that was half on its way is cut, and its tail arrives later; a read that returns bytes
+//     starts the count again); an empty packet that ended an earlier message is dropped with the rest, so the first read of a message after the drain
 //     starts clean. It makes at most MaxDrainReads (8) reads and takes at most MaxDrainTime (250 ms); a device that is not quiet by then
-//     keeps sending without being asked, and the session is lost with ErrProtocol. ErrStalled, ErrGone and ErrClosed in the drain end
-//     the session as everywhere. On a quiet device it costs one timed-out read (DrainReadTimeout), and its time counts against the
-//     budget of that call. The drain only reads, so Open itself still sends and reads nothing: it runs at the first exchange.
+//     keeps sending without being asked, and the session is lost with ErrProtocol; no read waits longer than what is left of MaxDrainTime.
+//     ErrStalled, ErrGone and ErrClosed in the drain end the session as everywhere. On a quiet device it costs two timed-out reads
+//     (2 x DrainReadTimeout, 40 ms), and its time counts against the budget of that call. The drain only reads, so Open itself still sends and reads nothing: it runs at the first exchange.
 //
 // A late answer of an earlier session cannot match until the counter has gone round, which is 256 messages of the process later.
 // What remains is an answer that arrives after the drain with the number and the type of the pending command, which only a device
@@ -102,12 +104,16 @@
 // The messages are as large as the reader's dwMaxCCIDMessageLength, held to MaxMessageLength (the 64 KiB of one transfer of the Port).
 //
 // Reads are sized from the same length: the buffer holds the largest message and one packet. The reader asks for the first packet of
-// a message, takes dwLength from the header, and asks for exactly the rest, so a read never goes beyond its message. A message whose
+// a message, takes dwLength from the header, and asks for the rest rounded up to whole packets, so a read never goes beyond the last
+// packet of its message. Every read of the Port (the drain's too) is a whole number of packets, because usbfs can end a read in
+// EOVERFLOW when a packet of the device is larger than what is left of the buffer, and that would end the session for no reason. A message whose
 // length is an exact multiple of the packet size of the bulk IN endpoint may be followed by an empty packet, which the next read
 // returns as zero bytes: that one empty read, at the start of the next message, is consumed and is not an answer; an empty read
 // anywhere else is a protocol error. A transfer that ends on a short packet before the length that the header gives is a message cut
-// short, also a protocol error. An answer for another sequence number is a stale or foreign one, read whole and dropped, at most
-// MaxStaleAnswers of them in one exchange; the next one ends the session.
+// short, also a protocol error: ending the session there is a deliberate choice, stricter than the specification asks for a partial
+// response that was interrupted. An answer for another sequence number is a stale or foreign one, read whole and dropped, at most
+// MaxStaleAnswers of them in one exchange; the next one ends the session. Of the status byte of an answer only the card status
+// (bits 0 and 1) and the command status (bits 6 and 7) are read; its reserved bits (2 to 5) are ignored.
 //
 // # The limits
 //
@@ -137,9 +143,15 @@
 //   - Transmit moves the bytes of ONE APDU. It builds no command, reads no status word, and does not follow a continuation such as 61xx
 //     (GET RESPONSE) or 6Cxx: those, and every card application, belong to the layer above, which also splits an application command
 //     that is longer than MaxCommandAPDU.
+//   - One Port serves one Reader. A second Open on a Port that a Reader holds fails with usbccid.ErrAlreadyClaimed (the Port's claim is
+//     the first Reader's), and leaves the Port and that Reader as they were: Open does not close that Port.
 //   - A lost session cannot be repaired. After ErrSessionLost nothing is sent until the caller closes the Reader and opens it again
 //     (a new Port from the usbccid layer, a new claim, a new PowerOn). The layer above treats whatever it held of the card (a
 //     selected application, a verified PIN, a secure channel) as gone.
+//   - A session lost while the card waited for a person leaves the card answering the OLD command with time extensions until it ends
+//     that command, and a new session's exchanges can meet them. After such a loss a new session can fail until the card ends the old
+//     command: the caller waits and opens again. How long that takes, and what the card does with a new command meanwhile, is not
+//     known from this layer and is to be measured on a real card.
 //   - A session begins with PowerOn, and the layer above never treats the first answers of a session as proof of anything that
 //     happened before it. A late answer of an earlier session is dropped by the drain and by the sequence counter, but the rest risk
 //     (above) is not nil: a verified PIN, a signature or a selected application is established only by an exchange of this session

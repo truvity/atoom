@@ -38,6 +38,7 @@
 //   - ErrStalled: a bulk endpoint stalled; latched for the handle (every later bulk call returns it, without asking the kernel).
 //   - ErrClosed: the Device was closed. After Close, Release and Close return nil and every other call returns ErrClosed (also
 //     when the device is gone as well).
+//   - ErrAlreadyClaimed: Claim of an interface that this handle holds already; the kernel is not asked and the claim stays.
 //   - ErrNoSuchInterface (also for a number outside 0 to 255), ErrNotClaimed, ErrBadEndpoint (also an address that two interfaces
 //     list), ErrBadLength: a call refused before the kernel was asked.
 //   - ErrNotUSBNode: Open was given a path that is not a USB device node. ErrBadDescriptors: its descriptors are missing, malformed or not simple (below). ErrSeveralConfigurations: the device declares other than one configuration. ErrNoProcSelfFd: /proc/self/fd is not available. ErrWrongDevice: Candidate.Open found another device at

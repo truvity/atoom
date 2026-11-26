@@ -189,7 +189,8 @@ func TestMessageLengthsAroundPacketBoundaries(t *testing.T) {
 	}
 }
 
-// A read never asks for more than its message: after the header the reader asks for exactly the rest.
+// A read never asks for more than the packets of its message: after the header the reader asks for the rest rounded up to whole
+// packets, and every read is a whole number of packets (a bulk read of another size can end in EOVERFLOW).
 func TestReadsNeverGoBeyondTheMessage(t *testing.T) {
 	var want []byte
 	r, f := openPowered(t, Options{}, cardHandler(func([]byte) []byte { return want }))
@@ -210,8 +211,13 @@ func TestReadsNeverGoBeyondTheMessage(t *testing.T) {
 			}
 			lens = lens[1:]
 		}
-		// The first read asks for one packet; the second, when there is one, for the rest exactly.
-		if total <= 64 && (len(lens) != 1 || lens[0] != 64) || total > 64 && (len(lens) != 2 || lens[0] != 64 || lens[1] != total-64) {
+		// The first read asks for one packet; the second, when there is one, for the rest in whole packets.
+		for _, l := range f.inLens {
+			if l%64 != 0 {
+				t.Errorf("response of %d bytes: a read of %d bytes is not a whole number of packets", n, l)
+			}
+		}
+		if total <= 64 && (len(lens) != 1 || lens[0] != 64) || total > 64 && (len(lens) != 2 || lens[0] != 64 || lens[1] != (total-64+63)/64*64) {
 			t.Errorf("response of %d bytes: reads of %v", n, f.inLens)
 		}
 		prevBoundary = total%64 == 0
@@ -439,7 +445,7 @@ func TestTransferTimeoutsFollowTheOptions(t *testing.T) {
 
 	// Default: ten seconds at most, and well above zero.
 	_, f = openPowered(t, Options{}, cardHandler(echoSW))
-	for _, d := range f.timeouts[1:] { // the first is the read of the drain
+	for _, d := range f.timeouts[2:] { // the first two are the reads of the drain
 		if d <= 5*time.Second || d > DefaultTransferTimeout {
 			t.Fatalf("default transfer timeout %v", d)
 		}
