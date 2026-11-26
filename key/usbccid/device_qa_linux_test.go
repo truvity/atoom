@@ -1,4 +1,4 @@
-//go:build linux
+//go:build linux && (amd64 || arm64)
 
 package usbccid
 
@@ -94,10 +94,13 @@ func (k *qaKernel) countReq(req uintptr) int {
 	return n
 }
 
-// qaDevice opens a Device over a regular file that holds desc and gives it the script k. The file is returned for the tests that
+// qaDevice opens a Device over a regular file that holds desc (the made-up composite device when desc is nil) and gives it the script k. The file is returned for the tests that
 // change it. Close is called at the end of the test.
 func qaDevice(t *testing.T, desc []byte, k *qaKernel) (*Device, string) {
 	t.Helper()
+	if desc == nil {
+		desc = qaDefaultDesc()
+	}
 	path := filepath.Join(t.TempDir(), "node")
 	if err := os.WriteFile(path, desc, 0o600); err != nil {
 		t.Fatal(err)
@@ -109,6 +112,24 @@ func qaDevice(t *testing.T, desc []byte, k *qaKernel) (*Device, string) {
 	t.Cleanup(func() { _ = d.Close() })
 	d.ioctl = k.ioctl
 	return d, path
+}
+
+// qaClaim claims the CCID interface of the made-up device.
+func qaClaim(t *testing.T, d *Device) {
+	t.Helper()
+	if err := d.Claim(qaCCID); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// qaLast is the last call of the script, or a failure of the test (never a panic).
+func (k *qaKernel) last(t *testing.T) kcall {
+	t.Helper()
+	c := k.snapshot()
+	if len(c) == 0 {
+		t.Fatal("the kernel was never asked")
+	}
+	return c[len(c)-1]
 }
 
 // errnoOf returns the errno an error carries, or 0.
@@ -178,21 +199,21 @@ func TestQARequestCodesDecode(t *testing.T) {
 // descriptor of 0, 1 or 2.
 func TestQAOnlyThreeRequestsOnTheOpenedDescriptor(t *testing.T) {
 	k := &qaKernel{}
-	d, _ := qaDevice(t, []byte{18, 1}, k)
+	d, _ := qaDevice(t, nil, k)
 	fd := d.fd
 	if fd <= 2 {
 		t.Fatalf("the node was opened on descriptor %d", fd)
 	}
-	_ = d.Claim(0)
-	_ = d.Claim(1)
-	_, _ = d.BulkOut(0x02, []byte{1}, time.Second)
-	_, _ = d.BulkIn(0x82, make([]byte, 4), time.Second)
-	_ = d.Release(0)
+	_ = d.Claim(qaCCID)
+	_ = d.Claim(qaCCID2)
+	_, _ = d.BulkOut(qaOut, []byte{1}, time.Second)
+	_, _ = d.BulkIn(qaIn, make([]byte, 4), time.Second)
+	_ = d.Release(qaCCID)
 	_ = d.Close()
-	_ = d.Claim(2)
-	_, _ = d.BulkOut(0x02, []byte{1}, time.Second)
+	_ = d.Claim(qaCCID)
+	_, _ = d.BulkOut(qaOut, []byte{1}, time.Second)
 	calls := k.snapshot()
-	// two claims, two transfers, the explicit release of 0 and the release of 1 by Close; the calls after Close ask nothing
+	// two claims, two transfers, the explicit release of 1 and the release of 3 by Close; the calls after Close ask nothing
 	if len(calls) != 6 {
 		t.Fatalf("%d calls: %+v", len(calls), calls)
 	}
@@ -209,12 +230,12 @@ func TestQAOnlyThreeRequestsOnTheOpenedDescriptor(t *testing.T) {
 func TestQAClaimAndReleaseArgument(t *testing.T) {
 	k := &qaKernel{}
 	d, _ := qaDevice(t, nil, k)
-	for _, n := range []int{0, 1, 2, 127, 128, 254, 255} {
+	for _, n := range []int{qaCCID, qaCCID2} {
 		if err := d.Claim(n); err != nil {
 			t.Fatalf("claim %d: %v", n, err)
 		}
 	}
-	for _, n := range []int{255, 0} {
+	for _, n := range []int{qaCCID2, qaCCID} {
 		if err := d.Release(n); err != nil {
 			t.Fatalf("release %d: %v", n, err)
 		}
@@ -230,7 +251,7 @@ func TestQAClaimAndReleaseArgument(t *testing.T) {
 			t.Errorf("request %#x", c.req)
 		}
 	}
-	if fmt.Sprint(claims) != "[0 1 2 127 128 254 255]" || fmt.Sprint(releases) != "[255 0]" {
+	if fmt.Sprint(claims) != "[1 3]" || fmt.Sprint(releases) != "[3 1]" {
 		t.Errorf("claims %v releases %v", claims, releases)
 	}
 }
@@ -245,7 +266,7 @@ func TestQABusyIsOnlyAClaimAnsweredEBUSY(t *testing.T) {
 		t.Run("claim/"+e.Error(), func(t *testing.T) {
 			k := &qaKernel{answer: func(kcall) (uintptr, unix.Errno) { return 0, e }}
 			d, _ := qaDevice(t, nil, k)
-			err := d.Claim(3)
+			err := d.Claim(qaCCID2)
 			if err == nil {
 				t.Fatal("no error")
 			}
@@ -259,7 +280,7 @@ func TestQABusyIsOnlyAClaimAnsweredEBUSY(t *testing.T) {
 			if errors.Is(err, ErrGone) != isFatal {
 				t.Errorf("errors.Is(ErrGone) = %v for %v, want %v", !isFatal, e, isFatal)
 			}
-			if d.claimed[3] {
+			if d.claimed[qaCCID2] {
 				t.Error("a refused claim is recorded as held")
 			}
 			if k.count() != 1 {
@@ -270,27 +291,27 @@ func TestQABusyIsOnlyAClaimAnsweredEBUSY(t *testing.T) {
 	// The same errno on the other calls.
 	k := &qaKernel{answer: func(kcall) (uintptr, unix.Errno) { return 0, unix.EBUSY }}
 	d, _ := qaDevice(t, nil, k)
-	if _, err := d.BulkOut(0x02, []byte{1}, time.Second); errors.Is(err, ErrBusy) || !errors.Is(err, unix.EBUSY) {
+	d.claimed[qaCCID] = true // as if a claim had succeeded earlier
+	if _, err := d.BulkOut(qaOut, []byte{1}, time.Second); errors.Is(err, ErrBusy) || !errors.Is(err, unix.EBUSY) {
 		t.Errorf("EBUSY on a transfer: %v (must be the plain errno, not ErrBusy)", err)
 	}
-	if _, err := d.BulkIn(0x82, make([]byte, 1), time.Second); errors.Is(err, ErrBusy) {
+	if _, err := d.BulkIn(qaIn, make([]byte, 1), time.Second); errors.Is(err, ErrBusy) {
 		t.Errorf("EBUSY on a read: %v", err)
 	}
-	d.claimed[1] = true // as if a claim had succeeded earlier
-	if err := d.Release(1); errors.Is(err, ErrBusy) || !errors.Is(err, unix.EBUSY) {
+	if err := d.Release(qaCCID); errors.Is(err, ErrBusy) || !errors.Is(err, unix.EBUSY) {
 		t.Errorf("EBUSY on a release: %v", err)
 	}
 }
 
-// The interface number is checked against 0..255 before the kernel is asked, in every direction, and the check comes after the
-// state of the handle: a closed handle says ErrClosed and a gone one says ErrGone, whatever the number.
+// An interface number that is not a CCID interface of the descriptors is refused before the kernel is asked, in every direction, and
+// the check comes after the state of the handle: a closed handle says ErrClosed and a gone one says ErrGone, whatever the number.
 func TestQAClaimRange(t *testing.T) {
 	k := &qaKernel{}
 	d, _ := qaDevice(t, nil, k)
-	for _, n := range []int{math.MinInt, -256, -1, 256, 257, 1 << 16, math.MaxInt32, math.MaxInt} {
+	for _, n := range []int{math.MinInt, -256, -1, 0, 2, 4, 255, 256, 257, 1 << 16, math.MaxInt32, math.MaxInt} {
 		err := d.Claim(n)
-		if !errors.Is(err, unix.EINVAL) || errors.Is(err, ErrBusy) || errors.Is(err, ErrGone) {
-			t.Errorf("claim %d: %v, want EINVAL", n, err)
+		if !errors.Is(err, ErrNoSuchInterface) || errors.Is(err, ErrBusy) || errors.Is(err, ErrGone) || errors.Is(err, unix.EINVAL) {
+			t.Errorf("claim %d: %v, want ErrNoSuchInterface", n, err)
 		}
 	}
 	if k.count() != 0 {
@@ -299,20 +320,20 @@ func TestQAClaimRange(t *testing.T) {
 	if err := d.Release(-1); err != nil || d.Release(math.MaxInt) != nil || k.count() != 0 {
 		t.Errorf("release of a number that was never claimed must be a no-op: %v, %d calls", err, k.count())
 	}
-	for _, n := range []int{0, 255} {
+	for _, n := range []int{qaCCID, qaCCID2} {
 		if err := d.Claim(n); err != nil {
 			t.Errorf("claim %d: %v", n, err)
 		}
 	}
 	// A refused number does not latch.
-	if _, err := d.BulkOut(0x02, []byte{1}, time.Second); err != nil {
+	if _, err := d.BulkOut(qaOut, []byte{1}, time.Second); err != nil {
 		t.Errorf("transfer after refused claims: %v", err)
 	}
 
 	gone := &qaKernel{answer: func(kcall) (uintptr, unix.Errno) { return 0, unix.ENODEV }}
 	g, _ := qaDevice(t, nil, gone)
-	_ = g.Claim(1)
-	if err := g.Claim(1000); !errors.Is(err, ErrGone) || errors.Is(err, unix.EINVAL) {
+	_ = g.Claim(qaCCID)
+	if err := g.Claim(1000); !errors.Is(err, ErrGone) || errors.Is(err, ErrNoSuchInterface) {
 		t.Errorf("claim 1000 on a gone device: %v, want ErrGone", err)
 	}
 	_ = d.Close()
@@ -353,8 +374,7 @@ func TestQAReleaseSemantics(t *testing.T) {
 		t.Errorf("%d releases after Close, want 2", got)
 	}
 	before := k.count()
-	// BUG-candidate of the documentation, held as the code behaves: Release after Close is nil, while the doc comment of Close
-	// says that after Close every call returns ErrClosed.
+	// After Close, Release returns nil (and asks nothing), as the doc comments say.
 	if err := d.Release(1); err != nil {
 		t.Errorf("release after close: %v", err)
 	}
@@ -374,13 +394,16 @@ func TestQAReleaseErrors(t *testing.T) {
 			return 0, 0
 		}}
 		d, _ := qaDevice(t, nil, k)
-		_ = d.Claim(2)
-		err := d.Release(2)
+		qaClaim(t, d)
+		err := d.Release(qaCCID)
 		if !errors.Is(err, unix.EINVAL) || errors.Is(err, ErrGone) {
 			t.Fatalf("release: %v", err)
 		}
-		if _, err := d.BulkOut(0x02, nil, time.Second); err != nil {
+		if _, err := d.Descriptors(); err != nil {
 			t.Errorf("a refused release must not latch: %v", err)
+		}
+		if _, err := d.BulkOut(qaOut, nil, time.Second); !errors.Is(err, ErrNotClaimed) {
+			t.Errorf("the claim is forgotten after a refused release: %v", err)
 		}
 		if err := d.Close(); err != nil {
 			t.Errorf("close after a failed release: %v", err)
@@ -398,13 +421,13 @@ func TestQAReleaseErrors(t *testing.T) {
 			return 0, 0
 		}}
 		d, _ := qaDevice(t, nil, k)
-		_ = d.Claim(2)
+		qaClaim(t, d)
 		gone = true
-		if err := d.Release(2); err != nil {
+		if err := d.Release(qaCCID); err != nil {
 			t.Fatalf("release that met a gone device: %v, want nil", err)
 		}
 		before := k.count()
-		if _, err := d.BulkIn(0x82, make([]byte, 2), time.Second); !errors.Is(err, ErrGone) || !errors.Is(err, unix.ENODEV) {
+		if _, err := d.BulkIn(qaIn, make([]byte, 2), time.Second); !errors.Is(err, ErrGone) || !errors.Is(err, unix.ENODEV) {
 			t.Errorf("after the fatal release: %v, want ErrGone", err)
 		}
 		if k.count() != before {
@@ -422,7 +445,7 @@ func TestQACloseTriesEveryRelease(t *testing.T) {
 		return 0, 0
 	}}
 	d, _ := qaDevice(t, nil, k)
-	for n := range 5 {
+	for _, n := range []int{qaCCID, qaCCID2} {
 		if err := d.Claim(n); err != nil {
 			t.Fatal(err)
 		}
@@ -436,8 +459,8 @@ func TestQACloseTriesEveryRelease(t *testing.T) {
 			seen[c.iface]++
 		}
 	}
-	if len(seen) != 5 {
-		t.Errorf("released %v, want each of 0..4 once", seen)
+	if len(seen) != 2 {
+		t.Errorf("released %v, want each of 1 and 3 once", seen)
 	}
 	for n, c := range seen {
 		if c != 1 {
@@ -456,7 +479,7 @@ func TestQACloseOfADeviceThatWentDuringRelease(t *testing.T) {
 		return 0, 0
 	}}
 	d, _ := qaDevice(t, nil, k)
-	for _, n := range []int{0, 1, 2} {
+	for _, n := range []int{qaCCID, qaCCID2} {
 		_ = d.Claim(n)
 	}
 	gone = true
@@ -479,9 +502,9 @@ func TestQAErrorChains(t *testing.T) {
 		want string // text the message must carry
 	}
 	ops := []op{
-		{"claim", func(d *Device) error { return d.Claim(4) }, "claim interface 4"},
-		{"bulk out", func(d *Device) error { _, err := d.BulkOut(0x05, []byte{1}, time.Second); return err }, "0x05"},
-		{"bulk in", func(d *Device) error { _, err := d.BulkIn(0x05, make([]byte, 1), time.Second); return err }, "0x85"},
+		{"claim", func(d *Device) error { return d.Claim(qaCCID) }, "claim interface 1"},
+		{"bulk out", func(d *Device) error { _, err := d.BulkOut(qaOut, []byte{1}, time.Second); return err }, "0x02"},
+		{"bulk in", func(d *Device) error { _, err := d.BulkIn(qaIn, make([]byte, 1), time.Second); return err }, "0x82"},
 	}
 	cases := []struct {
 		e                  unix.Errno
@@ -495,6 +518,7 @@ func TestQAErrorChains(t *testing.T) {
 			t.Run(o.name+"/"+c.e.Error(), func(t *testing.T) {
 				k := &qaKernel{answer: func(kcall) (uintptr, unix.Errno) { return 0, c.e }}
 				d, _ := qaDevice(t, nil, k)
+				d.claimed[qaCCID] = true // as if a claim had succeeded earlier: the transfers are then asked of the kernel
 				err := o.do(d)
 				if err == nil {
 					t.Fatal("no error")
@@ -516,7 +540,7 @@ func TestQAErrorChains(t *testing.T) {
 				}
 				// The error that every later call returns also carries both.
 				if c.gone {
-					_, later := d.BulkIn(0x82, make([]byte, 1), time.Second)
+					_, later := d.BulkIn(qaIn, make([]byte, 1), time.Second)
 					if !errors.Is(later, ErrGone) || !errors.Is(later, c.e) || errnoOf(later) != c.e {
 						t.Errorf("later call: %v", later)
 					}
@@ -529,14 +553,15 @@ func TestQAErrorChains(t *testing.T) {
 // B. Latch: the failing call, any method as the first failure, and nothing reaches the kernel afterwards.
 func TestQAGoneLatchesFromEveryMethod(t *testing.T) {
 	first := map[string]func(d *Device) error{
-		"claim":    func(d *Device) error { return d.Claim(1) },
-		"bulk out": func(d *Device) error { _, err := d.BulkOut(0x02, []byte{1}, time.Second); return err },
-		"bulk in":  func(d *Device) error { _, err := d.BulkIn(0x82, make([]byte, 4), time.Second); return err },
+		"claim":    func(d *Device) error { return d.Claim(qaCCID) },
+		"bulk out": func(d *Device) error { _, err := d.BulkOut(qaOut, []byte{1}, time.Second); return err },
+		"bulk in":  func(d *Device) error { _, err := d.BulkIn(qaIn, make([]byte, 4), time.Second); return err },
 	}
 	for name, do := range first {
 		t.Run(name, func(t *testing.T) {
 			k := &qaKernel{answer: func(kcall) (uintptr, unix.Errno) { return 0, unix.ENODEV }}
-			d, _ := qaDevice(t, []byte{9}, k)
+			d, _ := qaDevice(t, nil, k)
+			d.claimed[qaCCID] = true // as if a claim had succeeded earlier
 			if err := do(d); !errors.Is(err, ErrGone) || !errors.Is(err, unix.ENODEV) {
 				t.Fatalf("first: %v", err)
 			}
@@ -546,13 +571,13 @@ func TestQAGoneLatchesFromEveryMethod(t *testing.T) {
 				}
 			}
 			for range 3 {
-				if _, err := d.BulkOut(0x02, nil, 0); !errors.Is(err, ErrGone) {
+				if _, err := d.BulkOut(qaOut, nil, 0); !errors.Is(err, ErrGone) {
 					t.Errorf("bulk out: %v", err)
 				}
-				if _, err := d.BulkIn(0x82, nil, -1); !errors.Is(err, ErrGone) {
+				if _, err := d.BulkIn(qaIn, nil, -1); !errors.Is(err, ErrGone) {
 					t.Errorf("bulk in: %v", err)
 				}
-				if _, err := d.BulkOut(0x02, make([]byte, maxTransfer+1), 0); !errors.Is(err, ErrGone) {
+				if _, err := d.BulkOut(qaOut, make([]byte, maxTransfer+1), 0); !errors.Is(err, ErrGone) {
 					t.Errorf("an over-long transfer on a gone device must say ErrGone: %v", err)
 				}
 				if b, err := d.Descriptors(); !errors.Is(err, ErrGone) || b != nil {
@@ -581,16 +606,14 @@ func TestQATimeoutLeavesTheHandleUsable(t *testing.T) {
 		}
 		return uintptr(c.bt.Len), 0
 	}}
-	d, _ := qaDevice(t, []byte{1, 2}, k)
-	if err := d.Claim(1); err != nil {
-		t.Fatal(err)
-	}
+	d, _ := qaDevice(t, nil, k)
+	qaClaim(t, d)
 	for i := range 3 {
-		n, err := d.BulkOut(0x02, []byte{1, 2, 3}, 5*time.Millisecond)
+		n, err := d.BulkOut(qaOut, []byte{1, 2, 3}, 5*time.Millisecond)
 		if !errors.Is(err, ErrTimeout) || !errors.Is(err, unix.ETIMEDOUT) || errors.Is(err, ErrGone) || n != 0 {
 			t.Fatalf("round %d: timeout: n=%d err=%v", i, n, err)
 		}
-		n, err = d.BulkIn(0x82, make([]byte, 5), 5*time.Millisecond)
+		n, err = d.BulkIn(qaIn, make([]byte, 5), 5*time.Millisecond)
 		if err != nil || n != 5 {
 			t.Fatalf("round %d: next transfer: n=%d err=%v", i, n, err)
 		}
@@ -598,7 +621,7 @@ func TestQATimeoutLeavesTheHandleUsable(t *testing.T) {
 	if got := k.countReq(reqBulk); got != 6 {
 		t.Errorf("%d bulk calls for 6 transfers (a timeout is not retried)", got)
 	}
-	if b, err := d.Descriptors(); err != nil || len(b) != 2 {
+	if b, err := d.Descriptors(); err != nil || len(b) != len(qaDefaultDesc()) {
 		t.Errorf("descriptors after timeouts: %v %v", b, err)
 	}
 	if err := d.Close(); err != nil {
@@ -617,14 +640,15 @@ func TestQAInterruptedCallIsReportedNotRetried(t *testing.T) {
 		return uintptr(c.bt.Len), 0
 	}}
 	d, _ := qaDevice(t, nil, k)
-	_, err := d.BulkIn(0x82, make([]byte, 8), time.Second)
+	d.claimed[qaCCID] = true
+	_, err := d.BulkIn(qaIn, make([]byte, 8), time.Second)
 	if !errors.Is(err, unix.EINTR) || errors.Is(err, ErrGone) || errors.Is(err, ErrTimeout) || errors.Is(err, ErrBusy) {
 		t.Fatalf("interrupted transfer: %v", err)
 	}
 	if calls.Load() != 1 {
 		t.Errorf("%d calls: EINTR was retried", calls.Load())
 	}
-	if n, err := d.BulkIn(0x82, make([]byte, 8), time.Second); err != nil || n != 8 {
+	if n, err := d.BulkIn(qaIn, make([]byte, 8), time.Second); err != nil || n != 8 {
 		t.Errorf("transfer after EINTR: %d %v", n, err)
 	}
 }
@@ -636,65 +660,71 @@ func TestQAShortCountsPassThrough(t *testing.T) {
 	for _, r := range []uintptr{0, 1, 31, 63, 64} {
 		k := &qaKernel{answer: func(kcall) (uintptr, unix.Errno) { return r, 0 }}
 		d, _ := qaDevice(t, nil, k)
-		n, err := d.BulkOut(0x02, make([]byte, 64), time.Second)
+		qaClaim(t, d)
+		n, err := d.BulkOut(qaOut, make([]byte, 64), time.Second)
 		if err != nil || n != int(r) {
 			t.Errorf("BulkOut short count %d: n=%d err=%v", r, n, err)
 		}
-		n, err = d.BulkIn(0x82, make([]byte, 64), time.Second)
+		n, err = d.BulkIn(qaIn, make([]byte, 64), time.Second)
 		if err != nil || n != int(r) {
 			t.Errorf("BulkIn short count %d: n=%d err=%v", r, n, err)
 		}
 	}
 }
 
-// Zero bytes go to the kernel as a zero-length transfer with no data pointer, whether the slice is nil or empty. The limit is exact:
-// 1<<24 bytes go through, one more is refused before the kernel in both directions.
+// An empty write goes to the kernel as a zero-length transfer with no data pointer, whether the slice is nil or empty (a zero-length
+// packet is a thing a bulk OUT endpoint takes). An empty read is refused before the kernel is asked. The limit is exact: 64 KiB go
+// through in both directions, one more is refused before the kernel.
 func TestQAZeroAndLimitTransfers(t *testing.T) {
 	k := &qaKernel{}
 	d, _ := qaDevice(t, nil, k)
+	qaClaim(t, d)
 	for _, p := range [][]byte{nil, {}, make([]byte, 0, 100)} {
-		if n, err := d.BulkOut(0x02, p, time.Second); err != nil || n != 0 {
+		if n, err := d.BulkOut(qaOut, p, time.Second); err != nil || n != 0 {
 			t.Errorf("BulkOut of nothing: %d %v", n, err)
 		}
-		if n, err := d.BulkIn(0x82, p, time.Second); err != nil || n != 0 {
+	}
+	for _, c := range k.snapshot()[1:] { // the first call is the claim
+		if c.bt.Len != 0 || c.bt.Data != nil {
+			t.Errorf("%+v, want a zero-length transfer with no pointer", c.bt)
+		}
+	}
+	before := k.count()
+	for _, p := range [][]byte{nil, {}, make([]byte, 0, 100)} {
+		if n, err := d.BulkIn(qaIn, p, time.Second); !errors.Is(err, ErrBadLength) || n != 0 || errors.Is(err, ErrGone) {
 			t.Errorf("BulkIn into nothing: %d %v", n, err)
 		}
 	}
-	for i, c := range k.snapshot() {
-		if c.bt.Len != 0 || c.bt.Data != nil {
-			t.Errorf("call %d: %+v, want a zero-length transfer with no pointer", i, c.bt)
-		}
-	}
-
 	big := make([]byte, maxTransfer+1)
-	before := k.count()
 	for _, bad := range [][]byte{big, big[: maxTransfer+1 : maxTransfer+1]} {
-		if _, err := d.BulkOut(0x02, bad, time.Second); !errors.Is(err, unix.EINVAL) || errors.Is(err, ErrGone) {
+		if _, err := d.BulkOut(qaOut, bad, time.Second); !errors.Is(err, ErrBadLength) || errors.Is(err, ErrGone) {
 			t.Errorf("BulkOut of %d bytes: %v", len(bad), err)
 		}
-		if _, err := d.BulkIn(0x82, bad, time.Second); !errors.Is(err, unix.EINVAL) || errors.Is(err, ErrGone) {
+		if _, err := d.BulkIn(qaIn, bad, time.Second); !errors.Is(err, ErrBadLength) || errors.Is(err, ErrGone) {
 			t.Errorf("BulkIn of %d bytes: %v", len(bad), err)
 		}
 	}
 	if k.count() != before {
-		t.Error("an over-long transfer reached the kernel")
+		t.Error("a refused transfer reached the kernel")
 	}
 	exact := big[:maxTransfer]
-	if n, err := d.BulkOut(0x02, exact, time.Second); err != nil || n != maxTransfer {
+	if maxTransfer != 64*1024 {
+		t.Errorf("the limit is %d, the documentation says 64 KiB", maxTransfer)
+	}
+	if n, err := d.BulkOut(qaOut, exact, time.Second); err != nil || n != maxTransfer {
 		t.Errorf("BulkOut of exactly the limit: %d %v", n, err)
 	}
-	if n, err := d.BulkIn(0x82, exact, time.Second); err != nil || n != maxTransfer {
+	if got := k.last(t).bt.Len; got != maxTransfer {
+		t.Errorf("length sent: %d", got)
+	}
+	if n, err := d.BulkIn(qaIn, exact, time.Second); err != nil || n != maxTransfer {
 		t.Errorf("BulkIn of exactly the limit: %d %v", n, err)
 	}
-	last := k.snapshot()[k.count()-1]
-	if last.bt.Len != maxTransfer {
-		t.Errorf("length sent: %d", last.bt.Len)
+	if got := k.last(t).bt.Len; got != maxTransfer {
+		t.Errorf("length read: %d", got)
 	}
-	if maxTransfer >= math.MaxInt32/2 {
-		t.Errorf("maxTransfer %d is not below the kernel's INT_MAX/2 limit", maxTransfer)
-	}
-	// An over-long refusal does not latch.
-	if _, err := d.BulkOut(0x02, []byte{1}, time.Second); err != nil {
+	// A refusal does not latch.
+	if _, err := d.BulkOut(qaOut, []byte{1}, time.Second); err != nil {
 		t.Errorf("transfer after a refused one: %v", err)
 	}
 }
@@ -707,12 +737,13 @@ func TestQADataFlowsBothWays(t *testing.T) {
 		}
 	}, answer: func(c kcall) (uintptr, unix.Errno) { return uintptr(c.bt.Len) - 1, 0 }}
 	d, _ := qaDevice(t, nil, k)
+	qaClaim(t, d)
 	out := []byte{0, 1, 2, 0xFF, 0x80}
-	if n, err := d.BulkOut(0x02, out, time.Second); err != nil || n != 4 {
+	if n, err := d.BulkOut(qaOut, out, time.Second); err != nil || n != 4 {
 		t.Fatalf("BulkOut: %d %v", n, err)
 	}
 	in := make([]byte, 6)
-	n, err := d.BulkIn(0x82, in, time.Second)
+	n, err := d.BulkIn(qaIn, in, time.Second)
 	if err != nil || n != 5 {
 		t.Fatalf("BulkIn: %d %v", n, err)
 	}
@@ -720,54 +751,33 @@ func TestQADataFlowsBothWays(t *testing.T) {
 		t.Errorf("read %x", in[:n])
 	}
 	calls := k.snapshot()
-	if string(calls[0].data) != string(out) {
-		t.Errorf("the kernel saw %x, want %x", calls[0].data, out)
-	}
-}
-
-// The direction bit, for every possible endpoint byte.
-func TestQAEndpointDirectionBitForEveryValue(t *testing.T) {
-	k := &qaKernel{}
-	d, _ := qaDevice(t, nil, k)
-	for ep := range 256 {
-		if _, err := d.BulkOut(uint8(ep), []byte{1}, time.Second); err != nil {
-			t.Fatal(err)
-		}
-		if _, err := d.BulkIn(uint8(ep), make([]byte, 1), time.Second); err != nil {
-			t.Fatal(err)
-		}
-	}
-	calls := k.snapshot()
-	for ep := range 256 {
-		out, in := calls[2*ep].bt.Ep, calls[2*ep+1].bt.Ep
-		if out != uint32(ep)&0x7F || in != uint32(ep)|0x80 {
-			t.Fatalf("endpoint byte %#02x: out %#02x in %#02x", ep, out, in)
-		}
+	if string(calls[1].data) != string(out) {
+		t.Errorf("the kernel saw %x, want %x", calls[1].data, out)
 	}
 }
 
 // B. Timeout values as the kernel gets them.
 func TestQATimeoutValuesReachTheKernel(t *testing.T) {
+	const capMs = 600000 // ten minutes in ms
 	cases := []struct {
 		in   time.Duration
 		want uint32
 	}{
 		{0, 1}, {-1, 1}, {math.MinInt64, 1}, {time.Nanosecond, 1}, {999_999, 1}, {time.Millisecond, 1}, {time.Millisecond + 1, 2},
-		{50 * time.Microsecond, 1}, {15 * time.Second, 15000}, {30*time.Second - 1, 30000}, {time.Hour, 3_600_000},
-		{time.Duration(1<<30) * time.Millisecond, 1 << 30},
-		{time.Duration(1<<30)*time.Millisecond + 1, 1 << 30},
-		{time.Duration(1<<30)*time.Millisecond - time.Nanosecond, 1 << 30},
-		{time.Duration(1<<30-1) * time.Millisecond, 1<<30 - 1},
-		{10 * 365 * 24 * time.Hour, 1 << 30},
+		{50 * time.Microsecond, 1}, {15 * time.Second, 15000}, {30*time.Second - 1, 30000}, {time.Hour, capMs},
+		{maxTimeout, capMs}, {maxTimeout + 1, capMs}, {maxTimeout - 1, capMs}, {maxTimeout - time.Millisecond, capMs - 1},
+		{maxTimeout - time.Millisecond + 1, capMs}, {time.Duration(1<<30) * time.Millisecond, capMs}, {10 * 365 * 24 * time.Hour, capMs},
+		{math.MaxInt64, capMs}, {math.MaxInt64 - 1, capMs}, {math.MaxInt64 - 999_998, capMs}, {math.MaxInt64 - 999_999, capMs},
 	}
 	k := &qaKernel{}
 	d, _ := qaDevice(t, nil, k)
+	qaClaim(t, d)
 	for _, c := range cases {
 		before := k.count()
-		if _, err := d.BulkOut(0x02, []byte{1}, c.in); err != nil {
+		if _, err := d.BulkOut(qaOut, []byte{1}, c.in); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := d.BulkIn(0x82, make([]byte, 1), c.in); err != nil {
+		if _, err := d.BulkIn(qaIn, make([]byte, 1), c.in); err != nil {
 			t.Fatal(err)
 		}
 		for _, call := range k.snapshot()[before:] {
@@ -778,16 +788,14 @@ func TestQATimeoutValuesReachTheKernel(t *testing.T) {
 	}
 }
 
-// A duration that is near the largest the type holds must give the largest timeout (2^30 ms), never an overflow. ms adds almost a
-// millisecond to round up, and that sum wraps for a duration above MaxInt64 minus 999999 ns, so the kernel gets a number that is the
-// low 32 bits of a negative count: neither 1 ms nor the cap. Held as the doc comment promises ("at least 1, at most 2^30", and 0
-// never means for ever). The common spelling "time.Duration(math.MaxInt64)" for "no limit" hits it.
+// A duration that is near the largest the type holds must give the ceiling of ten minutes, never an overflow. This was a bug of the
+// first version (ms added almost a millisecond to round up before it clamped, and the sum wrapped for a duration above
+// MaxInt64 minus 999999 ns, so ms(MaxInt64) was 2217714955); it is fixed by clamping first, and this test keeps it fixed.
 func TestQAMillisecondsDoNotOverflowForHugeDurations(t *testing.T) {
-	t.Skip("BUG: ms() overflows for a duration above math.MaxInt64-999999 ns (device_linux.go:223: t + time.Millisecond - 1 wraps negative); " +
-		"remove this Skip when ms is fixed")
-	for _, d := range []time.Duration{math.MaxInt64, math.MaxInt64 - 1, math.MaxInt64 - 999_998} {
-		if got := ms(d); got != 1<<30 {
-			t.Errorf("ms(%d) = %d, want %d", int64(d), got, 1<<30)
+	for _, d := range []time.Duration{math.MaxInt64, math.MaxInt64 - 1, math.MaxInt64 - 999_998, math.MaxInt64 - 999_999, math.MaxInt64 - 1_000_000,
+		math.MaxInt64 / 2, 1 << 62, 1 << 40} {
+		if got := ms(d); got != 600000 {
+			t.Errorf("ms(%d) = %d, want 600000", int64(d), got)
 		}
 	}
 }
@@ -797,9 +805,9 @@ func TestQAMillisecondsDoNotOverflowForHugeDurations(t *testing.T) {
 func TestQAMillisecondsAreBoundedAndMonotonic(t *testing.T) {
 	var samples []time.Duration
 	for _, base := range []time.Duration{0, time.Millisecond, 2 * time.Millisecond, time.Second, time.Hour, time.Duration(1<<30) * time.Millisecond,
-		time.Duration(1<<31) * time.Millisecond, math.MaxInt64 - 2*time.Millisecond} {
+		time.Duration(1<<31) * time.Millisecond, maxTimeout, math.MaxInt64 - 2*time.Millisecond} {
 		for _, d := range []time.Duration{-1, 0, 1, 2, 999_999, 1_000_000, 1_000_001} {
-			if v := base + d; v >= 0 && v <= math.MaxInt64-time.Millisecond {
+			if v := base + d; v >= 0 {
 				samples = append(samples, v)
 			}
 		}
@@ -808,13 +816,13 @@ func TestQAMillisecondsAreBoundedAndMonotonic(t *testing.T) {
 	prev := uint32(0)
 	for _, s := range samples {
 		got := ms(s)
-		if got < 1 || got > 1<<30 {
-			t.Errorf("ms(%d) = %d out of 1..2^30", int64(s), got)
+		if got < 1 || got > 600000 {
+			t.Errorf("ms(%d) = %d out of 1..600000", int64(s), got)
 		}
 		if got < prev {
 			t.Errorf("ms(%d) = %d is below the value %d of a shorter duration", int64(s), got, prev)
 		}
-		if s > 0 && s <= time.Duration(1<<30)*time.Millisecond {
+		if s > 0 && s <= maxTimeout {
 			if want := uint32((int64(s) + 999_999) / 1_000_000); got != want { //nolint:gosec // at most 2^30
 				t.Errorf("ms(%d) = %d, want ceiling %d", int64(s), got, want)
 			}
@@ -826,18 +834,16 @@ func TestQAMillisecondsAreBoundedAndMonotonic(t *testing.T) {
 // B. The node is opened once and never by path again.
 func TestQANodeIsOpenedOnceAndNeverReopened(t *testing.T) {
 	k := &qaKernel{}
-	d, path := qaDevice(t, []byte{18, 1, 2}, k)
+	d, path := qaDevice(t, nil, k)
 	fd := d.fd
 	if err := os.Remove(path); err != nil {
 		t.Fatal(err)
 	}
-	if err := d.Claim(1); err != nil {
-		t.Fatal(err)
-	}
-	if b, err := d.Descriptors(); err != nil || len(b) != 3 {
+	qaClaim(t, d)
+	if b, err := d.Descriptors(); err != nil || len(b) != len(qaDefaultDesc()) {
 		t.Errorf("descriptors after the node vanished: %v %v", b, err)
 	}
-	if _, err := d.BulkOut(0x02, []byte{1}, time.Second); err != nil {
+	if _, err := d.BulkOut(qaOut, []byte{1}, time.Second); err != nil {
 		t.Error(err)
 	}
 	if _, err := os.Stat(path); !errors.Is(err, os.ErrNotExist) {
@@ -867,59 +873,9 @@ func TestQADescriptorsReadOnceAndBounded(t *testing.T) {
 	if again, _ := d.Descriptors(); len(again) != maxDescriptorBytes {
 		t.Errorf("descriptors read again: %d bytes", len(again))
 	}
-	empty, _ := qaDevice(t, nil, k)
+	empty, _ := qaDevice(t, []byte{}, k)
 	if b, err := empty.Descriptors(); err != nil || len(b) != 0 {
 		t.Errorf("empty node: %v %v", b, err)
-	}
-}
-
-// B. Open: the refusal on a permission error carries the errno and os.ErrPermission; the refusals leave no descriptor behind.
-func TestQAOpenPermissionAndDescriptorLeaks(t *testing.T) {
-	dir := t.TempDir()
-	locked := filepath.Join(dir, "locked")
-	if err := os.WriteFile(locked, []byte{1}, 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Chmod(locked, 0); err != nil {
-		t.Fatal(err)
-	}
-	if unix.Geteuid() != 0 {
-		_, err := Open(locked)
-		var pe *os.PathError
-		if !errors.Is(err, os.ErrPermission) || !errors.Is(err, unix.EACCES) || !errors.As(err, &pe) || pe.Path != locked {
-			t.Errorf("a node the user may not open: %v, want os.ErrPermission, EACCES and a *os.PathError of the path", err)
-		}
-	}
-	reg := filepath.Join(dir, "regular")
-	if err := os.WriteFile(reg, []byte{1}, 0o600); err != nil {
-		t.Fatal(err)
-	}
-	link := filepath.Join(dir, "link")
-	if err := os.Symlink(reg, link); err != nil {
-		t.Fatal(err)
-	}
-	fifo := filepath.Join(dir, "fifo")
-	if err := unix.Mkfifo(fifo, 0o600); err != nil {
-		t.Fatal(err)
-	}
-	countFDs := func() int {
-		ents, err := os.ReadDir("/proc/self/fd")
-		if err != nil {
-			t.Skip("no /proc/self/fd")
-		}
-		return len(ents)
-	}
-	before := countFDs()
-	for range 50 {
-		for _, p := range []string{reg, link, fifo, dir, filepath.Join(dir, "none"), locked} {
-			if d, err := Open(p); err == nil {
-				_ = d.Close()
-				t.Fatalf("Open(%s) succeeded on something that is not a character device", filepath.Base(p))
-			}
-		}
-	}
-	if after := countFDs(); after != before {
-		t.Errorf("%d descriptors open before the refusals, %d after", before, after)
 	}
 }
 
@@ -943,23 +899,21 @@ func TestQACloseWaitsForATransferInProgress(t *testing.T) {
 		return 0, 0
 	}}
 	d, _ := qaDevice(t, nil, k)
-	if err := d.Claim(1); err != nil {
-		t.Fatal(err)
-	}
+	qaClaim(t, d)
 	type result struct {
 		n   int
 		err error
 	}
 	transfer := make(chan result, 1)
 	go func() {
-		n, err := d.BulkIn(0x82, make([]byte, 16), time.Hour)
+		n, err := d.BulkIn(qaIn, make([]byte, 16), time.Hour)
 		transfer <- result{n, err}
 	}()
 	<-inside
 	closed := make(chan error, 1)
 	go func() { closed <- d.Close() }()
 	late := make(chan error, 1)
-	go func() { _, err := d.BulkOut(0x02, []byte{1}, time.Second); late <- err }()
+	go func() { _, err := d.BulkOut(qaOut, []byte{1}, time.Second); late <- err }()
 	select {
 	case err := <-closed:
 		t.Fatalf("Close returned while a transfer was in progress: %v", err)
@@ -978,7 +932,7 @@ func TestQACloseWaitsForATransferInProgress(t *testing.T) {
 	if got := k.countReq(reqRelease); got != 1 {
 		t.Errorf("%d releases, want 1 (after the transfer)", got)
 	}
-	if _, err := d.BulkIn(0x82, make([]byte, 1), time.Second); !errors.Is(err, ErrClosed) {
+	if _, err := d.BulkIn(qaIn, make([]byte, 1), time.Second); !errors.Is(err, ErrClosed) {
 		t.Errorf("after close: %v", err)
 	}
 }
@@ -998,11 +952,12 @@ func TestQAConcurrentUseWhileClosing(t *testing.T) {
 			}
 			return 0, 0
 		}}
-		d, _ := qaDevice(t, []byte{1, 2, 3}, k)
+		d, _ := qaDevice(t, nil, k)
 		var wg sync.WaitGroup
 		var bad atomic.Int32
 		check := func(err error) {
-			if err != nil && !errors.Is(err, ErrClosed) {
+			// Another goroutine may have released the interface: ErrNotClaimed is then the answer, and the refusals of the guards.
+			if err != nil && !errors.Is(err, ErrClosed) && !errors.Is(err, ErrNotClaimed) {
 				bad.Add(1)
 				t.Errorf("round %d: %v", round, err)
 			}
@@ -1016,15 +971,15 @@ func TestQAConcurrentUseWhileClosing(t *testing.T) {
 				for i := range 50 {
 					switch (g + i) % 5 {
 					case 0:
-						_, err := d.BulkOut(0x02, []byte{1, 2}, time.Second)
+						_, err := d.BulkOut(qaOut, []byte{1, 2}, time.Second)
 						check(err)
 					case 1:
-						_, err := d.BulkIn(0x82, make([]byte, 8), time.Second)
+						_, err := d.BulkIn(qaIn, make([]byte, 8), time.Second)
 						check(err)
 					case 2:
-						check(d.Claim(g))
+						check(d.Claim(qaCCID + 2*(g%2)))
 					case 3:
-						_ = d.Release(g)
+						_ = d.Release(qaCCID + 2*(g%2))
 					case 4:
 						_, err := d.Descriptors()
 						check(err)
@@ -1051,8 +1006,8 @@ func TestQAConcurrentUseWhileClosing(t *testing.T) {
 				t.Errorf("round %d: close: %v", round, err)
 			}
 		}
-		_, _ = d.BulkOut(0x02, []byte{1}, time.Second)
-		_ = d.Claim(1)
+		_, _ = d.BulkOut(qaOut, []byte{1}, time.Second)
+		_ = d.Claim(qaCCID)
 		if late.Load() != 0 {
 			t.Errorf("round %d: %d system calls after Close", round, late.Load())
 		}
@@ -1067,6 +1022,7 @@ func TestQAConcurrentUseWhileClosing(t *testing.T) {
 func TestQAGoneUnderConcurrency(t *testing.T) {
 	k := &qaKernel{answer: func(kcall) (uintptr, unix.Errno) { return 0, unix.ENODEV }}
 	d, _ := qaDevice(t, nil, k)
+	d.claimed[qaCCID] = true // as if a claim had succeeded earlier
 	var wg sync.WaitGroup
 	errs := make(chan error, 32)
 	start := make(chan struct{})
@@ -1075,7 +1031,7 @@ func TestQAGoneUnderConcurrency(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			<-start
-			_, err := d.BulkIn(0x82, make([]byte, 4), time.Second)
+			_, err := d.BulkIn(qaIn, make([]byte, 4), time.Second)
 			errs <- err
 		}()
 	}
@@ -1096,7 +1052,7 @@ func TestQAGoneUnderConcurrency(t *testing.T) {
 func TestQAConcurrentCloseReleasesOnce(t *testing.T) {
 	k := &qaKernel{}
 	d, _ := qaDevice(t, nil, k)
-	for n := range 4 {
+	for _, n := range []int{qaCCID, qaCCID2} {
 		_ = d.Claim(n)
 	}
 	var wg sync.WaitGroup
@@ -1105,7 +1061,7 @@ func TestQAConcurrentCloseReleasesOnce(t *testing.T) {
 		go func() { defer wg.Done(); _ = d.Close() }()
 	}
 	wg.Wait()
-	if got := k.countReq(reqRelease); got != 4 {
-		t.Errorf("%d releases for 4 interfaces", got)
+	if got := k.countReq(reqRelease); got != 2 {
+		t.Errorf("%d releases for 2 interfaces", got)
 	}
 }
