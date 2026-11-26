@@ -131,7 +131,7 @@ func TestDrainReadsOnlyOnceAtTheFirstExchange(t *testing.T) {
 	}
 }
 
-func TestDrainTimeoutIsCutToTheTransferTimeoutAndTheBudget(t *testing.T) {
+func TestDrainTimeoutIsCutToTheTransferTimeoutAndASmallBudgetIsRefused(t *testing.T) {
 	f := newFake(descSpec{}, cardHandler(echoSW))
 	r, _ := Open(f, Options{TransferTimeout: 5 * time.Millisecond})
 	if _, err := r.SlotStatus(testBudget); err != nil {
@@ -142,11 +142,11 @@ func TestDrainTimeoutIsCutToTheTransferTimeoutAndTheBudget(t *testing.T) {
 	}
 	f = newFake(descSpec{}, cardHandler(echoSW))
 	r, _ = Open(f, Options{})
-	if _, err := r.SlotStatus(3 * time.Millisecond); err != nil {
-		t.Fatal(err)
-	}
-	if f.timeouts[0] > 3*time.Millisecond {
-		t.Errorf("drain read timeout %v with a budget of 3ms", f.timeouts[0])
+	// A budget that leaves no room for one whole drain read is no proof of a quiet pipe: the session is lost, nothing is written.
+	_, err := r.SlotStatus(3 * time.Millisecond)
+	lostWith(t, err, ErrBudgetExhausted)
+	if f.nIn != 0 || f.nOut != 0 || r.drained {
+		t.Errorf("reads %d, writes %d, drained %v", f.nIn, f.nOut, r.drained)
 	}
 }
 
@@ -185,7 +185,7 @@ func TestDrainEndsWithTheBudget(t *testing.T) {
 	f.endless = msg(rspDataBlock, 9, stOK, 0, 0, []byte{1, 2})
 	f.onIn = func(*fakeDevice) { time.Sleep(15 * time.Millisecond) }
 	r, _ := Open(f, Options{})
-	_, err := r.SlotStatus(20 * time.Millisecond)
+	_, err := r.SlotStatus(40 * time.Millisecond)
 	lostWith(t, err, ErrBudgetExhausted)
 	if f.nOut != 0 {
 		t.Error("something was written")
@@ -474,5 +474,37 @@ func TestOpenWithACandidateOfAnotherDevice(t *testing.T) {
 		if r != nil || !errors.Is(err, usbccid.ErrWrongDevice) || !f.closed || f.count("claim") != 0 {
 			t.Errorf("err=%v calls=%v", err, f.calls)
 		}
+	}
+}
+
+// An empty packet that arrives just after the drain (the end of a whole-packet message of an earlier session) is consumed by the first
+// read, and does not break the session.
+func TestEmptyPacketRightAfterTheDrainIsConsumed(t *testing.T) {
+	first := true
+	r, _, err := openFake(Options{}, func(f *fakeDevice, m []byte) {
+		if m[0] == msgGetSlotState && first {
+			first = false
+			f.sendRaw([]byte{}, msg(rspSlotStatus, m[6], stOK, 0, 0, nil))
+			return
+		}
+		cardHandler(echoSW)(f, m)
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st, err := r.SlotStatus(testBudget); err != nil || st != SlotActive {
+		t.Fatal(st, err)
+	}
+	// Only one is consumed: the later exchanges find none (the fake sends none).
+	if _, err := r.PowerOn(testBudget); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// A typed nil *usbccid.Device is a nil Port.
+func TestOpenWithATypedNilDevice(t *testing.T) {
+	var d *usbccid.Device
+	if r, err := Open(d, Options{}); r != nil || !errors.Is(err, ErrNotOpen) {
+		t.Errorf("%v %v", r, err)
 	}
 }

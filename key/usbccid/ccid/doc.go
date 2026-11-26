@@ -71,9 +71,10 @@
 //     the session as everywhere. On a quiet device it costs one timed-out read (DrainReadTimeout), and its time counts against the
 //     budget of that call. The drain only reads, so Open itself still sends and reads nothing: it runs at the first exchange.
 //
-// What stays: an answer that arrives AFTER the drain, with a number that happens to be the one of a message of this session, is
-// accepted if it has the type that message expects. The chance is one in 256 at most for each such late message, and only for the same
-// message type, and the layer above covers it by the rules of "What the layer above must not assume".
+// A late answer of an earlier session cannot match until the counter has gone round, which is 256 messages of the process later.
+// What remains is an answer that arrives after the drain with the number and the type of the pending command, which only a device
+// that still holds an answer, or a hostile device, can produce; the layer above covers it by the rules of "What the layer above must
+// not assume".
 //
 // # What it never does
 //

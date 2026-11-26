@@ -171,7 +171,7 @@ type Reader struct {
 // is ErrNotOpen. On every error it closes the Port. A claim refused because another holder has the interface returns an error that wraps usbccid.ErrBusy;
 // the reader does not retry.
 func Open(p usbccid.Port, o Options) (*Reader, error) {
-	if p == nil {
+	if d, typed := p.(*usbccid.Device); p == nil || typed && d == nil {
 		return nil, fmt.Errorf("%w: the Port is nil", ErrNotOpen)
 	}
 	r, err := open(p, o)
@@ -647,8 +647,9 @@ func (r *Reader) exchange(op string, typ byte, level uint16, payload []byte, wan
 // Open still sends nothing; it runs at the first exchange of the session, whichever call that is, and its time counts against that
 // call's budget. It reads whole messages into the read buffer, each read with a timeout of DrainReadTimeout (and no more than the
 // transfer timeout or what is left of the budget), discards and clears what arrives, and stops at the first read that times out: the
-// pipe is quiet. An empty packet that ended an earlier message is read and dropped here, so the first read of a message after the
-// drain starts clean. At most MaxDrainReads reads and MaxDrainTime in all: a device that is not quiet by then keeps sending without
+// pipe is quiet. An empty packet that ended an earlier message is read and dropped here; one that arrives just after the drain is
+// consumed by the first read of the session (as after a whole-packet message). A read cut short by the budget is no proof of quiet:
+// the budget error ends the session. At most MaxDrainReads reads and MaxDrainTime in all: a device that is not quiet by then keeps sending without
 // being asked, and the session is lost with ErrProtocol. On a quiet device the cost is one timed-out read, DrainReadTimeout.
 func (r *Reader) drain(op string, dl time.Time) error {
 	buf := r.rbuf[:min(len(r.rbuf), MaxMessageLength)]
@@ -657,11 +658,13 @@ func (r *Reader) drain(op string, dl time.Time) error {
 		if reads >= MaxDrainReads || time.Since(start) > MaxDrainTime {
 			return r.lose(fmt.Errorf("%w: %s: the IN pipe is not quiet after %d reads (MaxDrainReads, MaxDrainTime): the device sends without being asked", ErrProtocol, op, reads))
 		}
-		to, _, err := r.timeout(dl)
-		if err != nil {
-			return r.lose(fmt.Errorf("ccid: %s: drain: %w", op, err))
+		// A read that the budget cut short proves nothing about the pipe: unless the budget leaves room for one whole drain read
+		// (DrainReadTimeout, or the transfer timeout when that is shorter), the session is lost as for a spent budget, and the
+		// drain is not marked done.
+		to := min(DrainReadTimeout, r.xfer)
+		if time.Until(dl) < to {
+			return r.lose(fmt.Errorf("ccid: %s: drain: %w: not enough left for one whole read of %v", op, ErrBudgetExhausted, to))
 		}
-		to = min(to, DrainReadTimeout)
 		n, err := r.port.BulkIn(r.lay.bulkIn, buf, to)
 		clear(buf)
 		switch {
@@ -670,7 +673,8 @@ func (r *Reader) drain(op string, dl time.Time) error {
 				return r.lose(fmt.Errorf("%w: %s: the port returned %d bytes for a buffer of %d", ErrProtocol, op, n, len(buf)))
 			}
 		case errors.Is(err, usbccid.ErrTimeout):
-			r.drained, r.emptyOK = true, false
+			// One empty packet may still arrive, the end of a whole-packet message of an earlier session: the first read consumes it.
+			r.drained, r.emptyOK = true, true
 			return nil
 		default:
 			return r.lose(portError(op, "drain", err, false))
