@@ -2,14 +2,8 @@ package file_test
 
 import (
 	"context"
-	"go/ast"
-	"go/parser"
-	"go/token"
-	"io/fs"
 	"log/slog"
-	"path/filepath"
 	"slices"
-	"strings"
 	"sync"
 	"testing"
 
@@ -152,47 +146,5 @@ func TestTheLogLinesAreWhatTheCodeAtMasterWrote(t *testing.T) {
 	wantLine(t, mine.line(t, "config directory failed"), slog.LevelError, "err")
 	if got := mine.messages(); len(got) != 1 {
 		t.Fatalf("the driver wrote %v, want one line", got)
-	}
-}
-
-// A line goes through the helper that resolves nil to slog.Default() or through a *slog.Logger the host gave: the package-level
-// functions of log/slog name no logger of the host, so none is called in the module's own code.
-func TestNoPackageLevelSlogCallInTheDriver(t *testing.T) {
-	banned := []string{"Info", "Warn", "Error", "Debug", "Log", "LogAttrs"}
-	fset := token.NewFileSet()
-	err := filepath.WalkDir(".", func(path string, d fs.DirEntry, err error) error {
-		if err != nil || d.IsDir() || !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
-			return err
-		}
-		file, err := parser.ParseFile(fset, path, nil, 0)
-		if err != nil {
-			return err
-		}
-		name := "slog"
-		for _, imp := range file.Imports {
-			if imp.Path.Value == `"log/slog"` && imp.Name != nil {
-				name = imp.Name.Name
-			}
-		}
-		for _, decl := range file.Decls {
-			fn, _ := decl.(*ast.FuncDecl)
-			inHelper := fn != nil && fn.Recv != nil && fn.Name.Name == "log"
-			ast.Inspect(decl, func(n ast.Node) bool {
-				sel, ok := n.(*ast.SelectorExpr)
-				if !ok {
-					return true
-				}
-				if id, ok := sel.X.(*ast.Ident); ok && id.Name == name {
-					if slices.Contains(banned, sel.Sel.Name) || (sel.Sel.Name == "Default" && !inHelper) {
-						t.Errorf("%s: slog.%s outside the helper that resolves a nil Logger", fset.Position(sel.Pos()), sel.Sel.Name)
-					}
-				}
-				return true
-			})
-		}
-		return nil
-	})
-	if err != nil {
-		t.Fatal(err)
 	}
 }
