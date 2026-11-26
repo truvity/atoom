@@ -35,8 +35,9 @@
 //   - ErrTimeout: a transfer's timeout ran out. The device stays usable.
 //   - ErrClosed: the Device was closed. After Close, Release and Close return nil and every other call returns ErrClosed (also
 //     when the device is gone as well).
-//   - ErrNoSuchInterface, ErrNotClaimed, ErrBadEndpoint, ErrBadLength: a call refused for its arguments, before the kernel was asked.
-//   - ErrNotUSBNode: Open was given a path that is not a USB device node. ErrWrongDevice: Candidate.Open found another device at
+//   - ErrNoSuchInterface (also for a number outside 0 to 255), ErrNotClaimed, ErrBadEndpoint (also an address that two interfaces
+//     list), ErrBadLength, ErrSeveralConfigurations: a call refused before the kernel was asked.
+//   - ErrNotUSBNode: Open was given a path that is not a USB device node. ErrBadDescriptors: its descriptors are missing or malformed. ErrNoProcSelfFd: /proc/self/fd is not available. ErrWrongDevice: Candidate.Open found another device at
 //     the node than Discover did.
 //   - ErrNotSupported: the system is not Linux on amd64 or arm64. The package still builds there, so that a program that links it
 //     compiles for macOS, and every entry point returns this error.
@@ -53,12 +54,20 @@
 //
 //   - A transfer that timed out is abandoned, and what it had already moved is lost. A late answer may arrive on the next read, so
 //     the layer above matches the sequence number of its own messages, and should treat its session as lost after a timeout.
-//   - The layer never clears a halt (a stalled endpoint): a stall is final for this handle.
+//   - A BulkOut that timed out may have sent part of a message: the stream is out of step, and the session is to be treated as lost.
+//     BulkOut returns a count, which the caller must compare with the length it gave.
+//   - The overflow error (a message longer than the read buffer) and the stall error are ordinary errors: they do not latch, and the
+//     layer never clears a halt, so a stalled endpoint stays stalled.
 //   - A read buffer must hold the largest message expected: a larger one is lost with an overflow error. The maximum packet size of
 //     an endpoint is not read here.
-//   - A message whose length is an exact multiple of the packet size is followed by an empty packet, which the next read returns as
-//     zero bytes.
-//   - A reset of the device by another process is not noticed until a call fails.
+//   - When a message is an exact multiple of the packet size it is followed by an empty packet. A read whose buffer is exactly as
+//     long as the message ends before that packet, and the next read returns it as zero bytes; a read with a longer buffer ends on
+//     the empty packet in the same call.
+//   - Only alternate setting 0 of an interface is known, and the layer never selects another. The interrupt endpoint of the CCID
+//     interface is reported by Discover and never used.
+//   - The descriptors are a snapshot taken at Open. A reset of the device by another process is not noticed until a call fails.
+//   - A device that declares several configurations is refused (ErrSeveralConfigurations): the kernel knows only the active one,
+//     usbfs does not say which, and the layer does not choose.
 //
 // # Safety rule for tests
 //
