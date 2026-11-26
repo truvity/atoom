@@ -227,8 +227,11 @@ type fakeDevice struct {
 	noZLP    bool
 	descErr  error
 	claimErr error
-	relErr   error
-	closeErr error
+	// refuseSecondClaim makes Claim of a held interface fail with usbccid.ErrAlreadyClaimed, as a Device does. Off by default: a test
+	// that opens a second Reader on the fake stands for a new Device of the same reader.
+	refuseSecondClaim bool
+	relErr            error
+	closeErr          error
 
 	// onOut is called with each bulk-out message after it was logged. It queues the answer with f.send.
 	onOut func(f *fakeDevice, m []byte)
@@ -276,6 +279,9 @@ func (f *fakeDevice) Claim(n int) error {
 	f.calls = append(f.calls, "claim")
 	if f.claimErr != nil {
 		return fmt.Errorf("fake: claim interface %d: %w", n, f.claimErr)
+	}
+	if f.claimed && f.refuseSecondClaim { // as a Device: a claim held already is refused, and stays
+		return fmt.Errorf("fake: claim interface %d: %w", n, usbccid.ErrAlreadyClaimed)
 	}
 	f.claimed = true
 	return nil

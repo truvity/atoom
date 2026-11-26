@@ -116,8 +116,8 @@ func TestDrainReadsOnlyOnceAtTheFirstExchange(t *testing.T) {
 	if _, err := r.SlotStatus(testBudget); err != nil {
 		t.Fatal(err)
 	}
-	if fmt.Sprint(f.calls[2:5]) != "[in out in]" {
-		t.Errorf("calls after Open: %v, want the drain read before the first write", f.calls[2:])
+	if fmt.Sprint(f.calls[2:6]) != "[in in out in]" {
+		t.Errorf("calls after Open: %v, want the two drain reads before the first write", f.calls[2:])
 	}
 	if f.timeouts[0] != DrainReadTimeout {
 		t.Errorf("the drain read has a timeout of %v", f.timeouts[0])
@@ -512,5 +512,86 @@ func TestOpenWithATypedNilDevice(t *testing.T) {
 	var d *usbccid.Device
 	if r, err := Open(d, Options{}); r != nil || !errors.Is(err, ErrNotOpen) {
 		t.Errorf("%v %v", r, err)
+	}
+}
+
+// Every read of the drain asks for a whole number of packets, and the bytes of the answer to reset ask in whole packets too.
+func TestDrainReadsAskForWholePackets(t *testing.T) {
+	f := newFake(descSpec{maxMsg: 300}, cardHandler(echoSW))
+	r, err := Open(f, Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.SlotStatus(testBudget); err != nil {
+		t.Fatal(err)
+	}
+	if len(f.inLens) < 2 || f.inLens[0] != 320 || f.inLens[1] != 320 { // 300+64 bytes held, 320 of them a whole number of 64
+		t.Errorf("reads of the drain: %v, want 320 bytes each", f.inLens)
+	}
+}
+
+// One read that times out is not proof of quiet: a message that was half on its way arrives after it, and the count of reads in a
+// row that time out starts again at any read that returns bytes.
+func TestDrainNeedsTwoTimedOutReadsInARow(t *testing.T) {
+	f := newFake(descSpec{}, cardHandler(echoSW))
+	f.onIn = func(f *fakeDevice) {
+		if f.nIn == 2 { // the tail that follows the first timed-out read
+			f.queueLocked(msg(rspSlotStatus, 9, stOK, 0, 0, nil))
+		}
+	}
+	r, err := Open(f, Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.SlotStatus(testBudget); err != nil {
+		t.Fatal(err)
+	}
+	if got := fmt.Sprint(f.calls[2:7]); got != "[in in in in out]" {
+		t.Errorf("calls after Open: %v, want timeout, tail, two timeouts, then the write", f.calls[2:])
+	}
+}
+
+// A read of the drain waits no longer than what is left of MaxDrainTime.
+func TestDrainReadIsCutToWhatIsLeftOfMaxDrainTime(t *testing.T) {
+	f := newFake(descSpec{}, cardHandler(echoSW))
+	f.endless = msg(rspDataBlock, 9, stOK, 0, 0, []byte{1, 2})
+	f.onIn = func(*fakeDevice) { time.Sleep(MaxDrainTime/2 - 5*time.Millisecond) }
+	r, err := Open(f, Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = r.SlotStatus(testBudget)
+	lostWith(t, err, ErrProtocol)
+	if f.nOut != 0 {
+		t.Error("something was written")
+	}
+	// A third read can only start after 2 x 120 ms, when less than DrainReadTimeout of MaxDrainTime is left.
+	for i, to := range f.timeouts {
+		if to <= 0 || to > DrainReadTimeout {
+			t.Errorf("read %d has a timeout of %v", i, to)
+		}
+	}
+	if n := len(f.timeouts); n >= 3 && f.timeouts[n-1] >= DrainReadTimeout {
+		t.Errorf("the last read, which started after %v, has a timeout of %v", 2*(MaxDrainTime/2-5*time.Millisecond), f.timeouts[n-1])
+	}
+}
+
+// A second Open on a Port that a Reader holds is refused with ErrAlreadyClaimed, and leaves the Port and its Reader as they were.
+func TestSecondOpenOnTheSamePortLeavesTheFirstReaderAlone(t *testing.T) {
+	f := newFake(descSpec{}, cardHandler(echoSW))
+	f.refuseSecondClaim = true
+	r1, err := Open(f, Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	r2, err := Open(f, Options{})
+	if r2 != nil || !errors.Is(err, usbccid.ErrAlreadyClaimed) {
+		t.Fatalf("second Open: %v, %v", r2, err)
+	}
+	if f.closed {
+		t.Fatal("the failed Open closed the Port of the first Reader")
+	}
+	if _, err := r1.PowerOn(testBudget); err != nil {
+		t.Errorf("the first Reader after the second Open: %v", err)
 	}
 }

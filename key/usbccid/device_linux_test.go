@@ -115,7 +115,7 @@ func TestFatalClassification(t *testing.T) {
 }
 
 func TestErrorValuesAreDistinct(t *testing.T) {
-	all := []error{ErrBusy, ErrGone, ErrTimeout, ErrClosed, ErrNotSupported}
+	all := []error{ErrBusy, ErrAlreadyClaimed, ErrGone, ErrTimeout, ErrClosed, ErrNotSupported}
 	for i, a := range all {
 		if a == nil || a.Error() == "" {
 			t.Fatalf("error %d is empty", i)
@@ -323,6 +323,37 @@ func TestClaimBusyIsErrBusy(t *testing.T) {
 	held = false
 	if err := d.Claim(qaCCID); err != nil {
 		t.Errorf("claim after the holder left: %v", err)
+	}
+}
+
+// A claim of an interface that the handle holds already is ErrAlreadyClaimed, is not ErrBusy, asks the kernel nothing and leaves the
+// claim as it was: a release still gives it back, and a claim after it works.
+func TestSecondClaimIsAlreadyClaimed(t *testing.T) {
+	var claims, releases atomic.Int32
+	d := scripted(t, nil, func(req uintptr, _ unsafe.Pointer) (uintptr, unix.Errno) {
+		switch req {
+		case reqClaim:
+			claims.Add(1)
+		case reqRelease:
+			releases.Add(1)
+		}
+		return 0, 0
+	})
+	if err := d.Claim(qaCCID); err != nil {
+		t.Fatal(err)
+	}
+	err := d.Claim(qaCCID)
+	if !errors.Is(err, ErrAlreadyClaimed) || errors.Is(err, ErrBusy) || errors.Is(err, ErrGone) || !strings.Contains(err.Error(), "interface 1") {
+		t.Fatalf("second claim: %v, want ErrAlreadyClaimed only", err)
+	}
+	if claims.Load() != 1 || !d.claimed[qaCCID] {
+		t.Errorf("claims asked of the kernel: %d, held: %v", claims.Load(), d.claimed[qaCCID])
+	}
+	if err := d.Release(qaCCID); err != nil || releases.Load() != 1 {
+		t.Fatalf("release: %v, %d requests", err, releases.Load())
+	}
+	if err := d.Claim(qaCCID); err != nil {
+		t.Errorf("claim after the release: %v", err)
 	}
 }
 

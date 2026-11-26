@@ -93,8 +93,9 @@ var ErrNotOpen = errors.New("ccid: the reader is not open: use Open with a Port"
 // not powered and sends it no command; the session is not lost.
 var ErrStillActive = errors.New("ccid: the reader says the card is still active after power off")
 
-// ErrBadATR is returned by PowerOn when the answer to reset is shorter than 2 bytes or longer than MaxATR. The card is powered on
-// and the session is not lost; the caller decides whether to power it off. The text holds the length and no byte.
+// ErrBadATR is returned by PowerOn when the answer to reset is shorter than 2 bytes or longer than MaxATR. The reader has reset the
+// card, but the Reader treats it as not powered (Transmit returns ErrNotPowered until a PowerOn succeeds), and the session is not
+// lost; the caller decides whether to power the card off. The text holds the length and no byte.
 var ErrBadATR = errors.New("ccid: the answer to reset has a length that is refused (2 to MaxATR bytes)")
 
 // The card-level failures. A reader reports them in its answer, with the status bytes, and the session goes on unless the failure

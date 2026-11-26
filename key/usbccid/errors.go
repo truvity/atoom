@@ -39,12 +39,18 @@ var ErrClosed = errors.New("usbccid: the device is closed")
 // system so that a program that links it compiles everywhere, but only Linux has usbfs and sysfs.
 var ErrNotSupported = errors.New("usbccid: not supported on this system: direct USB access needs Linux (usbfs) on amd64 or arm64")
 
-// The refusals below are errors of the arguments: the kernel was not asked, nothing was latched, and none of them is ErrBusy.
+// The refusals below are errors of the arguments or of the state of the handle: the kernel was not asked, nothing was latched, and none
+// of them is ErrBusy.
 
 // ErrNoSuchInterface is returned by Claim for an interface number that the descriptors of the device do not hold, or that is not a
 // CCID interface (class 0x0B) with both a bulk OUT and a bulk IN endpoint. Only the CCID interface of a card is ever claimed; its other interfaces (a passkey or a one-time-code
 // interface) are never touched.
 var ErrNoSuchInterface = errors.New("usbccid: the device has no CCID interface with this number")
+
+// ErrAlreadyClaimed is returned by Claim of an interface that this handle holds already. The kernel is not asked (its claim is per
+// file descriptor, so it would answer success again), and the claim stays as it was. Two readers on one Port are refused with it,
+// where the second would otherwise share the first one's claim and its pipe.
+var ErrAlreadyClaimed = errors.New("usbccid: this handle holds the interface already")
 
 // ErrNotClaimed is returned by a bulk call on an endpoint of a CCID interface that this handle has not claimed. The kernel would
 // claim a free interface by itself for the first transfer, and this package never lets it.

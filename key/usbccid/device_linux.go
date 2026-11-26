@@ -291,8 +291,9 @@ func (d *Device) fail(what string, e unix.Errno) error {
 // Claim takes interface n with USBDEVFS_CLAIMINTERFACE, for an interface that the descriptors hold, whose class is 0x0B (CCID) and that has both a bulk OUT and a bulk IN endpoint (this layer uses a CCID interface only through both, as Discover requires of a candidate);
 // any other number (a number outside 0 to 255 included, which no longer reaches the kernel to be refused as an invalid argument) is
 // refused before the kernel is asked, with an error that wraps ErrNoSuchInterface. A busy interface returns an
-// error that wraps ErrBusy (and EBUSY); the holder may also be another handle of the same process. Nothing is detached, the device
-// is not reset, and Claim never retries.
+// error that wraps ErrBusy (and EBUSY); the holder may also be another handle of the same process. An interface that this Device holds
+// already is refused with ErrAlreadyClaimed before the kernel is asked (its claim is per file descriptor and would answer success
+// again), and the claim stays as it was. Nothing is detached, the device is not reset, and Claim never retries.
 func (d *Device) Claim(n int) error {
 	d.mu.Lock()
 	defer d.mu.Unlock()
@@ -305,6 +306,9 @@ func (d *Device) Claim(n int) error {
 	}
 	if in == nil || in.class != ClassCCID || !in.bothBulk() {
 		return fmt.Errorf("usbccid: claim interface %d: %w", n, ErrNoSuchInterface)
+	}
+	if d.claimed[n] {
+		return fmt.Errorf("usbccid: claim interface %d: %w", n, ErrAlreadyClaimed)
 	}
 	v := uint32(n)                                      //nolint:gosec // n is the number of an interface of the descriptors: 0 to 255
 	_, e := d.ioctl(d.fd, reqClaim, unsafe.Pointer(&v)) //nolint:gosec // G103: the kernel ioctl argument, which the type of the request fixes

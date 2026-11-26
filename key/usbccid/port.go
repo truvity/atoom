@@ -16,8 +16,9 @@ type Port interface {
 
 	// Claim takes interface n with a plain claim. Only an interface that the descriptors hold and whose class is CCID (0x0B) is
 	// claimed (else ErrNoSuchInterface, before the kernel is asked). A claim refused because another holder has the interface (also
-	// another handle of the same process) returns an error for which errors.Is(err, ErrBusy) is true. Nothing is detached, and the
-	// caller must not retry on its own.
+	// another handle of the same process) returns an error for which errors.Is(err, ErrBusy) is true. An interface that this Port
+	// holds already returns ErrAlreadyClaimed, and the claim stays as it was. Nothing is detached, and the caller must not retry on
+	// its own.
 	Claim(n int) error
 
 	// Release gives interface n back. Releasing an interface that is not claimed is not an error.

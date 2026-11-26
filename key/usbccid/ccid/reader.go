@@ -41,15 +41,16 @@ const (
 	// timeout of a transfer is also cut to what is left of the budget.
 	DefaultTransferTimeout = 10 * time.Second
 
-	// MaxDrainReads is the number of reads that the drain at the first exchange of a session makes before it gives up: eight. A device
-	// that has not gone quiet by then keeps sending without being asked, and the session is lost with ErrProtocol.
+	// MaxDrainReads is the number of reads that the drain at the first exchange of a session makes before it gives up: eight. The
+	// pipe is quiet after two reads in a row that time out, so a device that has not gone quiet by then keeps sending without being
+	// asked, and the session is lost with ErrProtocol.
 	MaxDrainReads = 8
 
-	// MaxDrainTime is the time the drain may take in all: 250 milliseconds.
+	// MaxDrainTime is the time the drain may take in all: 250 milliseconds. No read of the drain waits longer than what is left of it.
 	MaxDrainTime = 250 * time.Millisecond
 
-	// DrainReadTimeout is the timeout of one read of the drain: 20 milliseconds. It is the cost of the drain on a quiet device (one
-	// read that times out).
+	// DrainReadTimeout is the timeout of one read of the drain: 20 milliseconds. The drain ends at two reads in a row that time out,
+	// so on a quiet device it costs two of them (40 milliseconds).
 	DrainReadTimeout = 20 * time.Millisecond
 
 	// MinMessageLength is the smallest dwMaxCCIDMessageLength this layer accepts: the 10-byte header and the largest short APDU
@@ -171,7 +172,9 @@ type Reader struct {
 // Open takes ownership of the Port p, reads its descriptors, checks that the device is of the simple kind this layer accepts and
 // claims its CCID interface. It sends nothing to the reader and reads nothing from it: the caller asks for the slot status and
 // powers the card on, and the first exchange of the session drains the IN pipe before it sends (see the package comment). A nil Port
-// is ErrNotOpen. On every error it closes the Port. A claim refused because another holder has the interface returns an error that wraps usbccid.ErrBusy;
+// is ErrNotOpen. On every error it closes the Port, except when the Port says that it holds the interface already
+// (usbccid.ErrAlreadyClaimed): the Port then belongs to the Reader that claimed it, and Open leaves it exactly as it was, for its
+// caller to close or not. A claim refused because another holder has the interface returns an error that wraps usbccid.ErrBusy;
 // the reader does not retry.
 func Open(p usbccid.Port, o Options) (*Reader, error) {
 	if d, typed := p.(*usbccid.Device); p == nil || typed && d == nil {
@@ -179,7 +182,9 @@ func Open(p usbccid.Port, o Options) (*Reader, error) {
 	}
 	r, err := open(p, o)
 	if err != nil {
-		_ = p.Close()
+		if !errors.Is(err, usbccid.ErrAlreadyClaimed) { // a Port that another Reader claimed is not ours to close
+			_ = p.Close()
+		}
 		return nil, err
 	}
 	return r, nil
@@ -208,7 +213,8 @@ func open(p usbccid.Port, o Options) (*Reader, error) {
 		r.limit = MaxCommandAPDU
 	}
 	// The read buffer holds the largest message and one packet more, so that the first read of a message, which asks for one packet,
-	// always fits. A read never asks for more than the largest message.
+	// always fits. A read never asks for more than the largest message rounded up to whole packets, which this length holds (see
+	// readMessage and drain).
 	r.wbuf = make([]byte, maxMsg)
 	r.rbuf = make([]byte, maxMsg+l.maxPacketIn)
 	if err := p.Claim(l.iface); err != nil {
@@ -654,6 +660,7 @@ func (r *Reader) exchange(op string, typ byte, level uint16, payload []byte, wan
 		if h[5] != 0 {
 			return answer{}, nil, r.lose(fmt.Errorf("%w: %s: the answer is for slot %d, and this layer serves slot 0", ErrProtocol, op, h[5]))
 		}
+		// Only the card status (bits 0-1) and the command status (bits 6-7) are read; the reserved bits 2 to 5 are not judged.
 		if h[7]&3 == 3 && h[7]>>6 < 2 {
 			return answer{}, nil, r.lose(fmt.Errorf("%w: %s: bmICCStatus 3 is reserved", ErrProtocol, op))
 		}
@@ -677,23 +684,31 @@ func (r *Reader) exchange(op string, typ byte, level uint16, payload []byte, wan
 // lost while the card waited for a person, and the person acted later) must not be taken for an answer of this one. It only reads,
 // so Open still sends nothing; it runs at the first exchange of the session, whichever call that is, and its time counts against
 // that call's budget. It reads whole messages into the read buffer, each read with a timeout of DrainReadTimeout (and no more than
-// the transfer timeout or what is left of the budget), discards and clears what arrives, and stops at the first read that times
-// out: the pipe is quiet. An empty packet that ended an earlier message is read and dropped here; one that arrives just after the
-// drain is consumed by the first read of the session (as after a whole-packet message). A read cut short by the budget is no proof
-// of quiet: the budget error ends the session, except before the first read, where it only refuses the call. At most MaxDrainReads
-// reads and MaxDrainTime in all: a device that is not quiet by then keeps sending without being asked, and the session is lost with
-// ErrProtocol. On a quiet device the cost is one timed-out read, DrainReadTimeout.
+// the transfer timeout, what is left of the budget or what is left of MaxDrainTime), discards and clears what arrives, and stops at
+// the second read in a row that times out: the pipe is quiet. One timed-out read is not enough: usbfs drops the bytes of a transfer
+// that timed out part-way, so a message that was half on its way is cut and its tail arrives later; the second window shows
+// whether more follows. A read that returns bytes (an empty packet too) starts the count again. An empty packet that ended an earlier message
+// is read and dropped here; one that arrives just after the drain is consumed by the first read of the session (as after a
+// whole-packet message). A read cut short by the budget is no proof of quiet: the budget error ends the session, except before the
+// first read, where it only refuses the call. A read cut short by MaxDrainTime proves nothing either and is not counted. At most
+// MaxDrainReads reads and MaxDrainTime in all: a device that is not quiet by then keeps sending without being asked, and the session
+// is lost with ErrProtocol. On a quiet device the cost is two timed-out reads, 2 x DrainReadTimeout.
 func (r *Reader) drain(op string, dl time.Time) error {
-	buf := r.rbuf[:min(len(r.rbuf), MaxMessageLength)]
+	mps := r.lay.maxPacketIn
+	size := min(len(r.rbuf), MaxMessageLength)
+	buf := r.rbuf[:size-size%mps] // a whole number of packets, as every read of the Port is (see Open)
 	start := time.Now()
+	quiet := 0 // reads in a row that timed out
 	for reads := 0; ; reads++ {
-		if reads >= MaxDrainReads || time.Since(start) > MaxDrainTime {
+		left := MaxDrainTime - time.Since(start)
+		if reads >= MaxDrainReads || left <= 0 {
 			return r.lose(fmt.Errorf("%w: %s: the IN pipe is not quiet after %d reads (MaxDrainReads, MaxDrainTime): the device sends without being asked", ErrProtocol, op, reads))
 		}
 		// A read that the budget cut short proves nothing about the pipe: unless the budget leaves room for one whole drain read
 		// (DrainReadTimeout, or the transfer timeout when that is shorter), the drain is not marked done. Before its first read
 		// that only refuses the call (nothing was read, the session is kept); later it ends the session.
-		to := min(DrainReadTimeout, r.xfer)
+		window := min(DrainReadTimeout, r.xfer)
+		to := min(window, left)
 		if time.Until(dl) < to {
 			err := fmt.Errorf("ccid: %s: drain: %w: not enough left for one whole read of %v", op, ErrBudgetExhausted, to)
 			if r.touched {
@@ -709,15 +724,25 @@ func (r *Reader) drain(op string, dl time.Time) error {
 			if n < 0 || n > len(buf) {
 				return r.lose(fmt.Errorf("%w: %s: the port returned %d bytes for a buffer of %d", ErrProtocol, op, n, len(buf)))
 			}
+			quiet = 0
 		case errors.Is(err, usbccid.ErrTimeout):
-			// One empty packet may still arrive, the end of a whole-packet message of an earlier session: the first read consumes it.
-			r.drained, r.emptyOK = true, true
-			return nil
+			if to < window { // cut by MaxDrainTime: no whole window of quiet, and the next turn ends the drain
+				quiet = 0
+				continue
+			}
+			if quiet++; quiet == 2 {
+				// One empty packet may still arrive, the end of a whole-packet message of an earlier session: the first read consumes it.
+				r.drained, r.emptyOK = true, true
+				return nil
+			}
 		default:
 			return r.lose(portError(op, "drain", err, false))
 		}
 	}
 }
+
+// roundUp returns n rounded up to a multiple of m.
+func roundUp(n, m int) int { return (n + m - 1) / m * m }
 
 // seqs is the one counter of sequence numbers of the process, shared by every Reader and seeded at random at first use. A Reader
 // that opens after a lost session therefore never starts where the old one was, and never at a place that can be guessed: a late
@@ -816,13 +841,19 @@ func (r *Reader) readMessage(op string, dl time.Time) (int, error) {
 		if err != nil {
 			return 0, r.lose(fmt.Errorf("ccid: %s: read: %w", op, err))
 		}
+		// The rest of the message, asked for in whole packets (got is one already, as every read before it filled its packets): a
+		// short packet ends the transfer at the end of the message, so no byte of a later message is taken.
 		want := total - got
-		n, err := r.port.BulkIn(r.lay.bulkIn, buf[got:total], to)
+		ask := roundUp(want, mps)
+		n, err := r.port.BulkIn(r.lay.bulkIn, buf[got:got+ask], to)
 		if err != nil {
 			return 0, r.lose(portError(op, "read", err, clamped))
 		}
-		if n < 0 || n > want {
-			return 0, r.lose(fmt.Errorf("%w: %s: the port returned %d bytes for a buffer of %d", ErrProtocol, op, n, want))
+		if n < 0 || n > ask {
+			return 0, r.lose(fmt.Errorf("%w: %s: the port returned %d bytes for a buffer of %d", ErrProtocol, op, n, ask))
+		}
+		if n > want {
+			return 0, r.lose(fmt.Errorf("%w: %s: %d bytes arrived for a message of %d", ErrProtocol, op, got+n, total))
 		}
 		if n == 0 || n < want {
 			return 0, r.lose(fmt.Errorf("%w: %s: the message ended after %d of %d bytes", ErrProtocol, op, got+n, total))
