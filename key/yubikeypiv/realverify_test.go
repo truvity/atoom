@@ -1,5 +1,3 @@
-//go:build atoom_card
-
 package yubikeypiv_test
 
 import (
@@ -13,10 +11,9 @@ import (
 	"github.com/truvity/atoom/key/yubikeypiv/internal/card/cardtest"
 )
 
-// These tests run the driver over a fake card whose attestations are read by the real code of the card build: piv-go's
-// verifier over the anchors of yubico.go, and toAttestation. The certificates are a test PKI of the fake (TEST ONLY
-// root, a PIV attestation intermediate, an attestation key and slot certificates with the Yubico extensions); no card
-// takes part. They run in the native job, which builds with the tag atoom_card.
+// These tests run the driver over a fake card whose attestations are read by the real code of the card build: the library key/pivattest and
+// the adapter of internal/card/attestation.go. The certificates are a test PKI of the fake (TEST ONLY root, a PIV attestation intermediate, an
+// attestation key and slot certificates with the Yubico extensions); no card takes part. The code has no cgo, so they run on every platform.
 
 // realCard is the fake with its VerifyAttestation replaced by the real one.
 type realCard struct {

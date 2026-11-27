@@ -1,7 +1,6 @@
 package pivattest
 
 import (
-	"bytes"
 	"errors"
 	"os"
 	"slices"
@@ -73,27 +72,6 @@ func TestEveryRowOfTheTableIsInTheFilesAndTheOthersAreNotAnchors(t *testing.T) {
 	for _, p := range pins {
 		if digests[p.SHA256] != p.Name {
 			t.Errorf("%s (%s) is not in the embedded files", p.Name, p.SHA256)
-		}
-	}
-}
-
-// The pinned files are the vendor's files as the driver's directory holds them today. Pull request 2 of the series removes the older copy
-// (key/yubikeypiv/internal/card/certs) and this comparison with it; until then the two must not drift.
-func TestTheEmbeddedFilesAreTheDriversCopiesWhileBothExist(t *testing.T) {
-	for _, f := range []string{"yubico-attestation-root-1.pem", "yubico-intermediate.pem"} {
-		old, err := os.ReadFile("../yubikeypiv/internal/card/certs/" + f) //nolint:gosec // one of two fixed names of this test
-		if errors.Is(err, os.ErrNotExist) {
-			t.Skipf("the older copy of %s is gone", f)
-		}
-		if err != nil {
-			t.Fatal(err)
-		}
-		mine, err := os.ReadFile("certs/" + f) //nolint:gosec // one of two fixed names of this test
-		if err != nil {
-			t.Fatal(err)
-		}
-		if !bytes.Equal(old, mine) {
-			t.Errorf("%s differs from the driver's copy", f)
 		}
 	}
 }

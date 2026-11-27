@@ -45,7 +45,7 @@ A person who doubts the files does these steps, with a tool they trust and the n
 3. Compare the digest of each certificate with the first table: split the PEM, convert each block to DER and take the SHA-256 (`openssl x509 -in block.pem -outform DER | sha256sum`), or `openssl x509 -noout -fingerprint -sha256` and remove the colons. The names and validity are in `openssl x509 -noout -subject -dates`.
 4. Where the vendor's OpenPGP signature of the files can be had from the vendor's PKI page, verify it (not done for the first reading).
 
-The tests of this package check what a machine can: that the table is the six digests written out a second time in the test, that each is the certificate of that name in the embedded files, that the bundle holds the vendor's 15 certificates, that the admission rule gives the three PIV intermediates and no other, that every row is on this page, and, while it exists, that the two files are the card driver's older copies.
+The tests of this package check what a machine can: that the table is the six digests written out a second time in the test, that each is the certificate of that name in the embedded files, that the bundle holds the vendor's 15 certificates, that the admission rule gives the three PIV intermediates and no other, and that every row is on this page.
 
 ## A new root, or a new intermediate
 
