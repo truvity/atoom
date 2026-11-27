@@ -5,6 +5,7 @@ import (
 	"crypto/x509"
 	"encoding/hex"
 	"encoding/pem"
+	"errors"
 	"fmt"
 	"slices"
 	"strings"
@@ -82,8 +83,9 @@ func (c *defaultCache) get(now func() time.Time) (*Verifier, error) {
 // Default is the verifier over the vendor's pinned certificates. It is built on the first call that succeeds and kept; a call that fails
 // is not kept, and the next call builds again. It fails when an embedded certificate is not the one the pin table names by its SHA-256,
 // when the root file holds more or fewer than one certificate, when the PIV attestation intermediates that the bundle admits (below) are not
-// exactly those of the table, and when the machine's clock is outside the validity of the pinned certificates: the pinned intermediates are
-// checked against the root at the clock of the machine when the verifier is built. A changed file is refused at the first call, and nothing
+// exactly those of the table, and when the machine's clock is outside the validity of the pinned certificates (ErrClock, which names the clock and the certificate's
+// validity and is told apart from the two errors of the table, ErrPinTable and ErrAdmission): the pinned intermediates are checked against
+// the root at the clock of the machine when the verifier is built. A changed file is refused at the first call, and nothing
 // is admitted silently. The verifier then checks a slot certificate, a signer and an anchor at the time of each call (VerifyAt: the time
 // given).
 //
@@ -98,8 +100,11 @@ func buildFrom(rootPEM, bundlePEM []byte, pins []Pin, now time.Time) (*Verifier,
 			rootSHA = p.SHA256
 		}
 	}
-	v, admitted, err := newVerifier(rootPEM, bundlePEM, rootSHA, now)
+	v, admitted, outside, err := newVerifier(rootPEM, bundlePEM, rootSHA, now)
 	if err != nil {
+		if errors.Is(err, ErrNoAnchor) && outside != nil {
+			return nil, clockError(now, outside)
+		}
 		return nil, err
 	}
 	// Every table row must be the one certificate of its name in the files, with the pinned digest.
@@ -121,6 +126,10 @@ func buildFrom(rootPEM, bundlePEM []byte, pins []Pin, now time.Time) (*Verifier,
 	slices.Sort(wantAdmitted)
 	slices.Sort(admitted)
 	if !slices.Equal(wantAdmitted, admitted) {
+		if outside != nil {
+			// A pinned certificate that the clock puts outside its validity is the reason that the admitted set is not the table's.
+			return nil, clockError(now, outside)
+		}
 		return nil, ErrAdmission
 	}
 	return v, nil
@@ -140,22 +149,30 @@ func buildFrom(rootPEM, bundlePEM []byte, pins []Pin, now time.Time) (*Verifier,
 // cut short with no line end before the next block takes that block with it. A verifier built from a damaged or cut bundle has fewer
 // anchors, and so refuses more. Only Default checks the bundle against the pins and fails closed.
 func NewVerifierFromPEM(rootPEM, bundlePEM []byte, wantRootSHA256 string) (*Verifier, error) {
-	v, _, err := newVerifier(rootPEM, bundlePEM, wantRootSHA256, time.Now())
+	v, _, _, err := newVerifier(rootPEM, bundlePEM, wantRootSHA256, time.Now())
 	return v, err
 }
 
-// newVerifier admits at the time now, and also returns the SHA-256 of every admitted intermediate.
-func newVerifier(rootPEM, bundlePEM []byte, wantRootSHA256 string, now time.Time) (*Verifier, []string, error) {
+// clockError is ErrClock with the time of the clock and the validity of the certificate that the clock puts outside it.
+func clockError(now time.Time, c *x509.Certificate) error {
+	const layout = "2006-01-02 15:04:05"
+	return &classed{class: ErrClock, text: fmt.Sprintf("pivattest: the clock of this machine reads %s UTC, which is outside the validity of the pinned certificate %q (valid %s to %s UTC): set the clock; the embedded files are not at fault",
+		now.UTC().Format(layout), c.Subject.CommonName, c.NotBefore.UTC().Format(layout), c.NotAfter.UTC().Format(layout))}
+}
+
+// newVerifier admits at the time now, and also returns the SHA-256 of every admitted intermediate and, when a certificate that the
+// admission needed was refused because now is outside its validity, the first such certificate (nil otherwise).
+func newVerifier(rootPEM, bundlePEM []byte, wantRootSHA256 string, now time.Time) (*Verifier, []string, *x509.Certificate, error) {
 	roots, err := parseCerts(rootPEM)
 	if err != nil || len(roots) != 1 {
-		return nil, nil, ErrRootCount
+		return nil, nil, nil, ErrRootCount
 	}
 	if digest(roots[0]) != wantRootSHA256 {
-		return nil, nil, ErrRootPin
+		return nil, nil, nil, ErrRootPin
 	}
 	bundle, err := parseCerts(bundlePEM)
 	if err != nil {
-		return nil, nil, &classed{class: ErrParse, cause: err, text: "pivattest: a certificate of the bundle does not parse: " + err.Error()}
+		return nil, nil, nil, &classed{class: ErrParse, cause: err, text: "pivattest: a certificate of the bundle does not parse: " + err.Error()}
 	}
 	rootPool, interPool := x509.NewCertPool(), x509.NewCertPool()
 	rootPool.AddCert(roots[0])
@@ -165,24 +182,29 @@ func newVerifier(rootPEM, bundlePEM []byte, wantRootSHA256 string, now time.Time
 	anchors := x509.NewCertPool()
 	anchors.AddCert(roots[0])
 	var admitted []string
+	var outside *x509.Certificate
 	for _, c := range bundle {
 		if !strings.HasPrefix(c.Subject.CommonName, pivIntermediatePrefix) {
 			continue
 		}
 		if _, err := c.Verify(x509.VerifyOptions{Roots: rootPool, Intermediates: interPool, CurrentTime: now, KeyUsages: []x509.ExtKeyUsage{x509.ExtKeyUsageAny}}); err != nil {
-			continue // not signed through the pinned root: not trusted
+			var invalid x509.CertificateInvalidError
+			if errors.As(err, &invalid) && invalid.Reason == x509.Expired && outside == nil {
+				outside = invalid.Cert // the clock, not the chain, refuses it
+			}
+			continue // not signed through the pinned root, or not valid now: not trusted
 		}
 		anchors.AddCert(c)
 		admitted = append(admitted, digest(c))
 	}
 	if len(admitted) == 0 {
-		return nil, nil, ErrNoAnchor
+		return nil, nil, outside, ErrNoAnchor
 	}
 	set := make(map[string]bool, len(admitted))
 	for _, d := range admitted {
 		set[d] = true
 	}
-	return &Verifier{anchors: anchors, admitted: set}, admitted, nil
+	return &Verifier{anchors: anchors, admitted: set}, admitted, outside, nil
 }
 
 func parseCerts(b []byte) ([]*x509.Certificate, error) {
