@@ -309,7 +309,7 @@ func TestTheRootFileOfDefaultHoldsExactlyOneCertificate(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	junk := pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: []byte{1}})
+	junk := pem.EncodeToMemory(&pem.Block{Type: "EXAMPLE DATA", Bytes: []byte{1}})
 	tests := []struct {
 		name string
 		root []byte

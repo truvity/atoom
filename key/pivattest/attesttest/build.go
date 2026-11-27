@@ -329,6 +329,17 @@ func (b *builder) chainCases() {
 	b.add("signer-is-the-piv-intermediate", "a slot certificate signed by the PIV intermediate itself, with that as the signer", "good", b.slot(g, SlotOptions{SignedWith: g.pivKey, Issuer: g.PIV}), g.PIV.Raw)
 	other := b.pki(PKIOptions{})
 	b.add("signer-is-another-card", "the signer is another card's f9 under the same PIV intermediate name but another PKI", "good", b.slot(g, def), other.F9.Raw)
+
+	// an anchor given as the slot certificate: the standard library reads an anchor as a chain of one certificate, so the signer is not looked at
+	for _, a := range []struct {
+		name string
+		cert *x509.Certificate
+	}{{"piv-intermediate", g.PIV}, {"root", g.Root}} {
+		why := "an anchor given as the slot certificate verifies as a chain of one, whoever the signer is: "
+		b.add("slot-is-the-"+a.name+"-signer-unrelated", why+"a certificate of another PKI", "good", a.cert.Raw, other.F9.Raw)
+		b.add("slot-is-the-"+a.name+"-signer-f9", why+"the card's own f9 certificate", "good", a.cert.Raw, f9)
+		b.add("slot-is-the-"+a.name+"-signer-itself", why+"the same certificate again", "good", a.cert.Raw, a.cert.Raw)
+	}
 	b.add("signer-and-slot-swapped", "the arguments in the wrong order", "good", f9, b.slot(g, def))
 	b.add("signer-is-the-intermediate", "the signer is the PIV intermediate, but the slot certificate is signed by f9", "good", b.slot(g, def), g.PIV.Raw)
 
@@ -407,7 +418,7 @@ func (b *builder) constructionCases() {
 	b.construct("bundle-with-another-roots-intermediate-too", "the good one is admitted, the other is not", root, append(append([]byte{}, bundle...), other.BundlePEM()...), sum)
 	b.construct("trailing-garbage", "bytes after the last PEM block are ignored", root, append(append([]byte{}, bundle...), []byte("trailing text that is not PEM\n")...), sum)
 	b.construct("garbage-before", "text before the first PEM block is ignored", root, append([]byte("a note before the blocks\n"), bundle...), sum)
-	junk := pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: []byte{1, 2, 3}})
+	junk := pem.EncodeToMemory(&pem.Block{Type: "EXAMPLE DATA", Bytes: []byte{1, 2, 3}})
 	b.construct("a-block-that-is-not-a-certificate", "a PEM block of another type is skipped", root, append(append([]byte{}, junk...), bundle...), sum)
 	badCert := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: []byte{1, 2, 3}})
 	b.construct("a-certificate-that-does-not-parse", "a CERTIFICATE block that is not a certificate is an error", root, append(append([]byte{}, bundle...), badCert...), sum)

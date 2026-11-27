@@ -53,6 +53,9 @@ func wantedCases() []wanted {
 	refused("a wrong root", attesttest.ClassChain, "good-chain-against-the-other-verifier")
 	refused("a rogue chain with the same names", attesttest.ClassChain, "rogue-pki-same-names", "rogue-pki-rsa")
 	refused("a signer that does not chain", attesttest.ClassChain, "signer-is-another-card", "signer-is-the-intermediate")
+	for _, a := range []string{"piv-intermediate", "root"} {
+		ok("an anchor given as the slot certificate, with three signers", "slot-is-the-"+a+"-signer-unrelated", "slot-is-the-"+a+"-signer-f9", "slot-is-the-"+a+"-signer-itself")
+	}
 	refused("expired and not yet valid, in the slot certificate and in f9", attesttest.ClassChain, "slot-expired", "slot-not-yet-valid", "f9-expired", "f9-not-yet-valid")
 	refused("a SHA-1 signature", attesttest.ClassChain, "slot-signature-rsa-sha1", "f9-signature-sha1")
 	refused("a changed body or a changed signature", attesttest.ClassChain, "tamper-slot-signature", "tamper-slot-common-name", "tamper-slot-9a-to-9c", "tamper-f9-signature", "tamper-f9-common-name")
@@ -104,6 +107,7 @@ func TestTheCorpusHoldsTheKindsOfCaseAReaderExpects(t *testing.T) {
 		"each extension absent":                                                     4,
 		"the critical flag on a vendor extension":                                   4,
 		"expired and not yet valid, in the slot certificate and in f9":              4,
+		"an anchor given as the slot certificate, with three signers":               6,
 	} {
 		if counts[kind] != n {
 			t.Errorf("%s: %d cases, want %d", kind, counts[kind], n)
@@ -138,7 +142,7 @@ func TestTheCorpusHoldsTheKindsOfCaseAReaderExpects(t *testing.T) {
 	if n < 60 {
 		t.Errorf("%d common-name variants, want at least 60", n)
 	}
-	if len(c.Cases) < 218 || len(c.Constructions) < 23 {
+	if len(c.Cases) < 224 || len(c.Constructions) < 23 {
 		t.Errorf("the corpus shrank to %d cases and %d constructions", len(c.Cases), len(c.Constructions))
 	}
 }

@@ -171,14 +171,16 @@ func TestGeneratedOverTheAcceptedCasesOfTheCorpus(t *testing.T) {
 		}
 	}
 	// the cases that are accepted with a slot name and are still not Generated: no chain of three
-	for _, name := range []string{"f9-signed-by-root", "signer-is-the-piv-intermediate"} {
+	for _, name := range []string{"f9-signed-by-root", "signer-is-the-piv-intermediate",
+		"slot-is-the-piv-intermediate-signer-unrelated", "slot-is-the-piv-intermediate-signer-f9", "slot-is-the-piv-intermediate-signer-itself",
+		"slot-is-the-root-signer-unrelated", "slot-is-the-root-signer-f9", "slot-is-the-root-signer-itself"} {
 		if !notGenerated[name] {
 			t.Errorf("%s is Generated", name)
 		}
 	}
 	t.Logf("%d accepted cases: %d Generated, %d not (%d of them with no slot in the name)", accepted, generated, accepted-generated, noSlot)
-	if accepted != 140 || generated != 107 || noSlot != 31 {
-		t.Errorf("the counts changed: %d accepted, %d Generated, %d with no slot (want 140, 107, 31)", accepted, generated, noSlot)
+	if accepted != 146 || generated != 107 || noSlot != 37 {
+		t.Errorf("the counts changed: %d accepted, %d Generated, %d with no slot (want 146, 107, 37)", accepted, generated, noSlot)
 	}
 }
 

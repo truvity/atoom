@@ -126,6 +126,10 @@ func wantEvidence(slot, signer *x509.Certificate, g attesttest.Result, anchors, 
 	if !anchors[anchor] && bytes.Equal(slot.RawIssuer, signer.RawSubject) {
 		anchor = signer.Issuer.CommonName
 	}
+	// A slot certificate that is itself an anchor is a chain of one: it is its own anchor, whoever the signer is.
+	if anchors[slot.Subject.CommonName] {
+		anchor = slot.Subject.CommonName
+	}
 	// Generated: a slot was read from the name, the signer given issued the slot certificate (the same bytes), and a PIV intermediate that the
 	// verifier admitted issued the signer. That is a chain of exactly three; the slot certificate is not an anchor (it is named by a slot).
 	generated := g.Slot != 0 && bytes.Equal(slot.RawIssuer, signer.RawSubject) && pivs[signer.Issuer.CommonName] && !anchors[slot.Subject.CommonName]
