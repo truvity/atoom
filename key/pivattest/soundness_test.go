@@ -1,12 +1,15 @@
 package pivattest_test
 
 import (
+	"crypto/ecdh"
 	"crypto/ecdsa"
 	"crypto/ed25519"
 	"crypto/elliptic"
 	"crypto/rand"
+	"crypto/rsa"
 	"crypto/x509"
 	"errors"
+	"math/big"
 	"reflect"
 	"testing"
 
@@ -164,5 +167,75 @@ func TestFactsComeFromTheSignedBytes(t *testing.T) {
 	garbage := &x509.Certificate{Raw: []byte{1, 2, 3}}
 	if _, err := vq.Verify(fresh, garbage); !errors.Is(err, pivattest.ErrParse) {
 		t.Errorf("a signer whose Raw does not parse: %v", err)
+	}
+}
+
+// An incomplete key, on either side of AttestsKey, is false and never a panic.
+func TestAttestsKeyNeverPanicsOnAnIncompleteKey(t *testing.T) {
+	good, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	rk, _ := rsa.GenerateKey(rand.Reader, 2048)
+	edPub, _, _ := ed25519.GenerateKey(rand.Reader)
+	xk, _ := ecdh.X25519().GenerateKey(rand.Reader)
+	complete := []any{&good.PublicKey, &rk.PublicKey, edPub, xk.PublicKey()}
+	incomplete := map[string]any{
+		"nil interface":     nil,
+		"ecdsa zero":        &ecdsa.PublicKey{},
+		"ecdsa nil":         (*ecdsa.PublicKey)(nil),
+		"ecdsa curve only":  &ecdsa.PublicKey{Curve: elliptic.P256()},
+		"ecdsa no Y":        &ecdsa.PublicKey{Curve: elliptic.P256(), X: good.X}, //nolint:staticcheck // a half-filled key is the case
+		"ecdsa no curve":    &ecdsa.PublicKey{X: good.X, Y: good.Y},              //nolint:staticcheck // a half-filled key is the case
+		"rsa zero":          &rsa.PublicKey{},
+		"rsa nil":           (*rsa.PublicKey)(nil),
+		"rsa exponent only": &rsa.PublicKey{E: 65537},
+		"rsa zero modulus":  &rsa.PublicKey{N: new(big.Int), E: 65537},
+		"ed25519 nil":       ed25519.PublicKey(nil),
+		"ed25519 short":     edPub[:16],
+		"ed25519 long":      append(append(ed25519.PublicKey{}, edPub...), 0),
+		"x25519 zero":       &ecdh.PublicKey{},
+		"x25519 nil":        (*ecdh.PublicKey)(nil),
+	}
+	for name, bad := range incomplete {
+		for _, key := range complete {
+			// the incomplete key as the caller's key, against a good evidence
+			if (pivattest.Evidence{Generated: true, PublicKey: key}).AttestsKey(bad) {
+				t.Errorf("%s as the caller's key: true", name)
+			}
+			// the incomplete key inside a hand-filled evidence
+			if (pivattest.Evidence{Generated: true, PublicKey: bad}).AttestsKey(key) {
+				t.Errorf("%s inside the evidence: true", name)
+			}
+		}
+		if (pivattest.Evidence{Generated: true, PublicKey: bad}).AttestsKey(bad) {
+			t.Errorf("%s on both sides: true", name)
+		}
+	}
+	// complete keys of every form still match themselves
+	for _, key := range complete {
+		if !(pivattest.Evidence{Generated: true, PublicKey: key}).AttestsKey(key) {
+			t.Errorf("%T does not attest itself", key)
+		}
+	}
+}
+
+// The bytes a caller gives are copied: changing them during or after the call cannot change what was read.
+func TestVerifyDERCopiesItsInputs(t *testing.T) {
+	p, v := newPKI(t, attesttest.PKIOptions{})
+	slot, err := p.SlotDER(attesttest.SlotOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	signer := append([]byte{}, p.F9.Raw...)
+	ev, err := v.VerifyDER(slot, signer)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := range slot {
+		slot[i] ^= 0xff
+	}
+	for i := range signer {
+		signer[i] ^= 0xff
+	}
+	if ev.PublicKey == nil || !ev.Generated {
+		t.Errorf("the evidence changed with the caller's bytes: %+v", ev)
 	}
 }
