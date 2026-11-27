@@ -14,12 +14,13 @@ import (
 	"connectrpc.com/connect"
 
 	keyv1alpha1 "github.com/truvity/atoom/key/gen/atoom/key/v1alpha1"
+	"github.com/truvity/atoom/key/pivattest"
 	"github.com/truvity/atoom/key/yubikeypiv/internal/card/cardtest"
 )
 
 // verifies: REQ-KEYS-274
-// A key that Generate returns is accepted only when it is the key the slot's attestation certifies, of the same type and the
-// same value: an EC key for an RSA slot, an RSA key for an EC slot, and another key of the right type are refused. A
+// A key that Generate returns is accepted only when it is the key the slot's attestation certifies (a generated key, by the library's
+// AttestsKey), of the same type and the same value: an EC key for an RSA slot, an RSA key for an EC slot, and another key of the right type are refused. A
 // samePublic that said yes to any of them would let a card hand the driver a key it did not attest.
 func TestSamePublicAcceptsOnlyTheAttestedKey(t *testing.T) {
 	ec1, err := ecdsa.GenerateKey(elliptic.P384(), rand.Reader)
@@ -38,23 +39,25 @@ func TestSamePublicAcceptsOnlyTheAttestedKey(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	ecSlot := &slotKey{pub: &ec1.PublicKey}
-	rsaSlot := &slotKey{rsaPub: &rsa1.PublicKey}
+	ecSlot := &slotKey{attested: pivattest.Evidence{Generated: true, PublicKey: &ec1.PublicKey}}
+	rsaSlot := &slotKey{attested: pivattest.Evidence{Generated: true, PublicKey: &rsa1.PublicKey}}
+	notGenerated := &slotKey{attested: pivattest.Evidence{PublicKey: &ec1.PublicKey}}
 	for name, c := range map[string]struct {
 		got  any
 		slot *slotKey
 		want bool
 	}{
-		"the attested EC key":          {&ec1.PublicKey, ecSlot, true},
-		"the attested RSA key":         {&rsa1.PublicKey, rsaSlot, true},
-		"another EC key":               {&ec2.PublicKey, ecSlot, false},
-		"another RSA key":              {&rsa2.PublicKey, rsaSlot, false},
-		"an EC key for the RSA slot":   {&ec1.PublicKey, rsaSlot, false},
-		"an RSA key for the EC slot":   {&rsa1.PublicKey, ecSlot, false},
-		"something that is not a key":  {"key", ecSlot, false},
-		"nothing":                      {nil, rsaSlot, false},
-		"the EC key of an empty slot":  {&ec1.PublicKey, &slotKey{}, false},
-		"the RSA key of an empty slot": {&rsa1.PublicKey, &slotKey{}, false},
+		"the attested EC key":         {&ec1.PublicKey, ecSlot, true},
+		"the attested RSA key":        {&rsa1.PublicKey, rsaSlot, true},
+		"another EC key":              {&ec2.PublicKey, ecSlot, false},
+		"another RSA key":             {&rsa2.PublicKey, rsaSlot, false},
+		"an EC key for the RSA slot":  {&ec1.PublicKey, rsaSlot, false},
+		"an RSA key for the EC slot":  {&rsa1.PublicKey, ecSlot, false},
+		"something that is not a key": {"key", ecSlot, false},
+		"nothing":                     {nil, rsaSlot, false},
+		"the key of an attestation that is not of a generated key": {&ec1.PublicKey, notGenerated, false},
+		"the EC key of an empty slot":                              {&ec1.PublicKey, &slotKey{}, false},
+		"the RSA key of an empty slot":                             {&rsa1.PublicKey, &slotKey{}, false},
 	} {
 		if got := samePublic(c.got, c.slot); got != c.want {
 			t.Errorf("%s: samePublic = %v, want %v", name, got, c.want)

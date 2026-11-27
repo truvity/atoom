@@ -26,7 +26,7 @@ import (
 var qpEvery = []error{
 	pivattest.ErrNil, pivattest.ErrNoRaw, pivattest.ErrZeroTime, pivattest.ErrParse, pivattest.ErrTooLarge, pivattest.ErrChain,
 	pivattest.ErrFirmwareExt, pivattest.ErrSerialExt, pivattest.ErrPolicyExt, pivattest.ErrFormFactorExt,
-	pivattest.ErrRootCount, pivattest.ErrRootPin, pivattest.ErrNoAnchor, pivattest.ErrPinTable, pivattest.ErrAdmission,
+	pivattest.ErrRootCount, pivattest.ErrRootPin, pivattest.ErrNoAnchor, pivattest.ErrPinTable, pivattest.ErrAdmission, pivattest.ErrClock,
 }
 
 // qpOnly says that err is of the class want and of no other class of the library.
@@ -116,19 +116,19 @@ func TestQPAGoodChainGivesTheValueTheCertificateStates(t *testing.T) {
 		slot *x509.Certificate
 		want Attestation
 	}{
-		{"slot 9a, firmware 5.8.0, serial 1234567, PIN once, touch never", named("YubiKey PIV Attestation 9a", all([3]byte{5, 8, 0}, 1234567, 2, 1, 4)...), Attestation{Version{5, 8, 0}, 1234567, 0x9a, PINOnce, TouchNever}},
-		{"slot 9c, PIN never, touch always", named("YubiKey PIV Attestation 9c", all([3]byte{5, 7, 4}, 1, 1, 2, 4)...), Attestation{Version{5, 7, 4}, 1, 0x9c, PINNever, TouchAlways}},
-		{"slot 9d, PIN always (read as none), touch cached", named("YubiKey PIV Attestation 9d", all([3]byte{5, 7, 0}, 7, 3, 3, 4)...), Attestation{Version{5, 7, 0}, 7, 0x9d, 0, TouchCached}},
-		{"slot 9e, a biometric PIN policy (read as none)", named("YubiKey PIV Attestation 9e", all([3]byte{5, 8, 0}, 7, 4, 1, 4)...), Attestation{Version{5, 8, 0}, 7, 0x9e, 0, TouchNever}},
-		{"slot 82, the other biometric PIN policy (read as none)", named("YubiKey PIV Attestation 82", all([3]byte{5, 8, 0}, 7, 5, 1, 4)...), Attestation{Version{5, 8, 0}, 7, 0x82, 0, TouchNever}},
-		{"slot 95, the largest serial, the largest version", named("YubiKey PIV Attestation 95", all([3]byte{255, 254, 253}, 1<<32-1, 1, 1, 0xff)...), Attestation{Version{255, 254, 253}, 1<<32 - 1, 0x95, PINNever, TouchNever}},
-		{"a serial of 2^32+5 is cut to 5", named("YubiKey PIV Attestation 9a", all([3]byte{5, 8, 0}, 1<<32+5, 2, 1, 4)...), Attestation{Version{5, 8, 0}, 5, 0x9a, PINOnce, TouchNever}},
-		{"serial 0", named("YubiKey PIV Attestation 9a", all([3]byte{5, 8, 0}, 0, 2, 1, 4)...), Attestation{Version{5, 8, 0}, 0, 0x9a, PINOnce, TouchNever}},
-		{"the form factor is not kept", named("YubiKey PIV Attestation 9a", all([3]byte{5, 8, 0}, 9, 2, 1, 0x85)...), Attestation{Version{5, 8, 0}, 9, 0x9a, PINOnce, TouchNever}},
-		{"a name that gives no slot: slot 0", named("YubiKey PIV Attestation f9", all([3]byte{5, 8, 0}, 9, 2, 1, 4)...), Attestation{Version{5, 8, 0}, 9, 0, PINOnce, TouchNever}},
-		{"no policy extension: the zero policies", named("YubiKey PIV Attestation 9a", attesttest.Firmware(5, 8, 0), attesttest.Serial(9)), Attestation{Version{5, 8, 0}, 9, 0x9a, 0, 0}},
-		{"no firmware extension: 0.0.0", named("YubiKey PIV Attestation 9a", attesttest.Serial(9), attesttest.Policy(2, 1)), Attestation{Version{}, 9, 0x9a, PINOnce, TouchNever}},
-		{"no serial extension: serial 0", named("YubiKey PIV Attestation 9a", attesttest.Firmware(5, 8, 0), attesttest.Policy(2, 1)), Attestation{Version{5, 8, 0}, 0, 0x9a, PINOnce, TouchNever}},
+		{"slot 9a, firmware 5.8.0, serial 1234567, PIN once, touch never", named("YubiKey PIV Attestation 9a", all([3]byte{5, 8, 0}, 1234567, 2, 1, 4)...), Attestation{Version{5, 8, 0}, 1234567, 0x9a, PINOnce, TouchNever, pivattest.Evidence{}}},
+		{"slot 9c, PIN never, touch always", named("YubiKey PIV Attestation 9c", all([3]byte{5, 7, 4}, 1, 1, 2, 4)...), Attestation{Version{5, 7, 4}, 1, 0x9c, PINNever, TouchAlways, pivattest.Evidence{}}},
+		{"slot 9d, PIN always (read as none), touch cached", named("YubiKey PIV Attestation 9d", all([3]byte{5, 7, 0}, 7, 3, 3, 4)...), Attestation{Version{5, 7, 0}, 7, 0x9d, 0, TouchCached, pivattest.Evidence{}}},
+		{"slot 9e, a biometric PIN policy (read as none)", named("YubiKey PIV Attestation 9e", all([3]byte{5, 8, 0}, 7, 4, 1, 4)...), Attestation{Version{5, 8, 0}, 7, 0x9e, 0, TouchNever, pivattest.Evidence{}}},
+		{"slot 82, the other biometric PIN policy (read as none)", named("YubiKey PIV Attestation 82", all([3]byte{5, 8, 0}, 7, 5, 1, 4)...), Attestation{Version{5, 8, 0}, 7, 0x82, 0, TouchNever, pivattest.Evidence{}}},
+		{"slot 95, the largest serial, the largest version", named("YubiKey PIV Attestation 95", all([3]byte{255, 254, 253}, 1<<32-1, 1, 1, 0xff)...), Attestation{Version{255, 254, 253}, 1<<32 - 1, 0x95, PINNever, TouchNever, pivattest.Evidence{}}},
+		{"a serial of 2^32+5 is cut to 5", named("YubiKey PIV Attestation 9a", all([3]byte{5, 8, 0}, 1<<32+5, 2, 1, 4)...), Attestation{Version{5, 8, 0}, 5, 0x9a, PINOnce, TouchNever, pivattest.Evidence{}}},
+		{"serial 0", named("YubiKey PIV Attestation 9a", all([3]byte{5, 8, 0}, 0, 2, 1, 4)...), Attestation{Version{5, 8, 0}, 0, 0x9a, PINOnce, TouchNever, pivattest.Evidence{}}},
+		{"the form factor is not kept", named("YubiKey PIV Attestation 9a", all([3]byte{5, 8, 0}, 9, 2, 1, 0x85)...), Attestation{Version{5, 8, 0}, 9, 0x9a, PINOnce, TouchNever, pivattest.Evidence{}}},
+		{"a name that gives no slot: slot 0", named("YubiKey PIV Attestation f9", all([3]byte{5, 8, 0}, 9, 2, 1, 4)...), Attestation{Version{5, 8, 0}, 9, 0, PINOnce, TouchNever, pivattest.Evidence{}}},
+		{"no policy extension: the zero policies", named("YubiKey PIV Attestation 9a", attesttest.Firmware(5, 8, 0), attesttest.Serial(9)), Attestation{Version{5, 8, 0}, 9, 0x9a, 0, 0, pivattest.Evidence{}}},
+		{"no firmware extension: 0.0.0", named("YubiKey PIV Attestation 9a", attesttest.Serial(9), attesttest.Policy(2, 1)), Attestation{Version{}, 9, 0x9a, PINOnce, TouchNever, pivattest.Evidence{}}},
+		{"no serial extension: serial 0", named("YubiKey PIV Attestation 9a", attesttest.Firmware(5, 8, 0), attesttest.Policy(2, 1)), Attestation{Version{5, 8, 0}, 0, 0x9a, PINOnce, TouchNever, pivattest.Evidence{}}},
 		{"no extension at all", named("YubiKey PIV Attestation 9c"), Attestation{Slot: 0x9c}},
 	}
 	for _, tt := range tests {
@@ -137,7 +137,7 @@ func TestQPAGoodChainGivesTheValueTheCertificateStates(t *testing.T) {
 			t.Errorf("%s: %v", tt.name, err)
 			continue
 		}
-		if got != tt.want {
+		if got.Reported() != tt.want {
 			t.Errorf("%s: read %+v, want %+v", tt.name, got, tt.want)
 		}
 	}
@@ -196,8 +196,8 @@ func TestQPTheArgumentsAreNotSwapped(t *testing.T) {
 	p := testPKI(t, "Yubico PIV Attestation B2 1")
 	verify := verifierOf(t, p)
 	slot := slotOf(t, p, nil)
-	want := Attestation{Version{5, 8, 0}, 1234567, 0x9a, PINOnce, TouchNever}
-	if got, err := verify(p.F9, slot); err != nil || got != want {
+	want := Attestation{Version{5, 8, 0}, 1234567, 0x9a, PINOnce, TouchNever, pivattest.Evidence{}}
+	if got, err := verify(p.F9, slot); err != nil || got.Reported() != want {
 		t.Fatalf("the right order: %+v, %v, want %+v", got, err, want)
 	}
 	// the other order: the card's certificate read as the slot certificate states no extension and names no slot, so that it is not the value
@@ -257,7 +257,7 @@ func TestQPACertificateOfExactlyTheLimitIsTakenAndOneByteMoreIsRefused(t *testin
 	const limit = pivattest.MaxCertificateSize
 	p := testPKI(t, "Yubico PIV Attestation B2 1")
 	verify := verifierOf(t, p)
-	want := Attestation{Version{5, 8, 0}, 1234567, 0x9a, PINOnce, TouchNever}
+	want := Attestation{Version{5, 8, 0}, 1234567, 0x9a, PINOnce, TouchNever, pivattest.Evidence{}}
 
 	slotAt, slotOver := qpBigSlot(t, p, limit), qpBigSlot(t, p, limit+1)
 	attAt, slotUnderAtt := qpBigF9(t, p, limit)
@@ -274,7 +274,7 @@ func TestQPACertificateOfExactlyTheLimitIsTakenAndOneByteMoreIsRefused(t *testin
 		{"an attestation certificate of the limit", attAt, slotUnderAtt},
 	}
 	for _, tt := range taken {
-		if got, err := verify(tt.att, tt.slot); err != nil || got != want {
+		if got, err := verify(tt.att, tt.slot); err != nil || got.Reported() != want {
 			t.Errorf("%s: %+v, %v, want %+v", tt.name, got, err, want)
 		}
 	}
@@ -345,11 +345,11 @@ func TestQPTheErrorOfTheBuildOfThePinnedVerifierIsTheAnswer(t *testing.T) {
 			t.Fatalf("the fake clock is in the year %d", y)
 		}
 		// no certificate at all: the answer would be ErrNil if the build were not asked first, or if its error were dropped
-		if _, err := verifyPinned(nil, nil); !qpOnly(err, pivattest.ErrNoAnchor) {
-			t.Fatalf("in the year 2000: %v, want the error of the build (no PIV attestation intermediate chains to the root yet)", err)
+		if _, err := verifyPinned(nil, nil); !qpOnly(err, pivattest.ErrClock) {
+			t.Fatalf("in the year 2000: %v, want the error of the build (the clock is before the pinned certificates)", err)
 		}
 		// another call builds again
-		if _, err := verifyPinned(nil, nil); !qpOnly(err, pivattest.ErrNoAnchor) {
+		if _, err := verifyPinned(nil, nil); !qpOnly(err, pivattest.ErrClock) {
 			t.Fatalf("in the year 2000, a second call: %v", err)
 		}
 		time.Sleep(30 * 365 * 24 * time.Hour) // the fake clock: the year 2029

@@ -47,9 +47,11 @@ func verifyWith(v *pivattest.Verifier, attCert, slotCert *x509.Certificate) (Att
 // fromEvidence is what the driver keeps of the library's reading of a slot certificate. It keeps, as they were, the quirks of the reading the
 // driver made with piv-go before it used the library:
 //
-//   - The form factor, the algorithm, the key, the anchor and Generated are dropped. A check that Generated is true is not made here.
-//   - A fact whose extension is absent is the zero value, with no error: no firmware is the version 0.0.0, no serial is 0, and a name that gives
-//     no slot is slot 0.
+//   - The reported values leave out the form factor, the algorithm, the key, the anchor and Generated. The whole of the evidence is kept in
+//     Attestation.Evidence, and the driver holds what the library tells a caller to hold (Generated, the facts stated, the key of the signed
+//     bytes) where it uses the answer: this function checks nothing.
+//   - A fact whose extension is absent is the zero value in the reported values, with no error: no firmware is the version 0.0.0, no serial is 0,
+//     and a name that gives no slot is slot 0. The evidence says which facts were stated (Attestation.MissingFact).
 //   - Only the PIN policies "never" and "once" are reported. "Always", the two biometric ones and an absent policy are all the zero PINPolicy,
 //     which no plan names, so a caller that compares it with the plan refuses them all (and pinPolicyName says "always" of it).
 //   - The touch policies "never", "always" and "cached" are reported; an absent policy is the zero TouchPolicy.
@@ -58,6 +60,8 @@ func fromEvidence(e pivattest.Evidence) Attestation {
 		Version: Version{e.Firmware.Major, e.Firmware.Minor, e.Firmware.Patch},
 		Serial:  e.Serial,
 		Slot:    Slot(e.Slot),
+
+		Evidence: e,
 	}
 	switch e.PIN {
 	case pivattest.PINNever:
