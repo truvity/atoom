@@ -327,6 +327,9 @@ func slotFromName(cn string) (byte, bool) {
 	if err != nil {
 		return 0, false
 	}
+	if n > 0xff {
+		return 0, false // No slot has a number above one byte. The cases below say the same; this line says it to a reader of the conversion.
+	}
 	switch {
 	case n == 0x9a, n == 0x9c, n == 0x9d, n == 0x9e, n >= 0x82 && n <= 0x95:
 		return byte(n), true
