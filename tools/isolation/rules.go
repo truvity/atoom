@@ -49,7 +49,7 @@ type lib struct {
 	Replaces []string // the module paths that a replace directive redirects (Go)
 }
 
-// shared names libraries that several drivers of one port may use (key/slotplan, key/pinrelease, key/usbccid): they are libraries, not drivers.
+// shared names libraries that several drivers of one port may use (key/slotplan, key/pinrelease, key/usbccid, key/pivattest): they are libraries, not drivers.
 type shared map[string]bool
 
 // isTool reports whether a directory holds the repository's own tooling, which is not a library and is neither released nor checked
