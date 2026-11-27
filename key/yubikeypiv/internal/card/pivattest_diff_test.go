@@ -306,7 +306,7 @@ func sameDriver(old, nw driverAnswer) string {
 		return fmt.Sprintf("the driver's paths differ in acceptance: old %+v, new %+v", old, nw)
 	}
 	if old.class == "" {
-		if old.a != nw.a {
+		if old.a != nw.a.Reported() {
 			return fmt.Sprintf("the driver's paths read other values: old %+v, new %+v", old.a, nw.a)
 		}
 		return ""

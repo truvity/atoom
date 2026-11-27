@@ -23,6 +23,7 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
+	"slices"
 	"sync"
 	"time"
 
@@ -61,6 +62,9 @@ type Card struct {
 	RogueRoot bool
 	// AttestedSerial is the serial the attestation certificates state; the SerialNo when zero.
 	AttestedSerial uint32
+	// AttestOmits names what the slot certificates leave out: "firmware", "serial" and "policy" (the extensions of that name) and "slot" (the
+	// common name names no slot). A real card states all four; a test leaves one out to show that the driver refuses it.
+	AttestOmits []string
 	// NoAttestationCert makes AttestationCertificate fail, as a card without one does.
 	NoAttestationCert bool
 	// LoginAttempts counts the PINs the card was sent, right or wrong.
@@ -102,6 +106,7 @@ type Card struct {
 	closed   bool
 	gone     bool
 	rootHash string
+	verify   func(attCert, slotCert *x509.Certificate) (card.Attestation, error)
 }
 
 // New returns a card in factory state with firmware 5.8.0, the factory PIN and management key.
@@ -428,14 +433,25 @@ func (c *Card) Attest(s card.Slot) (*x509.Certificate, error) {
 	if err != nil {
 		return nil, err
 	}
+	omits := func(what string) bool { return slices.Contains(c.AttestOmits, what) }
+	cn := "YubiKey PIV Attestation " + s.String()
+	if omits("slot") {
+		cn = "YubiKey PIV Attestation none"
+	}
+	var ext []pkix.Extension
+	if !omits("firmware") {
+		ext = append(ext, pkix.Extension{Id: oidFirmware, Value: []byte{byte(fw.Major), byte(fw.Minor), byte(fw.Patch)}}) //nolint:gosec // small version numbers
+	}
+	if !omits("serial") {
+		ext = append(ext, pkix.Extension{Id: oidSerial, Value: serial})
+	}
+	if !omits("policy") {
+		ext = append(ext, pkix.Extension{Id: oidKeyPolicy, Value: policyBytes(k.shown)})
+	}
 	tmpl := &x509.Certificate{
-		SerialNumber: big.NewInt(4), Subject: pkix.Name{CommonName: "YubiKey PIV Attestation " + s.String()},
+		SerialNumber: big.NewInt(4), Subject: pkix.Name{CommonName: cn},
 		NotBefore: time.Now().Add(-time.Hour), NotAfter: time.Now().Add(24 * time.Hour),
-		ExtraExtensions: []pkix.Extension{
-			{Id: oidFirmware, Value: []byte{byte(fw.Major), byte(fw.Minor), byte(fw.Patch)}}, //nolint:gosec // small version numbers,
-			{Id: oidSerial, Value: serial},
-			{Id: oidKeyPolicy, Value: policyBytes(k.shown)},
-		},
+		ExtraExtensions: ext,
 	}
 	der, err := x509.CreateCertificate(rand.Reader, tmpl, c.attCert, k.public(), c.attKey)
 	if err != nil {
@@ -444,52 +460,34 @@ func (c *Card) Attest(s card.Slot) (*x509.Certificate, error) {
 	return x509.ParseCertificate(der)
 }
 
-// VerifyAttestation implements card.Card against the fake's own root.
+// VerifyAttestation implements card.Card against the fake's own root, with the real reading of an attestation (card.NewAttestationVerifier:
+// the library key/pivattest over this card's TEST ONLY root and PIV-named intermediate), so that the answer carries the evidence the driver
+// holds: Generated, the facts stated, the key of the signed bytes.
 func (c *Card) VerifyAttestation(attCert, slotCert *x509.Certificate) (card.Attestation, error) {
 	c.mu.Lock()
-	defer c.mu.Unlock()
-	roots := x509.NewCertPool()
-	roots.AddCert(c.root)
-	inter := x509.NewCertPool()
-	inter.AddCert(attCert)
-	inter.AddCert(c.inter)
-	if _, err := slotCert.Verify(x509.VerifyOptions{Roots: roots, Intermediates: inter, KeyUsages: []x509.ExtKeyUsage{x509.ExtKeyUsageAny}}); err != nil {
-		return card.Attestation{}, err
-	}
-	var a card.Attestation
-	for _, e := range slotCert.Extensions {
-		switch {
-		case e.Id.Equal(oidFirmware) && len(e.Value) == 3:
-			a.Version = card.Version{Major: int(e.Value[0]), Minor: int(e.Value[1]), Patch: int(e.Value[2])}
-		case e.Id.Equal(oidSerial):
-			var n int64
-			if _, err := asn1.Unmarshal(e.Value, &n); err != nil {
-				return card.Attestation{}, err
-			}
-			a.Serial = uint32(n) //nolint:gosec // a serial number fits
-		case e.Id.Equal(oidKeyPolicy) && len(e.Value) == 2:
-			switch e.Value[0] {
-			case 0x01:
-				a.PIN = card.PINNever
-			case 0x02:
-				a.PIN = card.PINOnce
-			}
-			switch e.Value[1] {
-			case 0x01:
-				a.Touch = card.TouchNever
-			case 0x02:
-				a.Touch = card.TouchAlways
-			case 0x03:
-				a.Touch = card.TouchCached
-			}
+	if c.verify == nil {
+		if err := c.init(); err != nil {
+			c.mu.Unlock()
+			return card.Attestation{}, err
 		}
+		root, bundle, sum := pemOf(c.root), pemOf(c.inter), c.rootHash
+		v, err := card.NewAttestationVerifier(root, bundle, sum)
+		if err != nil {
+			c.mu.Unlock()
+			return card.Attestation{}, err
+		}
+		c.verify = v
 	}
-	var slot byte
-	if _, err := fmt.Sscanf(slotCert.Subject.CommonName, "YubiKey PIV Attestation %02x", &slot); err != nil {
-		return card.Attestation{}, err
+	verify := c.verify
+	c.mu.Unlock()
+	return verify(attCert, slotCert)
+}
+
+func pemOf(cs ...*x509.Certificate) (b []byte) {
+	for _, x := range cs {
+		b = append(b, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: x.Raw})...)
 	}
-	a.Slot = card.Slot(slot)
-	return a, nil
+	return b
 }
 
 // Generate implements card.Card. It refuses a slot that holds a key: the real card would replace it, and the

@@ -74,8 +74,9 @@ func TestQPTheOracleIsTheOldCode(t *testing.T) {
 	if PINNever != 1 || PINOnce != 2 || TouchNever != 1 || TouchAlways != 2 || TouchCached != 3 {
 		t.Fatalf("the values of the driver's policies changed: %d %d %d %d %d", PINNever, PINOnce, TouchNever, TouchAlways, TouchCached)
 	}
-	// the type of the answer has the five facts the old code filled, and no other: a new field is a change of behaviour to be decided here
-	var want = []string{"Version", "Serial", "Slot", "PIN", "Touch"}
+	// the type of the answer has the five facts the old code filled, and the evidence that the strict checks of the driver hold (Generated, the
+	// facts stated, the key of the signed bytes): another new field is a change of behaviour to be decided here. The five are what is reported.
+	var want = []string{"Version", "Serial", "Slot", "PIN", "Touch", "Evidence"}
 	rt := reflect.TypeOf(Attestation{})
 	if rt.NumField() != len(want) {
 		t.Fatalf("Attestation has %d fields, the oracle knows %d", rt.NumField(), len(want))
@@ -85,7 +86,7 @@ func TestQPTheOracleIsTheOldCode(t *testing.T) {
 			t.Errorf("field %d is %s, the oracle knows %s", i, rt.Field(i).Name, n)
 		}
 	}
-	if got := qpOldGave(qpOldRead{Major: 5, Minor: 7, Patch: 4, Serial: 9, SlotKey: 0x9c, Formfactor: 4, PINPolicy: 2, TouchPolicy: 3}); got != (Attestation{Version{5, 7, 4}, 9, 0x9c, PINOnce, TouchCached}) {
+	if got := qpOldGave(qpOldRead{Major: 5, Minor: 7, Patch: 4, Serial: 9, SlotKey: 0x9c, Formfactor: 4, PINPolicy: 2, TouchPolicy: 3}); got != (Attestation{Version{5, 7, 4}, 9, 0x9c, PINOnce, TouchCached, pivattest.Evidence{}}) {
 		t.Errorf("the oracle gives %+v", got)
 	}
 	for pin, want := range map[int]PINPolicy{-1: 0, 0: 0, 1: PINNever, 2: PINOnce, 3: 0, 4: 0, 5: 0, 6: 0, 255: 0} {
@@ -189,7 +190,7 @@ func TestQPTheAdapterGivesWhatTheOldCodeGaveForEveryCombination(t *testing.T) {
 								hasSerial: sn.has, serial: sn.n, hasForm: ff.has, form: ff.b, hasPolicy: p.has, pin: p.pin, touch: p.touch, generated: gen,
 							}
 							n++
-							if got, want := fromEvidence(c.evidence()), qpOldGave(c.old()); got != want {
+							if got, want := fromEvidence(c.evidence()).Reported(), qpOldGave(c.old()); got != want {
 								t.Fatalf("%+v: the driver reads %+v, the old code gave %+v", c, got, want)
 							}
 						}
@@ -232,7 +233,7 @@ func TestQPTheMappingOfEachPolicyIsTheOldOne(t *testing.T) {
 		Slot: 0x82, HasSlot: true, Firmware: pivattest.Version{Major: 1, Minor: 2, Patch: 3}, HasFirmware: true, Serial: 4, HasSerial: true,
 		FormFactor: 0x85, HasFormFactor: true, PIN: pivattest.PINOnce, Touch: pivattest.TouchCached, HasPolicy: true, Generated: true,
 	})
-	if want := (Attestation{Version{1, 2, 3}, 4, 0x82, PINOnce, TouchCached}); got != want {
+	if want := (Attestation{Version{1, 2, 3}, 4, 0x82, PINOnce, TouchCached, pivattest.Evidence{}}); got.Reported() != want {
 		t.Errorf("read %+v, want %+v", got, want)
 	}
 }
@@ -330,7 +331,7 @@ func TestQPEveryCaseOfTheCorpusGivesTheDriverTheValueOfTheOracle(t *testing.T) {
 				Major: w.Firmware[0], Minor: w.Firmware[1], Patch: w.Firmware[2], Serial: w.Serial, SlotKey: uint32(w.Slot), Formfactor: int(w.FormFactor),
 				PINPolicy: w.PIN, TouchPolicy: w.Touch,
 			})
-			if got != want {
+			if got.Reported() != want {
 				t.Errorf("the driver reads %+v, the oracle makes %+v of the recorded answer %+v", got, want, w)
 			}
 			seenPIN[got.PIN], seenTouch[got.Touch] = true, true
@@ -390,7 +391,7 @@ func TestQPTheDriversEntryAnswersTheCorpusAsTheAdapterDoes(t *testing.T) {
 			}
 			continue
 		}
-		if got != want {
+		if got.Reported() != want.Reported() {
 			t.Errorf("%s: the entry reads %+v, the adapter %+v", cs.Name, got, want)
 		}
 	}

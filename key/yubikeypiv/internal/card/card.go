@@ -14,6 +14,8 @@ import (
 	"crypto/x509"
 	"errors"
 	"fmt"
+
+	"github.com/truvity/atoom/key/pivattest"
 )
 
 // Slot is the key reference of a PIV slot: 0x9a, 0x9c, 0x9d or a retired slot 0x82 to 0x95 (NIST SP 800-73-4).
@@ -75,13 +77,42 @@ func (v Version) AtLeast(a, b, c int) bool {
 func (v Version) String() string { return fmt.Sprintf("%d.%d.%d", v.Major, v.Minor, v.Patch) }
 
 // Attestation is what a verified slot certificate says: the firmware and serial of the card that made it, the
-// policies of the key and its slot.
+// policies of the key and its slot (the first five fields, as the driver has always reported them), and the library's whole
+// reading of the certificate, kept so that the driver can hold what the library tells a caller to hold: Evidence.Generated, the
+// flags that say which facts the certificate states, and the key as it is in the signed bytes.
 type Attestation struct {
 	Version Version
 	Serial  uint32
 	Slot    Slot
 	PIN     PINPolicy
 	Touch   TouchPolicy
+
+	// Evidence is the library's answer for the certificate. A value that did not come from the library (a fake card's) says what it
+	// states in the same flags.
+	Evidence pivattest.Evidence
+}
+
+// Reported is the attestation without the evidence: the five values the driver reports.
+func (a Attestation) Reported() Attestation {
+	a.Evidence = pivattest.Evidence{}
+	return a
+}
+
+// MissingFact names the first of the firmware, the serial, the slot and the PIN and touch policy that the certificate does not
+// state ("firmware", "serial", "slot", "policy"), or "" when it states all of them. An absent extension reads as zero in the
+// fields above, so a caller that compares those values must first ask this.
+func (a Attestation) MissingFact() string {
+	switch e := a.Evidence; {
+	case !e.HasFirmware:
+		return "firmware"
+	case !e.HasSerial:
+		return "serial"
+	case !e.HasSlot:
+		return "slot"
+	case !e.HasPolicy:
+		return "policy"
+	}
+	return ""
 }
 
 // The errors of a card.

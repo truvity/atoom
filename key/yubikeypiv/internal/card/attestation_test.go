@@ -99,7 +99,7 @@ func TestFromEvidenceKeepsTheQuirksOfTheReading(t *testing.T) {
 		},
 	}
 	for _, tt := range tests {
-		if got := fromEvidence(tt.in); got != tt.want {
+		if got := fromEvidence(tt.in); got.Reported() != tt.want || got.Evidence != tt.in {
 			t.Errorf("%s: read %+v, want %+v", tt.name, got, tt.want)
 		}
 	}
@@ -129,7 +129,7 @@ func TestTheQuirksHoldThroughTheLibrary(t *testing.T) {
 		}
 	}
 	a, err := verify(p.F9, slotOf(t, p, []pkix.Extension{}))
-	if err != nil || a != (Attestation{Slot: 0x9a}) {
+	if err != nil || a.Reported() != (Attestation{Slot: 0x9a}) {
 		t.Errorf("no extension at all: %+v, %v (the slot is read from the name, 9a)", a, err)
 	}
 }
