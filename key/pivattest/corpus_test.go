@@ -143,6 +143,8 @@ func TestCorpusAnchorAndGenerated(t *testing.T) {
 		}
 		wantAnchor, wantGen := "Yubico PIV Attestation TEST ONLY 1", ev.HasSlot
 		switch cs.Name {
+		case "slot-is-the-root-signer-unrelated", "slot-is-the-root-signer-f9", "slot-is-the-root-signer-itself":
+			wantAnchor, wantGen = "TEST ONLY Yubico Attestation Root 1", false // an anchor as the slot certificate: a chain of one
 		case "f9-signed-by-root":
 			wantAnchor, wantGen = "TEST ONLY Yubico Attestation Root 1", false
 		case "signer-is-the-piv-intermediate", "signer-and-slot-swapped":
