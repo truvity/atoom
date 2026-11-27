@@ -133,46 +133,10 @@ func (c *pivCard) gone(err error) error {
 	return err
 }
 
-// VerifyAttestation checks the chain of the slot certificate through the card's attestation certificate to Yubico's root
-// with piv-go's verifier over the anchors of yubico.go, and reads the extensions.
+// VerifyAttestation checks the chain of the slot certificate through the card's attestation certificate to Yubico's root with the library
+// key/pivattest over its pinned certificates, and reads the extensions (attestation.go).
 func (c *pivCard) VerifyAttestation(attCert, slotCert *x509.Certificate) (Attestation, error) {
-	v, err := yubicoVerifier()
-	if err != nil {
-		return Attestation{}, err
-	}
-	return verifyWith(v, attCert, slotCert)
-}
-
-func verifyWith(v *piv.Verifier, attCert, slotCert *x509.Certificate) (Attestation, error) {
-	a, err := v.Verify(attCert, slotCert)
-	if err != nil {
-		return Attestation{}, err
-	}
-	return toAttestation(a), nil
-}
-
-// toAttestation is what the driver keeps of piv-go's reading of a slot certificate.
-func toAttestation(a *piv.Attestation) Attestation {
-	out := Attestation{
-		Version: Version{a.Version.Major, a.Version.Minor, a.Version.Patch},
-		Serial:  a.Serial,
-		Slot:    Slot(a.Slot.Key), //nolint:gosec // a slot key reference is one octet
-	}
-	switch a.PINPolicy {
-	case piv.PINPolicyNever:
-		out.PIN = PINNever
-	case piv.PINPolicyOnce:
-		out.PIN = PINOnce
-	}
-	switch a.TouchPolicy {
-	case piv.TouchPolicyNever:
-		out.Touch = TouchNever
-	case piv.TouchPolicyAlways:
-		out.Touch = TouchAlways
-	case piv.TouchPolicyCached:
-		out.Touch = TouchCached
-	}
-	return out
+	return verifyPinned(attCert, slotCert)
 }
 
 func (c *pivCard) Generate(managementKey []byte, s Slot, spec KeySpec) (crypto.PublicKey, error) {

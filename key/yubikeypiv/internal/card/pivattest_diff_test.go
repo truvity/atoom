@@ -3,9 +3,12 @@
 package card
 
 import (
+	"crypto/sha256"
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/asn1"
+	"encoding/hex"
+	"encoding/pem"
 	"errors"
 	"fmt"
 	"math/rand/v2"
@@ -13,6 +16,7 @@ import (
 	"reflect"
 	"regexp"
 	"runtime/debug"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -25,13 +29,17 @@ import (
 	"github.com/truvity/atoom/key/pivattest/attesttest"
 )
 
-// The differential test of the attestation library (key/pivattest): it holds the library to the check this driver uses today, which is
-// piv-go's piv.Verifier over the anchors of newVerifier (yubico.go). Both run live on every case of the corpus of key/pivattest/attesttest
-// and on freshly made cases, on freshly parsed certificates (piv-go changes the certificate it is given), and must agree on acceptance, on
-// every fact returned and on the class and the text of the error. The corpus also holds the old check's answers as committed data, which the
-// library's own tests replay on every system with no card; this test is what keeps that data honest.
+// The differential test of the attestation library (key/pivattest) and of the card driver's use of it. It holds the library to the check
+// the driver made before it used the library, which is piv-go's piv.Verifier over the anchors of the root and the PIV attestation
+// intermediates that chain to it (the admission rule of the driver's old constructor, kept below as oldNewVerifier). Both run live on every
+// case of the corpus of key/pivattest/attesttest and on freshly made cases, on freshly parsed certificates (piv-go changes the certificate it
+// is given), and must agree on acceptance, on every fact returned and on the class and the text of the error. It holds the driver's new path
+// (the library, then fromEvidence) to its old path (piv-go, then oldToAttestation, the old reading of the driver, kept below) the same way: the
+// same Attestation, or an error of the same class. The corpus also holds piv-go's answers as committed data, which the library's own tests
+// replay on every system with no card; this test is what keeps that data honest. The anchors of the real vendor certificates are built here
+// from the certificates the library pins.
 //
-// To write the corpus's results from the old check (after the corpus was rebuilt, or when the library the driver uses changes), run
+// To write the corpus's results from piv-go's check (after the corpus was rebuilt, or when piv-go changes), run
 //
 //	ATOOM_PIVATTEST_RECORD=1 go test -tags atoom_card -run TestPivattestDiffCorpus ./key/yubikeypiv/internal/card
 //
@@ -157,9 +165,164 @@ func same(old, nw outcome) string {
 	return ""
 }
 
-// oldConstruction is newVerifier of yubico.go, with the class of its error.
+// pivIntermediatePrefix is the common name of the intermediates that sign the attestation key of a PIV applet.
+const pivIntermediatePrefix = "Yubico PIV Attestation "
+
+// oldNewVerifier is the constructor the driver had before it used the library (newVerifier of the old yubico.go), unchanged: the piv-go verifier
+// whose trust anchors are the root (checked against wantRootSHA256) and every PIV attestation intermediate of the bundle that chains to it.
+func oldNewVerifier(rootPEM, bundlePEM []byte, wantRootSHA256 string) (*piv.Verifier, error) {
+	roots, err := oldParseCerts(rootPEM)
+	if err != nil || len(roots) != 1 {
+		return nil, errors.New("card: the Yubico root file does not hold exactly one certificate")
+	}
+	sum := sha256.Sum256(roots[0].Raw)
+	if hex.EncodeToString(sum[:]) != wantRootSHA256 {
+		return nil, errors.New("card: the Yubico root is not the pinned certificate")
+	}
+	bundle, err := oldParseCerts(bundlePEM)
+	if err != nil {
+		return nil, err
+	}
+	rootPool, interPool := x509.NewCertPool(), x509.NewCertPool()
+	rootPool.AddCert(roots[0])
+	for _, c := range bundle {
+		interPool.AddCert(c)
+	}
+	anchors := x509.NewCertPool()
+	anchors.AddCert(roots[0])
+	n := 0
+	for _, c := range bundle {
+		if !strings.HasPrefix(c.Subject.CommonName, pivIntermediatePrefix) {
+			continue
+		}
+		if _, err := c.Verify(x509.VerifyOptions{Roots: rootPool, Intermediates: interPool, KeyUsages: []x509.ExtKeyUsage{x509.ExtKeyUsageAny}}); err != nil {
+			continue // not signed through the pinned root: not trusted
+		}
+		anchors.AddCert(c)
+		n++
+	}
+	if n == 0 {
+		return nil, errors.New("card: the Yubico bundle holds no PIV attestation intermediate that chains to the root")
+	}
+	return &piv.Verifier{Roots: anchors}, nil
+}
+
+func oldParseCerts(b []byte) ([]*x509.Certificate, error) {
+	var out []*x509.Certificate
+	for {
+		var blk *pem.Block
+		blk, b = pem.Decode(b)
+		if blk == nil {
+			break
+		}
+		if blk.Type != "CERTIFICATE" {
+			continue
+		}
+		c, err := x509.ParseCertificate(blk.Bytes)
+		if err != nil {
+			return nil, fmt.Errorf("card: a Yubico certificate does not parse: %w", err)
+		}
+		out = append(out, c)
+	}
+	return out, nil
+}
+
+// oldToAttestation is what the driver kept of piv-go's reading of a slot certificate before it used the library (toAttestation of the old
+// piv.go), unchanged.
+func oldToAttestation(a *piv.Attestation) Attestation {
+	out := Attestation{
+		Version: Version{a.Version.Major, a.Version.Minor, a.Version.Patch},
+		Serial:  a.Serial,
+		Slot:    Slot(a.Slot.Key), //nolint:gosec // a slot key reference is one octet
+	}
+	switch a.PINPolicy {
+	case piv.PINPolicyNever:
+		out.PIN = PINNever
+	case piv.PINPolicyOnce:
+		out.PIN = PINOnce
+	}
+	switch a.TouchPolicy {
+	case piv.TouchPolicyNever:
+		out.Touch = TouchNever
+	case piv.TouchPolicyAlways:
+		out.Touch = TouchAlways
+	case piv.TouchPolicyCached:
+		out.Touch = TouchCached
+	}
+	return out
+}
+
+// driverAnswer is what the driver's VerifyAttestation returns for two certificates: a value, or an error and its class. The driver parses the
+// certificates before it calls (a certificate that does not parse never reaches the check), so a parse error is the same on both paths.
+type driverAnswer struct {
+	a     Attestation
+	class string // "" when there is no error
+	text  string
+}
+
+func parseBoth(slotDER, signerDER []byte) (slot, signer *x509.Certificate, bad *driverAnswer) {
+	slot, err := x509.ParseCertificate(slotDER)
+	if err != nil {
+		return nil, nil, &driverAnswer{class: attesttest.ClassParse, text: err.Error()}
+	}
+	signer, err = x509.ParseCertificate(signerDER)
+	if err != nil {
+		return nil, nil, &driverAnswer{class: attesttest.ClassParse, text: err.Error()}
+	}
+	return slot, signer, nil
+}
+
+// oldDriver is the driver's old path: piv-go's check, then oldToAttestation.
+func oldDriver(v *piv.Verifier, slotDER, signerDER []byte) driverAnswer {
+	slot, signer, bad := parseBoth(slotDER, signerDER)
+	if bad != nil {
+		return *bad
+	}
+	a, err := v.Verify(signer, slot)
+	if err != nil {
+		return driverAnswer{class: oldClass(err), text: err.Error()}
+	}
+	return driverAnswer{a: oldToAttestation(a)}
+}
+
+// newDriver is the driver's new path: the library's check, then fromEvidence (verifyWith, the code of pivCard.VerifyAttestation over a given
+// verifier).
+func newDriver(v *pivattest.Verifier, slotDER, signerDER []byte) driverAnswer {
+	slot, signer, bad := parseBoth(slotDER, signerDER)
+	if bad != nil {
+		return *bad
+	}
+	a, err := verifyWith(v, signer, slot)
+	if err != nil {
+		return driverAnswer{class: newClass(err), text: err.Error()}
+	}
+	return driverAnswer{a: a}
+}
+
+// sameDriver says what differs between the two paths of the driver, or "": the same Attestation, or an error of the same class (a chain error
+// with the same text, which the driver logs; the text of an extension error is the library's own wording).
+func sameDriver(old, nw driverAnswer) string {
+	if (old.class == "") != (nw.class == "") {
+		return fmt.Sprintf("the driver's paths differ in acceptance: old %+v, new %+v", old, nw)
+	}
+	if old.class == "" {
+		if old.a != nw.a {
+			return fmt.Sprintf("the driver's paths read other values: old %+v, new %+v", old.a, nw.a)
+		}
+		return ""
+	}
+	if old.class != nw.class {
+		return fmt.Sprintf("the driver's paths differ in the class of the error: old %q (%s), new %q (%s)", old.class, old.text, nw.class, nw.text)
+	}
+	if old.class == attesttest.ClassChain && !sameText(old.text, nw.text) {
+		return fmt.Sprintf("the driver's paths differ in the text of the chain error: old %q, new %q", old.text, nw.text)
+	}
+	return ""
+}
+
+// oldConstruction is oldNewVerifier, with the class of its error.
 func oldConstruction(rootPEM, bundlePEM []byte, sum string) (*piv.Verifier, string) {
-	v, err := newVerifier(rootPEM, bundlePEM, sum)
+	v, err := oldNewVerifier(rootPEM, bundlePEM, sum)
 	if err == nil {
 		return v, ""
 	}
@@ -260,10 +423,13 @@ func TestPivattestDiffCorpus(t *testing.T) {
 		if d := same(old, nw); d != "" {
 			t.Errorf("%s: %s", cs.Name, d)
 		}
+		if d := sameDriver(oldDriver(pr.old, cs.Slot, cs.Signer), newDriver(pr.new, cs.Slot, cs.Signer)); d != "" {
+			t.Errorf("%s: %s", cs.Name, d)
+		}
 		if record != "" {
 			c.Cases[i].Want = old.res
 		} else if !reflect.DeepEqual(old.res, cs.Want) {
-			t.Errorf("%s: the old check says %+v, the corpus holds %+v: record it again", cs.Name, old.res, cs.Want)
+			t.Errorf("%s: piv-go's check says %+v, the corpus holds %+v: record it again", cs.Name, old.res, cs.Want)
 		}
 	}
 	for i, k := range c.Constructions {
@@ -275,15 +441,15 @@ func TestPivattestDiffCorpus(t *testing.T) {
 		if record != "" {
 			c.Constructions[i].WantOK, c.Constructions[i].WantClass = oldClass == "", oldClass
 		} else if k.WantOK != (oldClass == "") || k.WantClass != oldClass {
-			t.Errorf("%s: the old check says %q, the corpus holds ok %v class %q: record it again", k.Name, oldClass, k.WantOK, k.WantClass)
+			t.Errorf("%s: piv-go's check says %q, the corpus holds ok %v class %q: record it again", k.Name, oldClass, k.WantOK, k.WantClass)
 		}
 	}
 	if record != "" && !t.Failed() {
-		c.GoldenSource = "recorded from piv-go " + pivGoVersion() + " (piv.Verifier over the anchors of card.newVerifier) by TestPivattestDiffCorpus of key/yubikeypiv/internal/card, run with ATOOM_PIVATTEST_RECORD"
+		c.GoldenSource = "recorded from piv-go " + pivGoVersion() + " (piv.Verifier over the root and the PIV attestation intermediates that chain to it) by TestPivattestDiffCorpus of key/yubikeypiv/internal/card, run with ATOOM_PIVATTEST_RECORD"
 		if err := c.Write(record); err != nil {
 			t.Fatal(err)
 		}
-		t.Logf("the results of the old check are written to %s", record)
+		t.Logf("the results of piv-go's check are written to %s", record)
 	}
 }
 
@@ -418,6 +584,9 @@ func TestPivattestDiffFreshCases(t *testing.T) {
 		if d := same(old, nw); d != "" {
 			t.Fatalf("case %d (seed %d): %s", i, seed, d)
 		}
+		if d := sameDriver(oldDriver(f.pair.old, slot, signer), newDriver(f.pair.new, slot, signer)); d != "" {
+			t.Fatalf("case %d (seed %d): %s", i, seed, d)
+		}
 	}
 }
 
@@ -453,11 +622,16 @@ func FuzzPivattestDiff(f *testing.F) {
 		if d := same(old, nw); d != "" {
 			t.Fatal(d)
 		}
+		if d := sameDriver(oldDriver(pr.pair.old, slot, signer), newDriver(pr.pair.new, slot, signer)); d != "" {
+			t.Fatal(d)
+		}
 	})
 }
 
-// The three deliberate differences of the library, seen against the old check. Each has a test of its own in the library; here the old
-// side is shown, so that a change in the old library (a fix of either) is noticed.
+// Deliberate differences of the library, seen against piv-go's check: the certificate of the caller, a nil argument, and the size of a
+// certificate. Each has a test of its own in the library; here piv-go's side is shown, so that a change in piv-go (a fix of either) is noticed.
+// The others need no piv-go: the library reads both certificates again from their raw bytes and takes the time as an argument, and Default
+// builds again after a failed build where the old constructor kept a failed build for the life of the program.
 func TestPivattestDiffDeliberateDifferences(t *testing.T) {
 	f := freshPair(t)
 	noBC, err := f.good.WithF9(attesttest.F9Options{NoBasicConstraints: true})
@@ -503,6 +677,76 @@ func TestPivattestDiffDeliberateDifferences(t *testing.T) {
 			t.Errorf("the library gave %v for a nil slot certificate", err)
 		}
 	})
+}
+
+// The size limit: piv-go has none, so it reads a valid certificate of any length; the library refuses one over MaxCertificateSize, and so does the
+// driver's new path.
+func TestPivattestDiffTheSizeLimit(t *testing.T) {
+	f := freshPair(t)
+	filler := attesttest.Ext(asn1.ObjectIdentifier{1, 3, 6, 1, 4, 1, 99999, 1}, false, make([]byte, pivattest.MaxCertificateSize))
+	slotDER, err := f.good.SlotDER(attesttest.SlotOptions{Extensions: append(attesttest.DefaultExtensions(), filler)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(slotDER) <= pivattest.MaxCertificateSize {
+		t.Fatalf("the certificate has %d bytes, which is not over the limit", len(slotDER))
+	}
+	signer := f.good.F9.Raw
+	old, nw := oldDriver(f.pair.old, slotDER, signer), newDriver(f.pair.new, slotDER, signer)
+	if old.class != "" || old.a.Serial != 1234567 {
+		t.Errorf("piv-go does not read a certificate of %d bytes: %+v", len(slotDER), old)
+	}
+	if nw.class == "" || !strings.Contains(nw.text, "longer than") {
+		t.Errorf("the driver's new path did not refuse it: %+v", nw)
+	}
+	if _, err := f.pair.new.VerifyDER(slotDER, signer); !errors.Is(err, pivattest.ErrTooLarge) {
+		t.Errorf("the library gave %v", err)
+	}
+}
+
+// The anchors of the vendor's real certificates, built as the old constructor built them from the files the library pins, are the root and the
+// three PIV attestation intermediates of its pin table, and the library builds its own verifier from the same files.
+func TestPivattestDiffThePinnedCertificatesGiveTheAnchorsOfTheOldDriver(t *testing.T) {
+	read := func(name string) []byte {
+		b, err := os.ReadFile("../../../pivattest/certs/" + name) //nolint:gosec // one of two fixed names of this test
+		if err != nil {
+			t.Fatal(err)
+		}
+		return b
+	}
+	var rootSum string
+	var want []string
+	for _, p := range pivattest.Pins() {
+		switch p.Role {
+		case pivattest.RoleRoot:
+			rootSum = p.SHA256
+			want = append(want, p.Name)
+		case pivattest.RolePIV:
+			want = append(want, p.Name)
+		}
+	}
+	v, err := oldNewVerifier(read("yubico-attestation-root-1.pem"), read("yubico-intermediate.pem"), rootSum)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got []string
+	for _, s := range v.Roots.Subjects() { //nolint:staticcheck // a pool built here, not the system's
+		var rdn pkix.RDNSequence
+		if _, err := asn1.Unmarshal(s, &rdn); err != nil {
+			t.Fatal(err)
+		}
+		var name pkix.Name
+		name.FillFromRDNSequence(&rdn)
+		got = append(got, name.CommonName)
+	}
+	slices.Sort(got)
+	slices.Sort(want)
+	if !slices.Equal(got, want) {
+		t.Errorf("the anchors of the old constructor are %q, the pin table says the root and the PIV attestation intermediates %q", got, want)
+	}
+	if _, err := pivattest.Default(); err != nil {
+		t.Errorf("the library does not build its verifier from the same files: %v", err)
+	}
 }
 
 // octet is the low octet of n: a slot key reference, a form factor and the draws below are all one octet.

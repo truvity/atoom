@@ -213,7 +213,7 @@ func (c *Card) Opener() card.Opener {
 
 // Anchors are what a real attestation verifier needs to trust this card: its root (PEM), the bundle of intermediates (PEM)
 // and the SHA-256 of the root (hex). The fake's own VerifyAttestation does not use them; a test that runs the real code
-// (card.NewVerifier, card.VerifyWith, under the tag atoom_card) does.
+// (card.NewAttestationVerifier) does.
 func (c *Card) Anchors() (rootPEM, bundlePEM []byte, rootSHA256 string, err error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()

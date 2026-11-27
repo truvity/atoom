@@ -32,8 +32,8 @@ import (
 // sealed to a key of its own nor spend the card's PIN tries with an answer no listed peer card's driver wrote, and a
 // released PIN that the card refused stops the release until a person unlocks the board (refused.go). What stays
 // key@'s alone: revocation (the driver cannot read the store), the freshness and the reuse of a request id, and the
-// attestation of the slot map, which the driver reads for key@ (VerifyAttestation) because piv-go and the pinned Yubico
-// anchors live in the driver only.
+// attestation of the slot map, which the driver reads for key@ (VerifyAttestation) because the driver is the one that links the
+// check (key/pivattest) with the pinned Yubico anchors.
 
 // The reasons of the refusals of the PIN release calls.
 const (

@@ -172,7 +172,7 @@ func TestDefaultSucceedsAndNamesExactlyTheSixCertificates(t *testing.T) {
 	}
 }
 
-// The files, the page and the older copies agree: the sentences of docs/pins.md that a machine can check.
+// The files and the page agree: the sentences of docs/pins.md that a machine can check.
 func TestThePinsPageHoldsTheDigestsAndTheDatesOfTheFiles(t *testing.T) {
 	page, err := os.ReadFile("docs/pins.md")
 	if err != nil {
@@ -217,28 +217,6 @@ func TestThePinsPageHoldsTheDigestsAndTheDatesOfTheFiles(t *testing.T) {
 		}
 		if to := cert.NotAfter.UTC().Format("2006-01-02 15:04:05"); strings.TrimSpace(cells[5]) != to {
 			t.Errorf("%s: valid to %q on the page, %q in the certificate", p.Name, strings.TrimSpace(cells[5]), to)
-		}
-	}
-}
-
-// The embedded files are the older copies of the card driver, byte for byte, while those exist. The test of the package holds the same
-// comparison and skips when the copies are gone; this one says so, so that the comparison is not skipped without notice while they exist.
-func TestTheEmbeddedFilesAreTheDriversCopiesAndTheComparisonRuns(t *testing.T) {
-	r, b := pivattest.EmbeddedFiles()
-	for name, mine := range map[string][]byte{"yubico-attestation-root-1.pem": r, "yubico-intermediate.pem": b} {
-		old, err := os.ReadFile("../yubikeypiv/internal/card/certs/" + name) //nolint:gosec // one of two fixed names
-		if errors.Is(err, os.ErrNotExist) {
-			t.Logf("the older copy of %s is gone: the comparison no longer applies", name)
-			continue
-		}
-		if err != nil {
-			t.Fatal(err)
-		}
-		if string(old) != string(mine) {
-			t.Errorf("%s differs from the driver's copy", name)
-		}
-		if len(mine) == 0 {
-			t.Errorf("%s is empty", name)
 		}
 	}
 }
