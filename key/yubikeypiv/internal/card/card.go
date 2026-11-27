@@ -100,7 +100,8 @@ func (a Attestation) Reported() Attestation {
 
 // MissingFact names the first of the firmware, the serial, the slot and the PIN and touch policy that the certificate does not
 // state ("firmware", "serial", "slot", "policy"), or "" when it states all of them. An absent extension reads as zero in the
-// fields above, so a caller that compares those values must first ask this.
+// fields above, so a caller that compares those values must first ask this. The case "slot" cannot be reached through the library, whose
+// Generated needs a named slot; it is kept as a guard for a value that was made by hand.
 func (a Attestation) MissingFact() string {
 	switch e := a.Evidence; {
 	case !e.HasFirmware:

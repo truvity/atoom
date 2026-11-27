@@ -421,7 +421,7 @@ func (s *Service) adopt(e entry) (*slotKey, error) {
 	if err != nil {
 		// The reason is the x509 error, which names a certificate and never a key; the refusal itself names none.
 		s.log().Warn("attestation refused", "slot", e.slot.String(), "error", err.Error())
-		return nil, attestationError("chain: the attestation does not chain to the Yubico root")
+		return nil, attestationError(attestationRefusal(err))
 	}
 	if !a.Evidence.Generated {
 		// A chain that verifies is not yet the attestation of a key a card made: a certificate that is itself a trust anchor
@@ -468,6 +468,22 @@ func (s *Service) adopt(e entry) (*slotKey, error) {
 		return nil, attestationError("key: cannot be encoded")
 	}
 	return &slotKey{entry: e, pub: pub, spki: spki, attested: a.Evidence}, nil
+}
+
+// attestationRefusal is the refusal for an error of the attestation check, by the class of the error (the library's named errors), so that
+// an operator reads the cause: the clock of the machine, a certificate that is missing, too large or does not parse, the driver's own pinned
+// files, or the chain. It holds no certificate content, key or serial; the journal has the full text of the error.
+func attestationRefusal(err error) string {
+	switch {
+	case errors.Is(err, pivattest.ErrClock):
+		return "clock: the clock of this machine is outside the validity of the pinned certificates"
+	case errors.Is(err, pivattest.ErrNil), errors.Is(err, pivattest.ErrNoRaw), errors.Is(err, pivattest.ErrTooLarge), errors.Is(err, pivattest.ErrParse):
+		return "certificate: the attestation certificate is missing, too large or does not parse"
+	case errors.Is(err, pivattest.ErrPinTable), errors.Is(err, pivattest.ErrAdmission), errors.Is(err, pivattest.ErrRootCount),
+		errors.Is(err, pivattest.ErrRootPin), errors.Is(err, pivattest.ErrNoAnchor):
+		return "pins: the pinned Yubico certificates of this program are not as its table says"
+	}
+	return "chain: the attestation does not chain to the Yubico root"
 }
 
 // samePublic says whether the key a card returned from Generate is the key the slot's attestation certifies: the library's
