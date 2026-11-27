@@ -62,7 +62,7 @@ Test cards only. On 2026-10-31 both cards were checked to be in factory state be
 
 The driver is Go on piv-go, over PIV only. [s4-piv-go-or-pkcs11.md](s4-piv-go-or-pkcs11.md) gives the reasons: piv-go connects exclusively and queues callers, where the PKCS#11 route resets the card when a second client appears. The findings above are the ones the driver depends on:
 
-- **The attestation roots are the driver's own.** It embeds Yubico's root and the full intermediate bundle and passes them to piv-go's verifier, because piv-go's own set fails on cards made since August 2025 (`internal/card/yubico.go`, measured again on a board on 2026-11-04).
+- **The attestation roots are the driver's own.** It embeds Yubico's root and the full intermediate bundle and passes them to piv-go's verifier, because piv-go's own set fails on cards made since August 2025 (`internal/card/yubico.go`, measured again on a board on 2026-11-04). Since 2026-11-27 the certificates and the check live in [key/pivattest](../../../pivattest/README.md), which the driver uses; piv-go's verifier is not used.
 - **The PC/SC lock is the reason for exclusive access.** A `scdaemon` or a second driver on the card makes the driver fail closed ([restart-and-session-reset.md](../restart-and-session-reset.md)).
 - **The OpenPGP applet is not used.** The plan has a release-signing key in a PIV slot ([card-slot-map.md](../card-slot-map.md)); the driver only signs digests and has no OpenPGP code, so whoever builds OpenPGP packets around that key does it outside the driver. go-openpgp-card, `gpg` and the Rust helper are not dependencies.
 - **A card signature takes about 150 ms** ([yubikey-piv-speed-and-sharing-2026-11-13.md](yubikey-piv-speed-and-sharing-2026-11-13.md) has the driver's own figures).
