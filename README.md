@@ -40,7 +40,7 @@ One block is built: [seal](blocks/seal/README.md), data keys per purpose and sco
 
 The Cedar loader is [policy](policy/README.md): the signed policy bundle, its loading rules and the decision test set, in Go and Rust ([record 0019](docs/decisions/0019-the-policy-bundle-and-its-loader.md)).
 
-The shared libraries are [common](common/README.md) (the types every port speaks), [socket](socket/README.md) (the socket host and its guard) and, for the card driver, [key/slotplan](key/slotplan/README.md), [key/pinrelease](key/pinrelease/README.md) and, for a card over direct USB, [key/usbccid](key/usbccid/README.md) (discovery, the claimed interface and, in its package `ccid`, the CCID reader; [record 0026](docs/decisions/0026-one-yubikey-driver-over-direct-usb.md)).
+The shared libraries are [common](common/README.md) (the types every port speaks), [socket](socket/README.md) (the socket host and its guard) and, for the card driver, [key/slotplan](key/slotplan/README.md), [key/pinrelease](key/pinrelease/README.md) and, for a card over direct USB, [key/usbccid](key/usbccid/README.md) (discovery, the claimed interface and, in its package `ccid`, the CCID reader; [record 0026](docs/decisions/0026-one-yubikey-driver-over-direct-usb.md)) and [key/pivattest](key/pivattest/README.md) (the check of a YubiKey PIV attestation, with no card and no cgo).
 
 Planned: the blocks `state`, `token` and `export`, Lambda extension zips, more drivers (PostgreSQL and Valkey stores, an SSM source, rqlite and PostgreSQL indexes). The order is the [plan](docs/plan.md).
 

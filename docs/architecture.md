@@ -49,7 +49,7 @@ atoom/
   key/                   port: proto, stubs, README, docs/
     conformance/         the key kit (a Go module of its own)
     software/  yubikeypiv/  awskms/     drivers
-    slotplan/  pinrelease/  usbccid/   small libraries of the card drivers
+    slotplan/  pinrelease/  usbccid/  pivattest/   small libraries of the card drivers
   store/                 port: items
     conformance/  rqlite/  memory/  dynamodb/
   source/  blob/  transport/  index/  destination/    the other ports, same shape
@@ -85,7 +85,7 @@ Checked in CI by `just check-isolation` ([0003](decisions/0003-libraries-with-th
 
 - a **port** module requires only the ConnectRPC and Protobuf runtimes and what their generated code needs, besides the `common` types;
 - a **driver** may require the `common` types, its own port, the kit of its own port (for tests), a shared library and its own backend SDK. It may not require another driver or the code of another port;
-- **no driver requires another driver.** A small library that several drivers of one port need is a shared library, listed in `tools/isolation/shared.txt` (`socket`, `key/slotplan`, `key/pinrelease`, `key/usbccid`, `blob/fsdir`);
+- **no driver requires another driver.** A small library that several drivers of one port need is a shared library, listed in `tools/isolation/shared.txt` (`socket`, `key/slotplan`, `key/pinrelease`, `key/usbccid`, `key/pivattest`, `blob/fsdir`);
 - a **block** requires only `common`, ports, shared libraries and other blocks, with no cycle, and never a driver or a backend ([0008](decisions/0008-blocks.md)); no port and no driver requires a block. A block may require the libraries it needs besides (`blocks/seal`: AES key wrap from `go-jose`);
 - a **library around an engine** (`policy`, [0019](decisions/0019-the-policy-bundle-and-its-loader.md)) requires only `common`, ports, shared libraries and its engine, never a driver or a block, and no library of the repository requires it;
 - a consumer that takes `key` and `key/software` has no AWS SDK, PC/SC, DynamoDB or PostgreSQL code in its module graph.
