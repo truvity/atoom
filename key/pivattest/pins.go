@@ -83,9 +83,11 @@ func (c *defaultCache) get(now func() time.Time) (*Verifier, error) {
 // Default is the verifier over the vendor's pinned certificates. It is built on the first call that succeeds and kept; a call that fails
 // is not kept, and the next call builds again. It fails when an embedded certificate is not the one the pin table names by its SHA-256,
 // when the root file holds more or fewer than one certificate, when the PIV attestation intermediates that the bundle admits (below) are not
-// exactly those of the table, and when the machine's clock is outside the validity of the pinned certificates (ErrClock, which names the clock and the certificate's
-// validity and is told apart from the two errors of the table, ErrPinTable and ErrAdmission): the pinned intermediates are checked against
-// the root at the clock of the machine when the verifier is built. A changed file is refused at the first call, and nothing
+// exactly those of the table, and when the machine's clock is outside the validity of a pinned PIV attestation intermediate: the pinned
+// intermediates are checked against the root at the clock of the machine when the verifier is built. The files are checked against the table
+// first; ErrClock (which names the clock and the certificate's validity) is given only when every embedded certificate is the pinned one and
+// the certificate that the clock puts outside its validity is itself a row of the table with the role of a PIV attestation intermediate.
+// Anything else is ErrPinTable or ErrAdmission. A changed file is refused at the first call, and nothing
 // is admitted silently. The verifier then checks a slot certificate, a signer and an anchor at the time of each call (VerifyAt: the time
 // given).
 //
@@ -101,10 +103,9 @@ func buildFrom(rootPEM, bundlePEM []byte, pins []Pin, now time.Time) (*Verifier,
 		}
 	}
 	v, admitted, outside, err := newVerifier(rootPEM, bundlePEM, rootSHA, now)
-	if err != nil {
-		if errors.Is(err, ErrNoAnchor) && outside != nil {
-			return nil, clockError(now, outside)
-		}
+	// An error of the construction ends the build, but for one: no PIV intermediate was admitted and some were refused for the clock. That is
+	// told from a changed file only after the files are checked against the table.
+	if err != nil && (!errors.Is(err, ErrNoAnchor) || len(outside) == 0) {
 		return nil, err
 	}
 	// Every table row must be the one certificate of its name in the files, with the pinned digest.
@@ -125,10 +126,16 @@ func buildFrom(rootPEM, bundlePEM []byte, pins []Pin, now time.Time) (*Verifier,
 	}
 	slices.Sort(wantAdmitted)
 	slices.Sort(admitted)
-	if !slices.Equal(wantAdmitted, admitted) {
-		if outside != nil {
-			// A pinned certificate that the clock puts outside its validity is the reason that the admitted set is not the table's.
-			return nil, clockError(now, outside)
+	if err != nil || !slices.Equal(wantAdmitted, admitted) {
+		// Every embedded certificate is the pinned one here. The clock is the cause only when a certificate that it puts outside its validity
+		// is itself a row of the table with the role of a PIV attestation intermediate; anything else is a table error.
+		for _, c := range outside {
+			if isPinnedPIV(pins, c) {
+				return nil, clockError(now, c)
+			}
+		}
+		if err != nil {
+			return nil, err
 		}
 		return nil, ErrAdmission
 	}
@@ -153,6 +160,12 @@ func NewVerifierFromPEM(rootPEM, bundlePEM []byte, wantRootSHA256 string) (*Veri
 	return v, err
 }
 
+// isPinnedPIV says that c is a row of the table with the role of a PIV attestation intermediate.
+func isPinnedPIV(pins []Pin, c *x509.Certificate) bool {
+	d := digest(c)
+	return slices.ContainsFunc(pins, func(p Pin) bool { return p.Role == RolePIV && p.SHA256 == d })
+}
+
 // clockError is ErrClock with the time of the clock and the validity of the certificate that the clock puts outside it.
 func clockError(now time.Time, c *x509.Certificate) error {
 	const layout = "2006-01-02 15:04:05"
@@ -160,9 +173,9 @@ func clockError(now time.Time, c *x509.Certificate) error {
 		now.UTC().Format(layout), c.Subject.CommonName, c.NotBefore.UTC().Format(layout), c.NotAfter.UTC().Format(layout))}
 }
 
-// newVerifier admits at the time now, and also returns the SHA-256 of every admitted intermediate and, when a certificate that the
-// admission needed was refused because now is outside its validity, the first such certificate (nil otherwise).
-func newVerifier(rootPEM, bundlePEM []byte, wantRootSHA256 string, now time.Time) (*Verifier, []string, *x509.Certificate, error) {
+// newVerifier admits at the time now, and also returns the SHA-256 of every admitted intermediate and the certificates that the admission
+// refused because now is outside their validity (none: nil).
+func newVerifier(rootPEM, bundlePEM []byte, wantRootSHA256 string, now time.Time) (*Verifier, []string, []*x509.Certificate, error) {
 	roots, err := parseCerts(rootPEM)
 	if err != nil || len(roots) != 1 {
 		return nil, nil, nil, ErrRootCount
@@ -182,15 +195,15 @@ func newVerifier(rootPEM, bundlePEM []byte, wantRootSHA256 string, now time.Time
 	anchors := x509.NewCertPool()
 	anchors.AddCert(roots[0])
 	var admitted []string
-	var outside *x509.Certificate
+	var outside []*x509.Certificate
 	for _, c := range bundle {
 		if !strings.HasPrefix(c.Subject.CommonName, pivIntermediatePrefix) {
 			continue
 		}
 		if _, err := c.Verify(x509.VerifyOptions{Roots: rootPool, Intermediates: interPool, CurrentTime: now, KeyUsages: []x509.ExtKeyUsage{x509.ExtKeyUsageAny}}); err != nil {
 			var invalid x509.CertificateInvalidError
-			if errors.As(err, &invalid) && invalid.Reason == x509.Expired && outside == nil {
-				outside = invalid.Cert // the clock, not the chain, refuses it
+			if errors.As(err, &invalid) && invalid.Reason == x509.Expired {
+				outside = append(outside, invalid.Cert) // the clock, not the chain, refuses it
 			}
 			continue // not signed through the pinned root, or not valid now: not trusted
 		}

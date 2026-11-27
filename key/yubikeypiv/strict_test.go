@@ -15,6 +15,7 @@ import (
 	"errors"
 	"log/slog"
 	"math/big"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -216,8 +217,11 @@ func TestATrustAnchorGivenAsTheSlotCertificateIsRefusedByAdopt(t *testing.T) {
 	_, rec, err := startQuirk(t, q, factoryDefaults)
 	wantProblem(t, err, "slots.9a.attestation: origin")
 	l := rec.line(t, "attestation refused")
-	if l.level != slog.LevelWarn || strings.Contains(strings.Join(l.keys(), " "), "certificate") {
+	if l.level != slog.LevelWarn || !slices.Equal(l.keys(), []string{"slot", "error", "slot_named", "anchor"}) {
 		t.Errorf("the journal line: %v", l)
+	}
+	if l.attrs[2].Value.Bool() != true || l.attrs[3].Value.String() != "YubiKey PIV Attestation 9a" {
+		t.Errorf("the journal line says slot_named %v and anchor %q", l.attrs[2].Value, l.attrs[3].Value)
 	}
 	if !c.Closed() {
 		t.Fatal("the refused card was left open")
@@ -249,6 +253,9 @@ func TestATrustAnchorGivenAsAPeersAttestationIsRefused(t *testing.T) {
 	if got := line.attrs[0].Value.String(); !strings.HasPrefix(got, "origin:") {
 		t.Errorf("the journal says %q", got)
 	}
+	if !slices.Equal(line.keys(), []string{"error", "slot_named", "anchor"}) || !line.attrs[1].Value.Bool() || line.attrs[2].Value.String() != "YubiKey PIV Attestation 9a" {
+		t.Errorf("the journal line: %v", line.attrs)
+	}
 }
 
 // Each fact the attestation does not state, in turn: the firmware, the serial, the slot and the policy. Refused for what it is, on adoption (a
@@ -262,7 +269,12 @@ func TestAFactThatTheAttestationDoesNotStateIsRefusedByAdopt(t *testing.T) {
 			if _, err := c.PutKey(0x9a, spec); err != nil {
 				t.Fatal(err)
 			}
-			_, _, err := startQuirk(t, &quirkCard{Card: c}, factoryDefaults)
+			_, rec, err := startQuirk(t, &quirkCard{Card: c}, factoryDefaults)
+			if word == "slot" {
+				if l := rec.line(t, "attestation refused"); l.attrs[2].Key != "slot_named" || l.attrs[2].Value.Bool() {
+					t.Errorf("a slot that is not named: %v", l.attrs)
+				}
+			}
 			// A slot that the name does not give is also no generated key for the library (Generated needs the slot), so that is the refusal.
 			want := word + ": the attestation does not state it"
 			if word == "slot" {
