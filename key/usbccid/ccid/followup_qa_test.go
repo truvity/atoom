@@ -192,28 +192,67 @@ func TestQADrainNeedsTwoTimeoutsInARow(t *testing.T) {
 
 // ---- rule 3: the drain is bounded in time ----
 
-// readLog records, for each drain read, when it was started and what timeout it was given.
+// readLog records, for each drain read, the timeout it was given and a LOWER bound of the time the drain had spent when the read was
+// begun: the time from the start of the first read to the end of the previous read's hook, both measured by the fake itself. The drain
+// reads its own clock before it hands the read to the Port, so what it had spent is never less than that bound, however slow the
+// machine is: a slow machine only makes the true figure larger, so every check below that holds at the bound holds at any speed.
+//
+// What the bound cannot give is the exact figure (how much was left when a read began): that needs a clock that the test controls,
+// which the Reader does not have (see TestQADrainTimeIsBounded).
 type readLog struct {
-	at []time.Time
-	to []time.Duration
+	to    []time.Duration // the timeout of each read
+	floor []time.Duration // at least this much of MaxDrainTime was spent when the read began
+	first time.Time       // the start of the first read: after the drain began
+	last  time.Time       // the end of the hook of the previous read: before the drain looked at its clock again
 }
 
-func (l *readLog) hook(f *fakeDevice, sleep time.Duration) func(*fakeDevice) {
+// hook returns the onIn hook. plan says how long the fake keeps read k (counted from 0), given the time since the first read began. A
+// read that has nothing to return takes no time: the fake does not wait out the timeout it is given.
+func (l *readLog) hook(f *fakeDevice, plan func(k int, since time.Duration) time.Duration) func(*fakeDevice) {
 	return func(*fakeDevice) {
-		l.at = append(l.at, time.Now())
-		l.to = append(l.to, f.timeouts[len(f.timeouts)-1])
-		if sleep > 0 && (len(f.in) > 0 || f.endless != nil) { // a read that has something to return takes its time; one that times out does not
-			time.Sleep(sleep)
+		now := time.Now()
+		if len(l.to) == 0 {
+			l.first, l.last = now, now
 		}
+		k := len(l.to)
+		l.to = append(l.to, f.timeouts[len(f.timeouts)-1])
+		l.floor = append(l.floor, l.last.Sub(l.first))
+		if len(f.in) > 0 || f.endless != nil { // a read that has something to return takes its time
+			if d := plan(k, now.Sub(l.first)); d > 0 {
+				time.Sleep(d)
+			}
+		}
+		l.last = time.Now()
 	}
 }
 
-// within checks that no read waits past MaxDrainTime counted from the first read.
+// each is a plan: every read that returns something takes d.
+func each(d time.Duration) func(int, time.Duration) time.Duration {
+	return func(int, time.Duration) time.Duration { return d }
+}
+
+// until is a plan: read k lasts until marks[k] after the first read began (and not at all when that is past): the fake absorbs the
+// overshoot of its own sleeps, so what is left of MaxDrainTime at a later read does not depend on how long each sleep really lasted.
+func until(marks ...time.Duration) func(int, time.Duration) time.Duration {
+	return func(k int, since time.Duration) time.Duration {
+		if k < len(marks) {
+			return marks[k] - since
+		}
+		return 0
+	}
+}
+
+// within checks the rule at any speed: no read is asked to wait longer than what was left of MaxDrainTime when it began, which is at
+// most MaxDrainTime minus the time the fake had kept the drain, and the timeout is neither zero nor more than one window. Exact: no
+// tolerance, because the bound is on the side that a slow machine moves away from.
 func (l *readLog) within(t *testing.T) {
 	t.Helper()
-	for i := range l.at {
-		if end := l.at[i].Sub(l.at[0]) + l.to[i]; end > MaxDrainTime+5*time.Millisecond {
-			t.Errorf("read %d starts %v after the first and waits %v: past MaxDrainTime", i, l.at[i].Sub(l.at[0]), l.to[i])
+	for i := range l.to {
+		if l.to[i] <= 0 || l.to[i] > DrainReadTimeout {
+			t.Errorf("read %d has a timeout of %v", i, l.to[i])
+		}
+		if l.floor[i]+l.to[i] > MaxDrainTime {
+			t.Errorf("read %d began after at least %v and waits %v: past MaxDrainTime (%v)", i, l.floor[i], l.to[i], MaxDrainTime)
 		}
 	}
 }
@@ -223,7 +262,7 @@ func TestQADrainTimeIsBounded(t *testing.T) {
 		f := newFake(descSpec{}, cardHandler(echoSW))
 		f.endless = msg(rspDataBlock, 9, stOK, 0, 0, qaResp)
 		var l readLog
-		f.onIn = l.hook(f, 45*time.Millisecond)
+		f.onIn = l.hook(f, each(45*time.Millisecond))
 		r, _ := Open(f, Options{})
 		_, err := r.SlotStatus(testBudget)
 		lostWith(t, err, ErrProtocol)
@@ -232,26 +271,42 @@ func TestQADrainTimeIsBounded(t *testing.T) {
 			t.Errorf("%d writes, drained %v", f.nOut, r.drained)
 		}
 	})
+	// The rule: the read that begins when less than DrainReadTimeout of MaxDrainTime is left is given that remainder, not a whole
+	// window. The reads below return something, so the drain goes on; the fake keeps the fourth until 240 ms after the first began,
+	// so any later read begins with at most 10 ms left, whatever the speed of the machine. The two outcomes that can follow are both
+	// right: a read, which must have a timeout of at most 10 ms (cut to the remainder), or the loss of the session because the
+	// machine was so slow that nothing was left (which needs MaxDrainTime to have passed in the call).
+	//
+	// What a clock seam in the Reader (a func() time.Time in Options, or a field of Reader) would add: a test could fix the remainder
+	// (say 7 ms) and assert the timeout is exactly 7 ms, and that a remainder of zero loses the session, on every machine, with no
+	// sleep. Without it the test can only prove the upper bound (at most the remainder that the fake's own sleeps leave), which
+	// catches a read that is NOT cut, and not a read that is cut too much.
 	t.Run("the last read waits for the remainder only", func(t *testing.T) {
-		// Four items, each read takes 60 ms: the fifth read starts with 10 ms left, and gets a timeout of 10 ms, not 20.
 		f := newFake(descSpec{}, cardHandler(echoSW))
-		for i := range 4 {
+		const reads = 4
+		for i := range reads {
 			f.sendRaw(msg(rspDataBlock, byte(i+1), stOK, 0, 0, qaResp))
 		}
 		var l readLog
-		f.onIn = l.hook(f, 60*time.Millisecond)
+		marks := []time.Duration{60 * time.Millisecond, 120 * time.Millisecond, 180 * time.Millisecond, MaxDrainTime - 10*time.Millisecond}
+		f.onIn = l.hook(f, until(marks...))
 		r, _ := Open(f, Options{})
+		began := time.Now()
 		_, err := r.SlotStatus(testBudget)
+		spent := time.Since(began)
 		lostWith(t, err, ErrProtocol) // reads that are cut do not make the pipe quiet
 		l.within(t)
-		cut := false
-		for _, to := range l.to {
-			if to < DrainReadTimeout {
-				cut = true
+		if len(l.to) > reads {
+			for i := reads; i < len(l.to); i++ {
+				if l.floor[i] < MaxDrainTime-10*time.Millisecond {
+					t.Errorf("read %d began after only %v: the fake kept the fourth read until %v", i, l.floor[i], marks[reads-1])
+				}
+				if l.to[i] >= DrainReadTimeout {
+					t.Errorf("read %d, begun with at most %v left, has the timeout %v: not cut to the remainder", i, MaxDrainTime-l.floor[i], l.to[i])
+				}
 			}
-		}
-		if !cut {
-			t.Errorf("no read was cut to the remainder: %v", l.to)
+		} else if spent < MaxDrainTime { // a slow machine: no read followed, which is right only when the time was gone
+			t.Errorf("the session was lost after %v with %d reads: MaxDrainTime had not passed", spent, len(l.to))
 		}
 		if f.nOut != 0 || r.drained {
 			t.Errorf("%d writes, drained %v: a cut read was taken for a quiet window", f.nOut, r.drained)
@@ -262,7 +317,7 @@ func TestQADrainTimeIsBounded(t *testing.T) {
 		f := newFake(descSpec{}, cardHandler(echoSW))
 		f.sendRaw(msg(rspDataBlock, 1, stOK, 0, 0, qaResp))
 		var l readLog
-		f.onIn = l.hook(f, MaxDrainTime+30*time.Millisecond)
+		f.onIn = l.hook(f, each(MaxDrainTime+30*time.Millisecond))
 		r, _ := Open(f, Options{})
 		_, err := r.SlotStatus(testBudget)
 		lostWith(t, err, ErrProtocol)
@@ -367,7 +422,7 @@ func TestQABudgetGoneBetweenTheHeaderAndTheBody(t *testing.T) {
 	}{
 		{"the budget is spent while the header is read", func(_ *fakeDevice, n int) {
 			if n == 1 {
-				time.Sleep(60 * time.Millisecond)
+				time.Sleep(pastBudget)
 			}
 		}, []error{ErrBudgetExhausted}},
 		{"the body never comes, and the read is cut to the budget", func(f *fakeDevice, n int) {
@@ -388,7 +443,7 @@ func TestQABudgetGoneBetweenTheHeaderAndTheBody(t *testing.T) {
 			base := f.nIn
 			f.onIn = func(f *fakeDevice) { c.onRead(f, f.nIn-base) }
 			armed = true
-			_, err := r.Transmit(qaCmd, 30*time.Millisecond)
+			_, err := r.Transmit(qaCmd, smallBudget)
 			lostWith(t, err, nil)
 			for _, want := range c.cause {
 				if !errors.Is(err, want) {

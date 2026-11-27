@@ -292,7 +292,7 @@ func TestQAEndToEndLostSessionThenLateAnswer(t *testing.T) {
 	if _, err := r1.PowerOn(testBudget); err != nil {
 		t.Fatal(err)
 	}
-	_, err = r1.Transmit(qaCmd, 30*time.Millisecond)
+	_, err = r1.Transmit(qaCmd, smallBudget) // the silent card times out at once, cut to the budget
 	lostWith(t, err, ErrBudgetExhausted)
 	if err := r1.Close(); err != nil {
 		t.Fatal(err)
@@ -829,7 +829,7 @@ func TestQAEmptyReadAfterTheDrain(t *testing.T) {
 // The drain needs the budget of two whole windows (2 x DrainReadTimeout, or 2 x the transfer timeout when that is shorter) before its
 // first read. With less, the call is refused with ErrBudgetExhausted before any read, the session is NOT lost (nothing was read or
 // sent), the drain stays pending and happens, once, in the next call that has the budget. At the amount itself the call already has
-// microseconds spent, so it is refused as well; a few milliseconds above it, the call goes through.
+// microseconds spent, so it is refused as well (a slower machine only refuses more); well above it, the call goes through.
 func TestQADrainNeedsAWholeReadInTheBudget(t *testing.T) {
 	for _, c := range []struct {
 		name string
@@ -845,7 +845,8 @@ func TestQADrainNeedsAWholeReadInTheBudget(t *testing.T) {
 			{"1 ns below two windows", 2*c.to - 1, false},
 			{"1 ms below two windows", 2*c.to - time.Millisecond, false},
 			{"at two windows", 2 * c.to, false},
-			{"5 ms above two windows", 2*c.to + 5*time.Millisecond, true},
+			// Well above, not at the edge: a call that is refused because the machine stalled for the margin is no proof of the rule.
+			{"100 ms above two windows", 2*c.to + 100*time.Millisecond, true},
 		} {
 			t.Run(c.name+"/"+b.name, func(t *testing.T) {
 				f := newFake(descSpec{}, cardHandler(echoSW))
@@ -892,9 +893,12 @@ func TestQADrainDoesNotCallAShortenedReadQuiet(t *testing.T) {
 	for i := range 3 {
 		f.send(msg(rspDataBlock, byte(i+1), stOK, 0, 0, qaResp))
 	}
-	f.onIn = func(*fakeDevice) { time.Sleep(15 * time.Millisecond) } // each drain read costs 15 ms of the budget
+	// Each drain read costs at least 40 ms of the budget, which holds the two windows with 60 ms to spare: the third read would begin
+	// after at least 80 ms, with less than a window left, so it is refused at any speed (a slower machine refuses an earlier one), and
+	// the pipe is never quiet: the third item (or the second) is still in it.
+	f.onIn = func(*fakeDevice) { time.Sleep(40 * time.Millisecond) }
 	r, _ := Open(f, Options{})
-	_, err := r.SlotStatus(2*DrainReadTimeout + 20*time.Millisecond)
+	_, err := r.SlotStatus(2*DrainReadTimeout + 60*time.Millisecond)
 	lostWith(t, err, ErrBudgetExhausted)
 	if r.drained || f.nOut != 0 {
 		t.Errorf("drained %v, writes %d", r.drained, f.nOut)

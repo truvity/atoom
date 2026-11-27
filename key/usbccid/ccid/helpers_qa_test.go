@@ -123,6 +123,15 @@ type lostCase struct {
 	not   []error
 }
 
+// A test that spends a budget on purpose uses smallBudget, and a fake that keeps a call for pastBudget to run it out. smallBudget is
+// large enough that a stall of the test process before the first call on the Port (a slow or busy machine) cannot use it up and turn
+// the expected loss of the session into a refusal that touched nothing; pastBudget is longer, and a sleep only ever lasts longer than
+// asked, so the budget is gone however slow the machine is.
+const (
+	smallBudget = 100 * time.Millisecond
+	pastBudget  = 150 * time.Millisecond
+)
+
 // runLost runs the case and holds the lost-session rule: ErrSessionLost with the cause reachable, no secret in the text, the buffers
 // clear, every later call answers with the same error without one call on the port, and Close still releases and closes the port.
 func runLost(t *testing.T, c lostCase) {

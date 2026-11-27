@@ -60,14 +60,14 @@ func lostFaults() []qaFault {
 		{name: "port closed on BulkIn", cause: []error{usbccid.ErrClosed}, tune: inFrom(usbccid.ErrClosed)},
 		{name: "an error of no known kind on BulkIn", cause: []error{errOverflow}, tune: inFrom(errOverflow)},
 		{name: "short write", cause: []error{ErrShortWrite}, tune: func(f *fakeDevice, _, _, _ int) { f.shortOut = true }},
-		{name: "budget runs out during a transfer", cause: []error{ErrBudgetExhausted, usbccid.ErrTimeout}, budget: 30 * time.Millisecond,
+		{name: "budget runs out during a transfer", cause: []error{ErrBudgetExhausted, usbccid.ErrTimeout}, budget: smallBudget,
 			reply: func(*fakeDevice, byte, byte) {}},
-		{name: "budget runs out between the transfers", cause: []error{ErrBudgetExhausted}, not: []error{usbccid.ErrTimeout}, budget: 30 * time.Millisecond,
+		{name: "budget runs out between the transfers", cause: []error{ErrBudgetExhausted}, not: []error{usbccid.ErrTimeout}, budget: smallBudget,
 			reply: func(f *fakeDevice, rsp, seq byte) {
-				time.Sleep(80 * time.Millisecond)
+				time.Sleep(pastBudget)
 				f.send(msg(rsp, seq, stOK, 0, 0, qaResp))
 			}},
-		{name: "a wait with no end", cause: []error{ErrBudgetExhausted}, budget: 40 * time.Millisecond,
+		{name: "a wait with no end", cause: []error{ErrBudgetExhausted}, budget: smallBudget,
 			reply: func(f *fakeDevice, rsp, seq byte) { f.endless = msg(rsp, seq, stTimeExt, 1, 0, nil) }},
 		{name: "three stale answers are skipped, the fourth ends it", cause: []error{ErrProtocol}, reply: stale(4)},
 		{name: "many stale answers", cause: []error{ErrProtocol}, reply: stale(40)},
@@ -294,11 +294,11 @@ func TestQALostInsideChains(t *testing.T) {
 		}), cause: []error{ErrReaderFault, ErrNoCard}},
 		{name: "a wait with no end between the blocks", onBlock: at(1, func(f *fakeDevice, m []byte) {
 			f.endless = msg(rspDataBlock, m[6], stTimeExt, 1, 0, nil)
-		}), budget: 40 * time.Millisecond, cause: []error{ErrBudgetExhausted}},
+		}), budget: smallBudget, cause: []error{ErrBudgetExhausted}},
 		{name: "the budget runs out between the blocks", onBlock: at(1, func(f *fakeDevice, m []byte) {
-			time.Sleep(80 * time.Millisecond)
+			time.Sleep(pastBudget)
 			f.send(msg(rspDataBlock, m[6], stOK, 0, chainEmptyAck, nil))
-		}), budget: 30 * time.Millisecond, cause: []error{ErrBudgetExhausted}, not: []error{usbccid.ErrTimeout}},
+		}), budget: smallBudget, cause: []error{ErrBudgetExhausted}, not: []error{usbccid.ErrTimeout}},
 		{name: "short write on the second block", tune: func(f *fakeDevice, _, out int) {
 			f.outFail = func(n int) error {
 				if n == out+2 {
@@ -351,11 +351,11 @@ func TestQALostInsideChains(t *testing.T) {
 		}), cause: []error{ErrCardParity, ErrCommandFailed}},
 		{name: "a wait with no end between the response blocks", onBlock: at(4, func(f *fakeDevice, m []byte) {
 			f.endless = msg(rspDataBlock, m[6], stTimeExt, 1, 0, nil)
-		}), budget: 40 * time.Millisecond, cause: []error{ErrBudgetExhausted}},
+		}), budget: smallBudget, cause: []error{ErrBudgetExhausted}},
 		{name: "the budget runs out between the response blocks", onBlock: at(4, func(f *fakeDevice, m []byte) {
-			time.Sleep(80 * time.Millisecond)
+			time.Sleep(pastBudget)
 			f.send(msg(rspDataBlock, m[6], stOK, 0, chainEnd, qaResp))
-		}), budget: 30 * time.Millisecond, cause: []error{ErrBudgetExhausted}, not: []error{usbccid.ErrTimeout}},
+		}), budget: smallBudget, cause: []error{ErrBudgetExhausted}, not: []error{usbccid.ErrTimeout}},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
