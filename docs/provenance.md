@@ -173,6 +173,22 @@ The second half: the CCID reader, a package of the same module. Ported from the 
 | `fuzz_test.go`, `fuzz_qa_test.go` | new | answers of a hostile reader, a model of the answers, and descriptors |
 | `session_test.go`, the other `*_qa_test.go` | new | the drain and the sequence counter; framing, chains, the empty packet, the lost session, the budget, the packet sizes, the descriptor refusals and every error code, as tables |
 
+### key/pivattest
+
+<a id="key-pivattest"></a>
+
+The attestation check of the card drivers ([record 0026](decisions/0026-one-yubikey-driver-over-direct-usb.md)), as a library of its own so that the card driver and any program that reads an attestation without a card use one check. New code written for atoom; no text of another library was copied.
+
+**What it was written from.** The behaviour of the check is that of `piv.Verifier.Verify` of [piv-go](https://github.com/go-piv/piv-go) v2.6.0 (`piv/key.go`), run with the anchors that the card driver builds, which the library is held equal to. piv-go is licensed under Apache-2.0, which differs from this repository's licence, so the library was written from two other things: the vendor's public description of attestation (developers.yubico.com/PIV/Introduction/PIV_attestation.html, read 2026-11-27: the certificates of the chain, the extensions under 1.3.6.1.4.1.41482.3 for the firmware version, the serial number, the policy and the form factor, and the common name "YubiKey PIV Attestation" and the slot of a slot certificate), and the behaviour of piv-go as a table of what it accepts and refuses (the order of its checks, the Basic Constraints workaround, the length and range of each extension, the reading of the serial number and of the slot), which was then proved by running both on the corpus. The functions, the error types, the structure and the comments are this repository's own.
+
+| Here | From | Changed |
+| --- | --- | --- |
+| `certs/yubico-attestation-root-1.pem`, `certs/yubico-intermediate.pem` | `key/yubikeypiv/internal/card/certs/` of this repository, which took them from the vendor (developers.yubico.com/PKI, fetched 2026-11-04; read again 2026-11-27, identical byte for byte, [docs/pins.md](../key/pivattest/docs/pins.md)) | copied byte for byte; the older copies stay until the card driver is moved onto the library, and a test holds the two equal. They are the vendor's certificates, public, and the only real certificates in the module |
+| `pivattest.go`, `pins.go`, `errors.go`, `doc.go` | new, from the vendor's page and piv-go's behaviour as above | the checks in piv-go's order; three deliberate differences, each with a test: the caller's certificate is not changed (the workaround is made on a copy), a nil argument is `ErrNil` and not a panic, and `VerifyAt` takes the time. Added: the flags for absent extensions, `Algorithm`, `PublicKey`, `Anchor`, `Generated`, the pin table with its digests, `Default` that fails closed, and the named errors. The text of a chain error keeps the one phrase "error verifying attestation certificate: " of piv-go's error, so that the driver's log lines do not change; the texts of the extension errors are worded here, and their class is what the differential test holds equal |
+| `attesttest/` (`pki.go`, `build.go`, `corpus.go`, `corpus/corpus.json`) | new | a TEST ONLY PKI builder and the corpus: certificates made by code, with the answer of the old check for each. The answers were recorded from piv-go v2.6.0 by the differential test of the card driver |
+| `*_test.go` | new | the replay of the corpus, the pin tests, the three differences, the construction refusals and the fuzz targets |
+| `key/yubikeypiv/internal/card/pivattest_diff_test.go` | new | the differential test, behind the build tag `atoom_card`: both checks live on every case of the corpus, on fresh cases and on a fuzz target; with `ATOOM_PIVATTEST_RECORD` it rewrites the corpus's answers from the old check |
+
 ## store
 
 <a id="store"></a>
