@@ -463,9 +463,9 @@ func TestQABudgetFailureAfterAPortCallLosesTheSession(t *testing.T) {
 		t.Run("one drain read, then the budget is gone: "+op.name, func(t *testing.T) {
 			f := newFake(descSpec{}, cardHandler(echoSW))
 			f.send(msg(rspDataBlock, 77, stOK, 0, 0, qaResp)) // the first read returns bytes, and takes longer than the budget
-			f.onIn = func(*fakeDevice) { time.Sleep(60 * time.Millisecond) }
+			f.onIn = func(*fakeDevice) { time.Sleep(pastBudget) }
 			r, _ := Open(f, Options{})
-			err := op.call(r, 2*DrainReadTimeout+5*time.Millisecond)
+			err := op.call(r, smallBudget) // room for the two windows with 60 ms to spare, and less than the sleep
 			lost(t, r, f, err)
 			if f.nOut != 0 || f.nIn != 1 {
 				t.Errorf("%d writes, %d reads", f.nOut, f.nIn)
@@ -480,9 +480,9 @@ func TestQABudgetFailureAfterAPortCallLosesTheSession(t *testing.T) {
 		if _, err := r.SlotStatus(testBudget); err != nil { // the drain is done
 			t.Fatal(err)
 		}
-		f.onIn = func(*fakeDevice) { time.Sleep(60 * time.Millisecond) }
+		f.onIn = func(*fakeDevice) { time.Sleep(pastBudget) }
 		outs := f.nOut
-		_, err = r.PowerOn(30 * time.Millisecond)
+		_, err = r.PowerOn(smallBudget)
 		lost(t, r, f, err)
 		if f.nOut-outs != 1 {
 			t.Errorf("%d messages written, want only GetSlotStatus", f.nOut-outs)
@@ -491,9 +491,9 @@ func TestQABudgetFailureAfterAPortCallLosesTheSession(t *testing.T) {
 	t.Run("a chain: the first block answered, the budget gone before the second", func(t *testing.T) {
 		cc := &chainCard{respParts: [][]byte{{0x90, 0}}}
 		r, f := openPowered(t, Options{}, cc.handler())
-		f.onIn = func(*fakeDevice) { time.Sleep(60 * time.Millisecond) }
+		f.onIn = func(*fakeDevice) { time.Sleep(pastBudget) }
 		outs := f.nOut
-		_, err := r.Transmit(qaLong, 30*time.Millisecond)
+		_, err := r.Transmit(qaLong, smallBudget)
 		lost(t, r, f, err)
 		if f.nOut-outs != 1 {
 			t.Errorf("%d blocks written, want 1", f.nOut-outs)
@@ -501,11 +501,11 @@ func TestQABudgetFailureAfterAPortCallLosesTheSession(t *testing.T) {
 	})
 	t.Run("a write that succeeded and a budget gone before the read", func(t *testing.T) {
 		r, f := openPowered(t, Options{}, func(f *fakeDevice, m []byte) {
-			time.Sleep(60 * time.Millisecond)
+			time.Sleep(pastBudget)
 			cardHandler(echoSW)(f, m)
 		})
 		reads := f.nIn
-		_, err := r.Transmit(qaCmd, 30*time.Millisecond)
+		_, err := r.Transmit(qaCmd, smallBudget)
 		lost(t, r, f, err)
 		if f.nIn != reads {
 			t.Error("a read was started with no budget")
@@ -516,12 +516,12 @@ func TestQABudgetFailureAfterAPortCallLosesTheSession(t *testing.T) {
 		out := f.nOut
 		f.outFail = func(n int) error {
 			if n > out {
-				time.Sleep(40 * time.Millisecond)
+				time.Sleep(pastBudget)
 				return usbccid.ErrTimeout
 			}
 			return nil
 		}
-		_, err := r.Transmit(qaCmd, 30*time.Millisecond)
+		_, err := r.Transmit(qaCmd, smallBudget)
 		lost(t, r, f, err)
 	})
 }

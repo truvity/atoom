@@ -161,7 +161,7 @@ func FuzzQAAnswersModel(f *testing.F) {
 		if _, err := r.PowerOn(testBudget); err != nil {
 			t.Fatal(err)
 		}
-		resp, err := r.Transmit(apduSelect, 60*time.Millisecond)
+		resp, err := r.Transmit(apduSelect, 2*time.Second) // the fake never waits: only a stall of seconds can spend this
 		assertWiped(t, r, "after the call")
 		if err == nil {
 			if len(resp) < 2 || len(resp) > MaxResponseAPDU {

@@ -355,26 +355,38 @@ func TestQAStaleTimeExtensionCounts(t *testing.T) {
 }
 
 // After the budget no transfer is started: with time extensions queued without end, the last BulkIn begins before the deadline.
+//
+// The test sees only when each read began (its own hook, which runs after the Reader has looked at its clock) and the timeout the read
+// was given. The deadline is at most the start of the first read plus the budget (the call began before its first read), and the
+// Reader gives a read no more than what is left of it when it looks, which is after the previous read began. So for every read after
+// the first: the time from the first read's start to the previous read's start, plus this read's timeout, is at most the budget. No
+// tolerance is needed, and a slow machine only makes the left side smaller.
 func TestQANoTransferAfterTheBudget(t *testing.T) {
 	const budget = 80 * time.Millisecond
-	var times []time.Time
+	var begun []time.Time // when each read began
+	var to []time.Duration
 	r, f := openPowered(t, Options{TransferTimeout: time.Second}, func(f *fakeDevice, m []byte) {
 		if m[0] != msgXfrBlock {
 			cardHandler(echoSW)(f, m)
 			return
 		}
 		f.endless = msg(rspDataBlock, m[6], stTimeExt, 1, 0, nil)
-		f.onIn = func(*fakeDevice) { times = append(times, time.Now()) }
+		f.onIn = func(f *fakeDevice) {
+			begun = append(begun, time.Now())
+			to = append(to, f.timeouts[len(f.timeouts)-1])
+		}
 	})
 	start := time.Now()
 	_, err := r.Transmit(apduSelect, budget)
 	end := time.Now()
 	lostWith(t, err, ErrBudgetExhausted)
-	if len(times) == 0 {
+	if len(begun) == 0 {
 		t.Fatal("no read")
 	}
-	if last := times[len(times)-1]; last.After(start.Add(budget + 5*time.Millisecond)) {
-		t.Errorf("a transfer started %v after the budget", last.Sub(start.Add(budget)))
+	for i := 1; i < len(begun); i++ {
+		if spent := begun[i-1].Sub(begun[0]); spent+to[i] > budget {
+			t.Errorf("read %d: the previous read began %v after the first and this one was given %v: past the budget %v", i, spent, to[i], budget)
+		}
 	}
 	if end.Sub(start) < budget {
 		t.Errorf("returned after %v, before the budget %v", end.Sub(start), budget)

@@ -191,8 +191,14 @@ func TestDrainEndsWithTheBudget(t *testing.T) {
 	f.endless = msg(rspDataBlock, 9, stOK, 0, 0, []byte{1, 2})
 	f.onIn = func(*fakeDevice) { time.Sleep(15 * time.Millisecond) }
 	r, _ := Open(f, Options{})
-	_, err := r.SlotStatus(50 * time.Millisecond)
+	// The budget holds the two windows of a first call with 60 ms to spare, so a stall before the first read cannot refuse the call
+	// without a loss. Each read takes at least 15 ms: the seventh would begin after 90 ms, with less than one window left, so the
+	// session ends before MaxDrainReads at any speed (a slower machine ends it earlier).
+	_, err := r.SlotStatus(2*DrainReadTimeout + 60*time.Millisecond)
 	lostWith(t, err, ErrBudgetExhausted)
+	if f.nIn >= MaxDrainReads {
+		t.Errorf("%d reads: the budget did not end the drain", f.nIn)
+	}
 	if f.nOut != 0 {
 		t.Error("something was written")
 	}

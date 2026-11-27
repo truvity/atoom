@@ -377,12 +377,12 @@ func TestBudgetEndsAnEndlessWait(t *testing.T) {
 	}
 	r, f := openPowered(t, Options{}, h)
 	start := time.Now()
-	_, err := r.Transmit(apduSelect, 60*time.Millisecond)
+	_, err := r.Transmit(apduSelect, smallBudget)
 	lostWith(t, err, ErrBudgetExhausted)
 	if d := time.Since(start); d > 2*time.Second {
 		t.Errorf("took %v", d)
 	}
-	if time.Since(start) < 50*time.Millisecond {
+	if time.Since(start) < smallBudget { // the deadline is not before the start plus the budget, so the call cannot end earlier
 		t.Errorf("returned after %v, before the budget", time.Since(start))
 	}
 	untouched(t, r, f, err)
@@ -406,7 +406,7 @@ func TestTimeSpentWaitingCountsAgainstTheBudget(t *testing.T) {
 		t.Fatalf("large budget: %x %v", got, err)
 	}
 	r, f := openPowered(t, Options{}, waits)
-	_, err := r.Transmit(apduSelect, 60*time.Millisecond)
+	_, err := r.Transmit(apduSelect, smallBudget) // eleven reads of 15 ms or more: past the budget
 	lostWith(t, err, ErrBudgetExhausted)
 	untouched(t, r, f, err)
 }
@@ -415,12 +415,12 @@ func TestTimeSpentWaitingCountsAgainstTheBudget(t *testing.T) {
 func TestBudgetEndsBeforeTheNextTransfer(t *testing.T) {
 	r, f := openPowered(t, Options{}, func(f *fakeDevice, m []byte) {
 		if m[0] == msgXfrBlock {
-			time.Sleep(40 * time.Millisecond)
+			time.Sleep(pastBudget)
 		}
 		cardHandler(echoSW)(f, m)
 	})
 	n := f.nIn
-	_, err := r.Transmit(apduSelect, 20*time.Millisecond)
+	_, err := r.Transmit(apduSelect, smallBudget)
 	lostWith(t, err, ErrBudgetExhausted)
 	if f.nIn != n {
 		t.Errorf("a read was started with no budget left")
@@ -456,12 +456,12 @@ func TestTransferTimeoutsFollowTheOptions(t *testing.T) {
 	f.mu.Lock()
 	f.timeouts = nil
 	f.mu.Unlock()
-	if _, err := r.Transmit(apduSelect, 50*time.Millisecond); err != nil {
+	if _, err := r.Transmit(apduSelect, 2*time.Second); err != nil { // the fake answers at once: only a stall of seconds can spend this
 		t.Fatal(err)
 	}
 	for _, d := range f.timeouts {
-		if d > 50*time.Millisecond {
-			t.Fatalf("transfer timeout %v with budget 50ms", d)
+		if d > 2*time.Second {
+			t.Fatalf("transfer timeout %v with budget 2s", d)
 		}
 	}
 }
@@ -474,7 +474,7 @@ func TestTimeoutKindsAreTold(t *testing.T) {
 		}
 	}
 	r, _ := openPowered(t, Options{}, silent)
-	_, err := r.Transmit(apduSelect, 30*time.Millisecond) // the transfer timeout (10 s) is cut to the budget
+	_, err := r.Transmit(apduSelect, time.Second) // the transfer timeout (10 s) is cut to the budget; the silent fake times out at once
 	lostWith(t, err, usbccid.ErrTimeout)
 	if !errors.Is(err, ErrBudgetExhausted) {
 		t.Errorf("a timeout cut by the budget: %v", err)

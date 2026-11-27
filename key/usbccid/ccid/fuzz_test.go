@@ -42,7 +42,7 @@ func FuzzAnswers(f *testing.F) {
 		r, fk := openPowered(t, Options{}, h)
 		seqs.n.Store(2) // the Transmit is number 3, as the seeds say
 		outs := fk.nOut
-		resp, err := r.Transmit(apduSelect, 50*time.Millisecond)
+		resp, err := r.Transmit(apduSelect, 2*time.Second) // the fake never waits: only a stall of seconds can spend this
 		if len(resp) > MaxResponseAPDU {
 			t.Fatalf("a response of %d bytes", len(resp))
 		}
