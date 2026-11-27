@@ -4,7 +4,6 @@ import (
 	"crypto/x509"
 	"errors"
 	"fmt"
-	"os"
 	"slices"
 	"strings"
 	"testing"
@@ -170,8 +169,9 @@ func TestQPTheNewestIntermediateDecidesAndIsNamed(t *testing.T) {
 }
 
 // A disagreement of the table or of the files is a table error and never a clock error, at a good clock and at a bad one wherever the clock is
-// not what refuses the build. Two cases are written down as they are: when the clock refuses every PIV intermediate, nothing is admitted and the
-// clock is named whatever the table says, and when it refuses one of them the clock is named for an admitted set that is not the table's.
+// not what refuses the build. A fault of the files or a wrong digest is a table error at a clock that refuses every PIV intermediate too. One
+// case is written down as it is: a row left out of the table (or a row that makes an anchor no anchor) at a clock before the newest
+// intermediate is named as the clock, because the intermediate that the clock refuses is itself a row with the role of a PIV intermediate.
 func TestQPATableDisagreementIsNeverAClockError(t *testing.T) {
 	f := embedded(t)
 	good := time.Date(2030, 1, 1, 0, 0, 0, 0, time.UTC)
@@ -240,9 +240,42 @@ func TestQPATableDisagreementIsNeverAClockError(t *testing.T) {
 			t.Errorf("a bundle with no PIV intermediate, %s: %v, %v", when, v, err)
 		}
 	}
-	// the clock refuses every PIV intermediate and the table is wrong as well: the clock is named
-	if v, err := pivattest.BuildFromAt(f.rootPEM, f.bundlePEM, digestOff, past); v != nil || !qpOnlyClock(err) {
+	// the clock refuses every PIV intermediate and the table is wrong as well: the files are checked against the table first, so it is a table error
+	if v, err := pivattest.BuildFromAt(f.rootPEM, f.bundlePEM, digestOff, past); v != nil || !errors.Is(err, pivattest.ErrPinTable) || errors.Is(err, pivattest.ErrClock) {
 		t.Errorf("a wrong digest in the year 2000: %v, %v", v, err)
+	}
+}
+
+// A fault of the embedded files (a pinned certificate replaced, removed, swapped for another pinned one or doubled) is a table error whatever
+// the clock says: at a good clock, at a clock before the newest intermediate and at a clock that refuses every one of them.
+func TestQPAFaultOfTheFilesIsATableErrorAtEveryClock(t *testing.T) {
+	f := embedded(t)
+	blocks := strings.SplitAfter(string(f.bundlePEM), "-----END CERTIFICATE-----\n")
+	blocks = blocks[:len(blocks)-1]
+	at := func(name string) int {
+		for k, d := range f.bundleDER {
+			if cnOf(t, d) == name {
+				return k
+			}
+		}
+		t.Fatalf("%s is not in the bundle", name)
+		return -1
+	}
+	const newest, older = "Yubico PIV Attestation B2 1", "Yubico PIV Attestation A 1"
+	k, j := at(newest), at(older)
+	replaced := slices.Clone(blocks)
+	replaced[k] = string(expiredCertNamed(t, newest))
+	removed := slices.Delete(slices.Clone(blocks), k, k+1)
+	swapped := slices.Clone(blocks)
+	swapped[k] = blocks[j] // the newest is another pinned certificate, which is then there twice
+	doubled := append(slices.Clone(blocks), blocks[k])
+	for name, bundle := range map[string]string{"replaced": strings.Join(replaced, ""), "removed": strings.Join(removed, ""), "swapped": strings.Join(swapped, ""), "doubled": strings.Join(doubled, "")} {
+		for when, clock := range map[string]time.Time{"a good clock": t2030, "a clock before the newest": qpFromB2.Add(-time.Second), "a clock that refuses every intermediate": time.Date(2000, 1, 1, 0, 0, 0, 0, time.UTC)} {
+			v, err := pivattest.BuildFromAt(f.rootPEM, []byte(bundle), pivattest.Pins(), clock)
+			if v != nil || errors.Is(err, pivattest.ErrClock) || !(errors.Is(err, pivattest.ErrPinTable) || errors.Is(err, pivattest.ErrAdmission)) {
+				t.Errorf("%s, %s: %v, %v, want a table error and never ErrClock", name, when, v, err)
+			}
+		}
 	}
 }
 
@@ -273,16 +306,12 @@ func TestQPAFailedBuildIsNotKeptAndASuccessfulOneIs(t *testing.T) {
 	}
 }
 
-// FINDING (skipped unless QP_FINDINGS=1): the build reads the zero time as "the machine's clock", because the standard library does for its
-// CurrentTime. VerifyAt refuses the zero time (ErrZeroTime: "no entry point reads it as the current time"), and the build form that takes the
-// time does not. Default itself never gives the zero time (time.Now does not), so this is reachable only through the seam, or a clock function
-// that returns the zero value: such a build succeeds at a clock that was not the one given, here the clock of the machine of the test.
-func TestQPFindingTheBuildReadsTheZeroTimeAsTheMachinesClock(t *testing.T) {
-	if os.Getenv("QP_FINDINGS") != "1" {
-		t.Skip("a finding: set QP_FINDINGS=1 to see it")
-	}
+// The build form that takes the time is an unexported seam (export_test.go): it passes the time to the standard library as the time of the check,
+// which reads the zero time as "the clock of the machine". VerifyAt refuses the zero time; this seam does not, and Default never gives it
+// (time.Now does not). Written down as it is, so that a change to it is seen.
+func TestQPTheSeamReadsTheZeroTimeAsTheMachinesClock(t *testing.T) {
 	f := embedded(t)
-	if v, err := pivattest.BuildFromAt(f.rootPEM, f.bundlePEM, pivattest.Pins(), time.Time{}); v != nil {
-		t.Errorf("a build at the zero time succeeded (%v): the zero time was read as the clock of the machine", err)
+	if v, err := pivattest.BuildFromAt(f.rootPEM, f.bundlePEM, pivattest.Pins(), time.Time{}); err != nil || v == nil {
+		t.Errorf("a build at the zero time: %v (the zero time is read as the clock of the machine, where the pinned certificates are valid)", err)
 	}
 }

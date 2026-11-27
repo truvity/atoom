@@ -58,7 +58,7 @@ func (c qpCase) run(t *testing.T, serial uint32) {
 			t.Errorf("adoption: the word is %q, want %q", a.word, c.adoptWord)
 		}
 		if c.checkLeaks {
-			if l := qpLeaks(a.err.Error(), c.slot, serial); len(l) > 0 {
+			if l := qpLeaks(a.err.Error(), c.slot, serial, true); len(l) > 0 {
 				t.Errorf("adoption: the words hold %v: %q", l, a.err)
 			}
 		}
@@ -76,14 +76,18 @@ func (c qpCase) run(t *testing.T, serial uint32) {
 			t.Errorf("peer (signer %q): the journal says %q, want %q", signer.Subject.CommonName, p.word, qpPeerWord(c.peerWord))
 		}
 		if c.checkLeaks {
-			text := p.err.Error()
+			if l := qpLeaks(p.err.Error(), c.slot, serial, true); len(l) > 0 {
+				t.Errorf("peer: the words hold %v: %q", l, p.err)
+			}
+			// the journal says the common name of the anchor on purpose (the field anchor): nothing else of the certificate
+			var journal string
 			for _, l := range p.rec.got() {
 				for _, at := range l.attrs {
-					text += " " + at.Value.String()
+					journal += " " + at.Value.String()
 				}
 			}
-			if l := qpLeaks(text, c.slot, serial); len(l) > 0 {
-				t.Errorf("peer: the words and the journal hold %v: %q", l, text)
+			if l := qpLeaks(journal, c.slot, serial, false); len(l) > 0 {
+				t.Errorf("peer: the journal holds %v: %q", l, journal)
 			}
 		}
 	}
@@ -232,10 +236,11 @@ func TestQPTheJournalLineOfARefusalIsStillWritten(t *testing.T) {
 		adoptLine  bool   // a line of its own on adoption
 		peerLine   bool
 		adoptAttrs []string
+		peerAttrs  []string
 	}{
-		{"a chain that does not verify", rogue, "x509", true, true, []string{"slot", "error"}},
-		{"a trust anchor as the slot certificate", root, "", true, true, []string{"slot", "error"}},
-		{"a fact that is not stated", noFW, "", false, true, nil},
+		{"a chain that does not verify", rogue, "x509", true, true, []string{"slot", "error"}, []string{"error"}},
+		{"a trust anchor as the slot certificate", root, "", true, true, []string{"slot", "error", "slot_named", "anchor"}, []string{"error", "slot_named", "anchor"}},
+		{"a fact that is not stated", noFW, "", false, true, nil, []string{"error"}},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			a := qpAdopt(t, w, w.f9, c.slot)
@@ -272,7 +277,7 @@ func TestQPTheJournalLineOfARefusalIsStillWritten(t *testing.T) {
 					peer = append(peer, l)
 				}
 			}
-			if len(peer) != 1 || peer[0].level != slog.LevelWarn || strings.Join(peer[0].keys(), ",") != "error" {
+			if len(peer) != 1 || peer[0].level != slog.LevelWarn || strings.Join(peer[0].keys(), ",") != strings.Join(c.peerAttrs, ",") {
 				t.Fatalf("peer: the lines %v", peer)
 			}
 			if len(refused) != 1 || refused[0].level != slog.LevelWarn {
