@@ -291,3 +291,29 @@ func TestGeneratedThroughNewVerifierFromPEM(t *testing.T) {
 		t.Errorf("Default: %+v, %v", ev, err)
 	}
 }
+
+// A bundle that holds the root itself (a vendor file that lists the root with the intermediates) does not make the root an admitted
+// intermediate: a chain that ends in the root is not Generated, and one through the admitted PIV intermediate still is.
+func TestARootListedInTheBundleIsNotAnAdmittedIntermediate(t *testing.T) {
+	rooted := fixedPKI(t, attesttest.PKIOptions{F9: attesttest.F9Options{SignedBy: "root", CommonName: "YubiKey PIV Attestation 9a"}})
+	bundle := attesttest.PEM(rooted.Root, rooted.Inter, rooted.FIDO, rooted.PIV)
+	v, err := pivattest.NewVerifierFromPEM(rooted.RootPEM(), bundle, rooted.RootSHA256())
+	if err != nil {
+		t.Fatal(err)
+	}
+	slot := fixedSlot(t, rooted, attesttest.SlotOptions{})
+	ev, err := v.VerifyAt(t2030, slot, rooted.F9)
+	if err != nil || ev.Generated || ev.AttestsKey(slot.PublicKey) || ev.Anchor != rooted.Root.Subject.CommonName {
+		t.Errorf("a chain that ends in the root, the root in the bundle: %+v, %v", ev, err)
+	}
+	// the same bundle, a chain through the PIV intermediate
+	p := fixedPKI(t, attesttest.PKIOptions{})
+	v2, err := pivattest.NewVerifierFromPEM(p.RootPEM(), attesttest.PEM(p.Root, p.Inter, p.FIDO, p.PIV), p.RootSHA256())
+	if err != nil {
+		t.Fatal(err)
+	}
+	s2 := fixedSlot(t, p, attesttest.SlotOptions{})
+	if ev, err := v2.VerifyAt(t2030, s2, p.F9); err != nil || !ev.Generated {
+		t.Errorf("through the PIV intermediate: %+v, %v", ev, err)
+	}
+}
