@@ -69,6 +69,7 @@
 // error and not a panic; VerifyAt takes the time; the facts are read from the signed bytes, so a change to a field of a parsed certificate
 // has no effect and a certificate built by hand with no Raw is refused; Default builds again after a failed build, where the old check's
 // constructor kept a failed build for the life of the program; and a certificate longer than MaxCertificateSize (16 KiB; the vendor's are
-// about 1 KiB) is refused with ErrTooLarge before it is parsed, where the old check has no limit. Evidence.Generated and AttestsKey are new
-// and have no counterpart in the old check.
+// about 1 KiB) is refused with ErrTooLarge before it is parsed, where the old check has no limit. A seventh difference follows from the
+// pin table: Default is built only when all three pinned PIV attestation intermediates are valid at the clock of the machine, where the
+// old check was built when at least one of them was. Evidence.Generated and AttestsKey are new and have no counterpart in the old check.
 package pivattest
