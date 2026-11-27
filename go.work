@@ -16,6 +16,7 @@ use (
 	./key/awskms
 	./key/conformance
 	./key/pinrelease
+	./key/pivattest
 	./key/slotplan
 	./key/software
 	./key/usbccid
@@ -54,6 +55,8 @@ replace github.com/truvity/atoom/key/awskms v0.11.0 => ./key/awskms
 replace github.com/truvity/atoom/key/conformance v0.11.0 => ./key/conformance
 
 replace github.com/truvity/atoom/key/pinrelease v0.11.0 => ./key/pinrelease
+
+replace github.com/truvity/atoom/key/pivattest v0.11.0 => ./key/pivattest
 
 replace github.com/truvity/atoom/key/slotplan v0.11.0 => ./key/slotplan
 
