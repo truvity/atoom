@@ -272,7 +272,8 @@ func TestQPAFaultOfTheFilesIsATableErrorAtEveryClock(t *testing.T) {
 	for name, bundle := range map[string]string{"replaced": strings.Join(replaced, ""), "removed": strings.Join(removed, ""), "swapped": strings.Join(swapped, ""), "doubled": strings.Join(doubled, "")} {
 		for when, clock := range map[string]time.Time{"a good clock": t2030, "a clock before the newest": qpFromB2.Add(-time.Second), "a clock that refuses every intermediate": time.Date(2000, 1, 1, 0, 0, 0, 0, time.UTC)} {
 			v, err := pivattest.BuildFromAt(f.rootPEM, []byte(bundle), pivattest.Pins(), clock)
-			if v != nil || errors.Is(err, pivattest.ErrClock) || !(errors.Is(err, pivattest.ErrPinTable) || errors.Is(err, pivattest.ErrAdmission)) {
+			isTable := errors.Is(err, pivattest.ErrPinTable) || errors.Is(err, pivattest.ErrAdmission)
+			if v != nil || errors.Is(err, pivattest.ErrClock) || !isTable {
 				t.Errorf("%s, %s: %v, %v, want a table error and never ErrClock", name, when, v, err)
 			}
 		}
