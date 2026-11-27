@@ -16,6 +16,11 @@ import (
 	"time"
 )
 
+// MaxCertificateSize is the longest certificate, in bytes of its DER form, that a check reads: the slot certificate and the signer given to
+// Verify, VerifyAt and VerifyDER. A longer one is refused with ErrTooLarge before it is parsed. The certificates of a card are about 1 KiB; the limit
+// is sixteen times that.
+const MaxCertificateSize = 16 << 10
+
 // pivIntermediatePrefix is the common-name prefix of the vendor's intermediates that sign the attestation key of a PIV applet.
 const pivIntermediatePrefix = "Yubico PIV Attestation "
 
@@ -203,6 +208,10 @@ func (v *Verifier) VerifyDER(slotDER, signerDER []byte) (Evidence, error) {
 func (v *Verifier) verifyDER(now time.Time, slotDER, signerDER []byte) (Evidence, error) {
 	if v == nil || v.anchors == nil {
 		return Evidence{}, ErrNoAnchor
+	}
+	// The one place that every entry passes before a byte is parsed: a certificate longer than the limit is refused.
+	if len(slotDER) > MaxCertificateSize || len(signerDER) > MaxCertificateSize {
+		return Evidence{}, &classed{class: ErrTooLarge, text: fmt.Sprintf("pivattest: a certificate is longer than %d bytes (the slot certificate %d, the signer %d)", MaxCertificateSize, len(slotDER), len(signerDER))}
 	}
 	// The parsed values point into the bytes they were read from: own copies, so that another goroutine changing the caller's bytes during
 	// the call cannot split the check of the chain from the facts.
