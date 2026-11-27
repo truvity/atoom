@@ -471,17 +471,21 @@ func (s *Service) adopt(e entry) (*slotKey, error) {
 }
 
 // attestationRefusal is the refusal for an error of the attestation check, by the class of the error (the library's named errors), so that
-// an operator reads the cause: the clock of the machine, a certificate that is missing, too large or does not parse, the driver's own pinned
-// files, or the chain. It holds no certificate content, key or serial; the journal has the full text of the error.
+// an operator reads the cause: the clock of the machine or the driver's own pinned files (an error of building the verifier, which the card marks
+// with ErrVerifierBuild), a certificate that is missing, too large, does not parse or has a malformed vendor extension (an error of checking the
+// two certificates), or the chain. It holds no certificate content, key or serial; the journal has the full text of the error.
 func attestationRefusal(err error) string {
 	switch {
-	case errors.Is(err, pivattest.ErrClock):
-		return "clock: the clock of this machine is outside the validity of the pinned certificates"
-	case errors.Is(err, pivattest.ErrNil), errors.Is(err, pivattest.ErrNoRaw), errors.Is(err, pivattest.ErrTooLarge), errors.Is(err, pivattest.ErrParse):
-		return "certificate: the attestation certificate is missing, too large or does not parse"
-	case errors.Is(err, pivattest.ErrPinTable), errors.Is(err, pivattest.ErrAdmission), errors.Is(err, pivattest.ErrRootCount),
-		errors.Is(err, pivattest.ErrRootPin), errors.Is(err, pivattest.ErrNoAnchor):
+	case errors.Is(err, card.ErrVerifierBuild):
+		// Where the error comes from, not only its class: a bundle of the program's own that does not parse is ErrParse too.
+		if errors.Is(err, pivattest.ErrClock) {
+			return "clock: the clock of this machine is outside the validity of the pinned certificates"
+		}
 		return "pins: the pinned Yubico certificates of this program are not as its table says"
+	case errors.Is(err, pivattest.ErrNil), errors.Is(err, pivattest.ErrNoRaw), errors.Is(err, pivattest.ErrTooLarge), errors.Is(err, pivattest.ErrParse),
+		errors.Is(err, pivattest.ErrFirmwareExt), errors.Is(err, pivattest.ErrSerialExt), errors.Is(err, pivattest.ErrPolicyExt), errors.Is(err, pivattest.ErrFormFactorExt):
+		// The chain of a malformed vendor extension verified: the certificate is at fault, not the chain.
+		return "certificate: the attestation certificate is missing, too large, does not parse or has a malformed vendor extension"
 	}
 	return "chain: the attestation does not chain to the Yubico root"
 }

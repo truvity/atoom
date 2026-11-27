@@ -445,6 +445,8 @@ func attRaw(t *testing.T, c *cardtest.Card) []byte {
 // verifier itself and of the clock, which the card cannot be made to give from outside, are given by the card's answer.
 func TestTheRefusalOfAFailedCheckNamesTheClassOfTheError(t *testing.T) {
 	spec := card.KeySpec{Algorithm: card.EC384, PIN: card.PINOnce, Touch: card.TouchNever}
+	const pins = "slots.9a.attestation: pins: the pinned Yubico certificates of this program are not as its table says"
+	const cert = "slots.9a.attestation: certificate: the attestation certificate is missing, too large, does not parse or has a malformed vendor extension"
 	const chain = "slots.9a.attestation: chain: the attestation does not chain to the Yubico root"
 	answering := func(err error) func(*cardtest.Card) *quirkCard {
 		return func(c *cardtest.Card) *quirkCard {
@@ -482,20 +484,25 @@ func TestTheRefusalOfAFailedCheckNamesTheClassOfTheError(t *testing.T) {
 		make  func(*cardtest.Card) *quirkCard
 		want  string
 	}{
-		{"the clock of the machine", false, answering(fmt.Errorf("a build: %w", pivattest.ErrClock)), "slots.9a.attestation: clock: the clock of this machine is outside the validity of the pinned certificates"},
+		{"the clock of the machine", false, answering(card.BuildError(fmt.Errorf("a build: %w", pivattest.ErrClock))), "slots.9a.attestation: clock: the clock of this machine is outside the validity of the pinned certificates"},
 		{"a certificate that is too large", false, func(c *cardtest.Card) *quirkCard {
 			return &quirkCard{Card: c, verify: fakeVerifier(t, c), attest: only9a(c, big1)}
-		}, "slots.9a.attestation: certificate: the attestation certificate is missing, too large or does not parse"},
+		}, "slots.9a.attestation: certificate: the attestation certificate is missing, too large, does not parse or has a malformed vendor extension"},
 		{"a certificate that is missing", false, func(c *cardtest.Card) *quirkCard {
 			return &quirkCard{Card: c, verify: fakeVerifier(t, c), attest: only9a(c, nil)}
-		}, "slots.9a.attestation: certificate: the attestation certificate is missing, too large or does not parse"},
+		}, cert},
 		{"a certificate with no raw bytes", false, func(c *cardtest.Card) *quirkCard {
 			return &quirkCard{Card: c, verify: fakeVerifier(t, c), attest: only9a(c, &x509.Certificate{})}
-		}, "slots.9a.attestation: certificate: the attestation certificate is missing, too large or does not parse"},
-		{"a certificate that does not parse", false, answering(pivattest.ErrParse), "slots.9a.attestation: certificate: the attestation certificate is missing, too large or does not parse"},
-		{"a pin table that is not the files'", false, answering(pivattest.ErrPinTable), "slots.9a.attestation: pins: the pinned Yubico certificates of this program are not as its table says"},
-		{"an admission that is not the table's", false, answering(fmt.Errorf("x: %w", pivattest.ErrAdmission)), "slots.9a.attestation: pins: the pinned Yubico certificates of this program are not as its table says"},
+		}, cert},
+		{"a certificate that does not parse", false, answering(pivattest.ErrParse), cert},
+		{"a pin table that is not the files'", false, answering(card.BuildError(pivattest.ErrPinTable)), "slots.9a.attestation: pins: the pinned Yubico certificates of this program are not as its table says"},
+		{"an admission that is not the table's", false, answering(card.BuildError(fmt.Errorf("x: %w", pivattest.ErrAdmission))), "slots.9a.attestation: pins: the pinned Yubico certificates of this program are not as its table says"},
 		{"a chain to another root", true, func(c *cardtest.Card) *quirkCard { return &quirkCard{Card: c, verify: fakeVerifier(t, c)} }, chain},
+		{"the program's own bundle does not parse", false, answering(card.BuildError(pivattest.ErrParse)), pins},
+		{"a malformed firmware extension", false, answering(pivattest.ErrFirmwareExt), cert},
+		{"a malformed serial extension", false, answering(pivattest.ErrSerialExt), cert},
+		{"a malformed policy extension", false, answering(pivattest.ErrPolicyExt), cert},
+		{"a malformed form factor extension", false, answering(pivattest.ErrFormFactorExt), cert},
 		{"an error that is of no class", false, answering(errors.New("something else")), chain},
 	}
 	for _, tt := range tests {
