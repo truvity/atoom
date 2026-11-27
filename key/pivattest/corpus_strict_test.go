@@ -111,7 +111,7 @@ func exactlyClass(err error, class string) bool {
 
 // wantEvidence is the evidence a verified slot certificate must give: the facts the old check returned come from the golden result; the
 // flags, the key, the algorithm and the anchor come from the certificates, read by this test's own code.
-func wantEvidence(slot, signer *x509.Certificate, g attesttest.Result, anchors map[string]bool) pivattest.Evidence {
+func wantEvidence(slot, signer *x509.Certificate, g attesttest.Result, anchors, pivs map[string]bool) pivattest.Evidence {
 	has := map[string]bool{}
 	for _, e := range slot.Extensions {
 		has[e.Id.String()] = true
@@ -126,6 +126,12 @@ func wantEvidence(slot, signer *x509.Certificate, g attesttest.Result, anchors m
 	if !anchors[anchor] && bytes.Equal(slot.RawIssuer, signer.RawSubject) {
 		anchor = signer.Issuer.CommonName
 	}
+	// Generated: a slot was read from the name, the signer given issued the slot certificate (the same bytes), and a PIV intermediate that the
+	// verifier admitted issued the signer. That is a chain of exactly three; the slot certificate is not an anchor (it is named by a slot).
+	generated := g.Slot != 0 && bytes.Equal(slot.RawIssuer, signer.RawSubject) && pivs[signer.Issuer.CommonName] && !anchors[slot.Subject.CommonName]
+	if generated {
+		anchor = signer.Issuer.CommonName
+	}
 	return pivattest.Evidence{
 		Slot: g.Slot, HasSlot: g.Slot != 0,
 		Firmware: pivattest.Version{Major: g.Firmware[0], Minor: g.Firmware[1], Patch: g.Firmware[2]}, HasFirmware: has[attesttest.OIDFirmware.String()],
@@ -133,7 +139,7 @@ func wantEvidence(slot, signer *x509.Certificate, g attesttest.Result, anchors m
 		FormFactor: g.FormFactor, HasFormFactor: has[attesttest.OIDFormFactor.String()],
 		PIN: pivattest.PINPolicy(g.PIN), Touch: pivattest.TouchPolicy(g.Touch), HasPolicy: has[attesttest.OIDPolicy.String()],
 		Algorithm: independentAlgorithm(pub), PublicKey: pub,
-		Anchor: anchor, Generated: strings.HasPrefix(anchor, "Yubico PIV Attestation "),
+		Anchor: anchor, Generated: generated,
 	}
 }
 
@@ -164,6 +170,17 @@ func anchorNames(p attesttest.PKIData) map[string]bool {
 			if cert, err := x509.ParseCertificate(blk.Bytes); err == nil && (f == p.RootPEM || strings.HasPrefix(cert.Subject.CommonName, "Yubico PIV Attestation ")) {
 				out[cert.Subject.CommonName] = true
 			}
+		}
+	}
+	return out
+}
+
+// pivNames are the names of the PIV intermediates of a PKI of the corpus that its verifier admits.
+func pivNames(p attesttest.PKIData) map[string]bool {
+	out := map[string]bool{}
+	for n := range anchorNames(p) {
+		if strings.HasPrefix(n, "Yubico PIV Attestation ") {
+			out[n] = true
 		}
 	}
 	return out
@@ -207,7 +224,7 @@ func caseProblems(c *attesttest.Corpus, vs map[string]*pivattest.Verifier, cs at
 			bad("an error with a non-zero evidence: %+v", ev)
 		}
 	case cs.Want.OK:
-		if d := evidenceDiff(ev, wantEvidence(slot, signer, cs.Want, anchorNames(c.PKIs[cs.PKI]))); d != "" {
+		if d := evidenceDiff(ev, wantEvidence(slot, signer, cs.Want, anchorNames(c.PKIs[cs.PKI]), pivNames(c.PKIs[cs.PKI]))); d != "" {
 			bad("evidence: %s", d)
 		}
 	}

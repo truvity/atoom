@@ -312,11 +312,14 @@ func FuzzVerifyDERCorpus(f *testing.F) {
 			ev.HasPolicy != has[attesttest.OIDPolicy.String()] || ev.HasFormFactor != has[attesttest.OIDFormFactor.String()] {
 			t.Fatalf("the flags of %+v do not say which extensions the certificate holds", ev)
 		}
-		if ev.Anchor == "" || ev.Generated != strings.HasPrefix(ev.Anchor, "Yubico PIV Attestation ") || ev.HasSlot != (ev.Slot != 0) {
+		if ev.Anchor == "" || (ev.Generated && (!ev.HasSlot || !strings.HasPrefix(ev.Anchor, "Yubico PIV Attestation "))) || ev.HasSlot != (ev.Slot != 0) {
 			t.Fatalf("an inconsistent evidence: %+v", ev)
 		}
 		if ev.HasPolicy && (ev.PIN < pivattest.PINNever || ev.PIN > pivattest.PINMatchAlways || ev.Touch < pivattest.TouchNever || ev.Touch > pivattest.TouchCached) {
 			t.Fatalf("a policy out of range: %+v", ev)
+		}
+		if ev.AttestsKey(ev.PublicKey) != ev.Generated {
+			t.Fatalf("AttestsKey of its own key is %v with Generated %v", ev.AttestsKey(ev.PublicKey), ev.Generated)
 		}
 		if ev.Algorithm != independentAlgorithm(ev.PublicKey) {
 			t.Fatalf("algorithm %v for a key of %T", ev.Algorithm, ev.PublicKey)

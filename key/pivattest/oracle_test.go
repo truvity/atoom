@@ -65,7 +65,7 @@ func TestEvidenceHoldsWhatTheCertificateStates(t *testing.T) {
 				t.Fatal(err)
 			}
 			want := tt.want
-			want.Algorithm, want.PublicKey, want.Anchor, want.Generated = pivattest.AlgEC256, slot.PublicKey, testAnchor, true
+			want.Algorithm, want.PublicKey, want.Anchor, want.Generated = pivattest.AlgEC256, slot.PublicKey, testAnchor, tt.want.HasSlot // a chain of three with a slot in the name
 			if d := evidenceDiff(ev, want); d != "" {
 				t.Fatal(d)
 			}

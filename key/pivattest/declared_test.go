@@ -154,7 +154,8 @@ func TestNilArgumentsAreANamedErrorAndNeverAPanic(t *testing.T) {
 		{"Verify(nil, nil)", func() (pivattest.Evidence, error) { return v.Verify(nil, nil) }, pivattest.ErrNil},
 		{"VerifyAt(now, nil, signer)", func() (pivattest.Evidence, error) { return v.VerifyAt(t2030, nil, p.F9) }, pivattest.ErrNil},
 		{"VerifyAt(now, slot, nil)", func() (pivattest.Evidence, error) { return v.VerifyAt(t2030, slot, nil) }, pivattest.ErrNil},
-		{"VerifyAt(zero, nil, nil)", func() (pivattest.Evidence, error) { return v.VerifyAt(time.Time{}, nil, nil) }, pivattest.ErrNil},
+		{"VerifyAt(now, nil, nil)", func() (pivattest.Evidence, error) { return v.VerifyAt(t2030, nil, nil) }, pivattest.ErrNil},
+		{"VerifyAt(zero, slot, signer)", func() (pivattest.Evidence, error) { return v.VerifyAt(time.Time{}, slot, p.F9) }, pivattest.ErrZeroTime},
 		{"VerifyDER(nil, signer)", func() (pivattest.Evidence, error) { return v.VerifyDER(nil, p.F9.Raw) }, pivattest.ErrParse},
 		{"VerifyDER(slot, nil)", func() (pivattest.Evidence, error) { return v.VerifyDER(slot.Raw, nil) }, pivattest.ErrParse},
 		{"VerifyDER(empty, empty)", func() (pivattest.Evidence, error) { return v.VerifyDER([]byte{}, []byte{}) }, pivattest.ErrParse},
@@ -164,14 +165,17 @@ func TestNilArgumentsAreANamedErrorAndNeverAPanic(t *testing.T) {
 		{"a zero verifier", func() (pivattest.Evidence, error) { return (&pivattest.Verifier{}).Verify(slot, p.F9) }, pivattest.ErrNoAnchor},
 		{"a zero verifier, VerifyAt", func() (pivattest.Evidence, error) { return new(pivattest.Verifier).VerifyAt(t2030, slot, p.F9) }, pivattest.ErrNoAnchor},
 		{"a zero verifier, VerifyDER", func() (pivattest.Evidence, error) { return (&pivattest.Verifier{}).VerifyDER(slot.Raw, p.F9.Raw) }, pivattest.ErrNoAnchor},
-		// A nil verifier and nil certificates: the doc comment lists the arguments first in the order of the checks, the code refuses the
-		// verifier first. Pinned as the code has it.
-		{"a zero verifier and nil certificates", func() (pivattest.Evidence, error) { return (&pivattest.Verifier{}).Verify(nil, nil) }, pivattest.ErrNoAnchor},
-		{"a nil verifier and nil certificates", func() (pivattest.Evidence, error) { return (*pivattest.Verifier)(nil).Verify(nil, nil) }, pivattest.ErrNoAnchor},
-		// A certificate that is not a parsed one (no DER): the standard library refuses it, with no panic.
-		{"a certificate that was never parsed", func() (pivattest.Evidence, error) { return v.VerifyAt(t2030, &x509.Certificate{}, &x509.Certificate{}) }, pivattest.ErrChain},
-		{"a slot certificate that was never parsed", func() (pivattest.Evidence, error) { return v.VerifyAt(t2030, &x509.Certificate{}, p.F9) }, pivattest.ErrChain},
-		{"a signer that was never parsed", func() (pivattest.Evidence, error) { return v.VerifyAt(t2030, slot, &x509.Certificate{}) }, pivattest.ErrChain},
+		// Nil certificates and a nil or zero verifier: the arguments are checked first (the order the doc comment gives), so ErrNil; a DER
+		// entry has no certificate argument to check, and the verifier's own check comes first there.
+		{"a zero verifier and nil certificates", func() (pivattest.Evidence, error) { return (&pivattest.Verifier{}).Verify(nil, nil) }, pivattest.ErrNil},
+		{"a nil verifier and nil certificates", func() (pivattest.Evidence, error) { return (*pivattest.Verifier)(nil).Verify(nil, nil) }, pivattest.ErrNil},
+		{"a nil verifier, VerifyAt, nil certificates", func() (pivattest.Evidence, error) { return (*pivattest.Verifier)(nil).VerifyAt(t2030, nil, nil) }, pivattest.ErrNil},
+		{"a zero verifier, VerifyDER, nothing", func() (pivattest.Evidence, error) { return (&pivattest.Verifier{}).VerifyDER(nil, nil) }, pivattest.ErrNoAnchor},
+		{"a zero verifier, a zero time", func() (pivattest.Evidence, error) { return (&pivattest.Verifier{}).VerifyAt(time.Time{}, slot, p.F9) }, pivattest.ErrZeroTime},
+		// A certificate that is not a parsed one (no Raw): refused, with no panic, whatever its fields say.
+		{"a certificate that was never parsed", func() (pivattest.Evidence, error) { return v.VerifyAt(t2030, &x509.Certificate{}, &x509.Certificate{}) }, pivattest.ErrNoRaw},
+		{"a slot certificate that was never parsed", func() (pivattest.Evidence, error) { return v.VerifyAt(t2030, &x509.Certificate{}, p.F9) }, pivattest.ErrNoRaw},
+		{"a signer that was never parsed", func() (pivattest.Evidence, error) { return v.VerifyAt(t2030, slot, &x509.Certificate{}) }, pivattest.ErrNoRaw},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -361,29 +365,39 @@ func TestVerifyAtJudgesEveryCertificateOfTheChain(t *testing.T) {
 	}
 }
 
-// A zero time is the current time (the doc comment says so). Pinned from both sides, with windows that hold any clock of this century so
-// that no result depends on the day: a window from 2010 to the end of time accepts it (a zero time that was the year 1 would not), and a
-// slot certificate that ended in 2011 refuses it (a zero time that meant "no check" would not).
-func TestAZeroTimeIsTheCurrentTime(t *testing.T) {
+// A zero time is refused by VerifyAt (ErrZeroTime), whatever the certificates; Verify and VerifyDER use the clock. Pinned with windows that hold
+// any clock of this century, so that no result depends on the day: a window from 2010 to the end of time is accepted by the entries that use
+// the clock, and a slot certificate that ended in 2011 is refused by them.
+func TestAZeroTimeIsRefusedAndTheClockEntriesUseTheClock(t *testing.T) {
 	end := time.Date(9999, 12, 31, 23, 59, 59, 0, time.UTC)
 	p := fixedPKI(t, attesttest.PKIOptions{NotBefore: t2010, NotAfter: end})
 	v := verifierOf(t, p)
 	forever := fixedSlot(t, p, attesttest.SlotOptions{NotBefore: t2010, NotAfter: end})
-	if _, err := v.VerifyAt(time.Time{}, forever, p.F9); err != nil {
-		t.Errorf("a zero time with a certificate valid until the end of time: %v", err)
+	ended := fixedSlot(t, p, attesttest.SlotOptions{NotBefore: t2010, NotAfter: time.Date(2011, 1, 1, 0, 0, 0, 0, time.UTC)})
+	for name, c := range map[string]*x509.Certificate{"a window to the end of time": forever, "a certificate that ended in 2011": ended} {
+		ev, err := v.VerifyAt(time.Time{}, c, p.F9)
+		if !errors.Is(err, pivattest.ErrZeroTime) || ev != (pivattest.Evidence{}) {
+			t.Errorf("%s: the zero time gave %+v, %v", name, ev, err)
+		}
 	}
 	if _, err := v.Verify(forever, p.F9); err != nil {
-		t.Errorf("Verify: %v", err)
+		t.Errorf("Verify, valid until the end of time: %v", err)
 	}
-	ended := fixedSlot(t, p, attesttest.SlotOptions{NotBefore: t2010, NotAfter: time.Date(2011, 1, 1, 0, 0, 0, 0, time.UTC)})
-	if _, err := v.VerifyAt(time.Time{}, ended, p.F9); !errors.Is(err, pivattest.ErrChain) {
-		t.Errorf("a zero time with a certificate that ended in 2011: %v", err)
+	if _, err := v.VerifyDER(forever.Raw, p.F9.Raw); err != nil {
+		t.Errorf("VerifyDER, valid until the end of time: %v", err)
 	}
 	if _, err := v.Verify(ended, p.F9); !errors.Is(err, pivattest.ErrChain) {
 		t.Errorf("Verify, a certificate that ended in 2011: %v", err)
 	}
-	// and a time of the year 1 that is not the zero value is the year 1: not the current time
+	if _, err := v.VerifyDER(ended.Raw, p.F9.Raw); !errors.Is(err, pivattest.ErrChain) {
+		t.Errorf("VerifyDER, a certificate that ended in 2011: %v", err)
+	}
+	// the epoch is a time like any other (here before the window)
 	if _, err := v.VerifyAt(time.Unix(0, 0), forever, p.F9); !errors.Is(err, pivattest.ErrChain) {
 		t.Errorf("the epoch: %v", err)
+	}
+	// the zero value in another zone is still the zero value
+	if _, err := v.VerifyAt(time.Time{}.In(time.FixedZone("UTC+3", 3*3600)), forever, p.F9); !errors.Is(err, pivattest.ErrZeroTime) {
+		t.Errorf("the zero instant in another zone: %v", err)
 	}
 }
