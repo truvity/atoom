@@ -71,5 +71,7 @@
 // constructor kept a failed build for the life of the program; and a certificate longer than MaxCertificateSize (16 KiB; the vendor's are
 // about 1 KiB) is refused with ErrTooLarge before it is parsed, where the old check has no limit. A seventh difference follows from the
 // pin table: Default is built only when all three pinned PIV attestation intermediates are valid at the clock of the machine, where the
-// old check was built when at least one of them was. Evidence.Generated and AttestsKey are new and have no counterpart in the old check.
+// old check was built when at least one of them was (from 2024-12-01, the start of the validity of the first two; before that date the old
+// check also built nothing). A refusal for the clock is the named error ErrClock, with the clock's time and the certificate's validity in
+// its text, and is not kept. Evidence.Generated and AttestsKey are new and have no counterpart in the old check.
 package pivattest

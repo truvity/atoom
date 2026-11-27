@@ -41,6 +41,12 @@ var (
 	// (the zero Verifier).
 	ErrNoAnchor = errors.New("pivattest: the bundle holds no PIV attestation intermediate that chains to the root")
 
+	// ErrClock: Default could not be built because a pinned certificate is not valid at the clock of this machine (its time is before the
+	// certificate's start of validity, or after its end). The text names the clock's time and the certificate's validity. It is not a
+	// disagreement of the embedded files with the pin table, which is ErrPinTable or ErrAdmission; a machine that starts with a stale clock
+	// gets this error until its clock is set, and the next call builds again.
+	ErrClock = errors.New("pivattest: a pinned certificate is not valid at the clock of this machine")
+
 	// ErrPinTable: an embedded vendor certificate is not the one the pin table names (Default only).
 	ErrPinTable = errors.New("pivattest: an embedded vendor certificate does not match the pin table")
 	// ErrAdmission: the PIV attestation intermediates that the bundle admits are not the ones of the pin table (Default only).

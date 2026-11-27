@@ -19,7 +19,7 @@ func TestDefaultAfterAFailedBuild(t *testing.T) {
 	early := time.Date(2000, 1, 1, 0, 0, 0, 0, time.UTC)
 	for i := 0; i < 3; i++ {
 		v, err := c.Get(func() time.Time { return early })
-		if v != nil || !errors.Is(err, pivattest.ErrNoAnchor) {
+		if v != nil || !errors.Is(err, pivattest.ErrClock) || errors.Is(err, pivattest.ErrNoAnchor) || errors.Is(err, pivattest.ErrAdmission) {
 			t.Fatalf("a build in 2000: %v, %v", v, err)
 		}
 		if c.Kept() != nil {
@@ -85,7 +85,7 @@ func TestDefaultUnderConcurrentCalls(t *testing.T) {
 	}
 	// the build over the vendor's files at a fixed time: also through the seam of the files
 	f := embedded(t)
-	if _, err := pivattest.BuildFromAt(f.rootPEM, f.bundlePEM, pivattest.Pins(), early); !errors.Is(err, pivattest.ErrNoAnchor) {
+	if _, err := pivattest.BuildFromAt(f.rootPEM, f.bundlePEM, pivattest.Pins(), early); !errors.Is(err, pivattest.ErrClock) {
 		t.Errorf("the vendor's files at 2000: %v", err)
 	}
 	if v, err := pivattest.BuildFromAt(f.rootPEM, f.bundlePEM, pivattest.Pins(), t2030); err != nil || v == nil {
