@@ -56,7 +56,7 @@
 // The vendor's older PIV root ("Yubico PIV Root CA Serial 263751", SHA-256
 // 63ece914e54dd87915f34033c85af4c0696ba1512f8add66ced738331207b546) is not pinned. By the vendor's attestation page as read on 2026-11-27,
 // every firmware before 5.7.4 is expected to chain to that older root, so a card with such firmware is refused at the chain by this
-// library; in the card driver, whose firmware floor is 5.7.0, that concerns 5.7.0 to 5.7.3, as it does with the driver's own check today.
+// library; in the card driver, whose firmware floor is 5.7.0, that concerns 5.7.0 to 5.7.3, as it did with the driver's own check before.
 // That was not measured on a card, and it is on the list of things to measure.
 //
 // # Equal to the check it replaces
