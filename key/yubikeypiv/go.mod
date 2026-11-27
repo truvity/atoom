@@ -11,6 +11,7 @@ require (
 	github.com/truvity/atoom/key v0.11.0
 	github.com/truvity/atoom/key/conformance v0.11.0
 	github.com/truvity/atoom/key/pinrelease v0.11.0
+	github.com/truvity/atoom/key/pivattest v0.11.0
 	github.com/truvity/atoom/key/slotplan v0.11.0
 	github.com/truvity/atoom/socket v0.11.0
 	google.golang.org/protobuf v1.36.12
