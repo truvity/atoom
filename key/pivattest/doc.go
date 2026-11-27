@@ -33,9 +33,10 @@
 // # The checks of Verify
 //
 // In order: the arguments (a nil certificate is ErrNil); both certificates read again from their Raw bytes (a certificate with no Raw is
-// ErrNoRaw, bytes that do not parse ErrParse), and everything below is taken from the values read again, never from a field of the
-// caller's certificate; the chain (ErrChain); the extensions in the order the certificate lists them, the first malformed one being the
-// error (ErrFirmwareExt, ErrSerialExt, ErrPolicyExt, ErrFormFactorExt); the slot. The chain is checked with the standard library, with the
+// ErrNoRaw; one longer than MaxCertificateSize, 16 KiB, is ErrTooLarge and is not parsed; bytes that do not parse are ErrParse), and
+// everything below is taken from the values read again, never from a field of the caller's certificate; the chain (ErrChain); the
+// extensions in the order the certificate lists them, the first malformed one being the error (ErrFirmwareExt, ErrSerialExt, ErrPolicyExt,
+// ErrFormFactorExt); the slot. The chain is checked with the standard library, with the
 // trust anchors as roots, the signer as the only intermediate, any extended key usage, and, for a signer that states no Basic Constraints (a
 // card of an older generation), the constraint "certificate authority" set on the value read again. Verify checks at the current time;
 // VerifyAt at the time of the caller, which must not be the zero time (ErrZeroTime): no entry point reads zero as "now".
@@ -64,8 +65,10 @@
 // strictness, the same quirks: a serial number longer than 32 bits is cut, bytes after the integer of the serial are ignored, a negative one
 // is refused; the class of every error is the same, a chain error keeps the text of its prefix, and the texts of the extension errors are
 // this package's own words); a corpus of certificates with the results of that check, in the package attesttest, is replayed by the tests
-// of every platform. Four differences are deliberate, and each has a test: the caller's certificate is not changed; a nil argument is an
-// error and not a panic; VerifyAt takes the time; and the facts are read from the signed bytes, so a change to a field of a parsed
-// certificate has no effect and a certificate built by hand with no Raw is refused. Evidence.Generated and AttestsKey are new and have no
-// counterpart in the old check.
+// of every platform. Six differences are deliberate, and each has a test: the caller's certificate is not changed; a nil argument is an
+// error and not a panic; VerifyAt takes the time; the facts are read from the signed bytes, so a change to a field of a parsed certificate
+// has no effect and a certificate built by hand with no Raw is refused; Default builds again after a failed build, where the old check's
+// constructor kept a failed build for the life of the program; and a certificate longer than MaxCertificateSize (16 KiB; the vendor's are
+// about 1 KiB) is refused with ErrTooLarge before it is parsed, where the old check has no limit. Evidence.Generated and AttestsKey are new
+// and have no counterpart in the old check.
 package pivattest

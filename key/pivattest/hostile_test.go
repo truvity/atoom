@@ -16,7 +16,7 @@ import (
 // Hostile input: bytes that are not what the call asks for. Every call returns (no panic, no hang), an error comes with a zero evidence and
 // is one of the named errors, and a verifier is built only when the files are what they should be.
 
-var verifyErrors = []error{pivattest.ErrParse, pivattest.ErrChain, pivattest.ErrFirmwareExt, pivattest.ErrSerialExt, pivattest.ErrPolicyExt, pivattest.ErrFormFactorExt, pivattest.ErrNoAnchor, pivattest.ErrNil}
+var verifyErrors = []error{pivattest.ErrParse, pivattest.ErrTooLarge, pivattest.ErrChain, pivattest.ErrFirmwareExt, pivattest.ErrSerialExt, pivattest.ErrPolicyExt, pivattest.ErrFormFactorExt, pivattest.ErrNoAnchor, pivattest.ErrNil}
 
 func namedVerifyError(err error) bool {
 	for _, e := range verifyErrors {
@@ -206,25 +206,43 @@ func TestHugeInputsReturn(t *testing.T) {
 	slot := fixedSlot(t, p, attesttest.SlotOptions{})
 	const mib = 1 << 20
 	huge := make([]byte, 64*mib)
+	// Over the limit of a certificate: refused by its length, before any byte is parsed, whatever the bytes are.
 	t.Run("a DER string of 64 MiB of zeros", func(t *testing.T) {
-		if _, err := safeVerifyDER(t, v, huge, slot.Raw); !errors.Is(err, pivattest.ErrParse) {
+		if _, err := safeVerifyDER(t, v, huge, slot.Raw); !errors.Is(err, pivattest.ErrTooLarge) {
 			t.Fatal(err)
 		}
-		if _, err := safeVerifyDER(t, v, slot.Raw, huge); !errors.Is(err, pivattest.ErrParse) {
+		if _, err := safeVerifyDER(t, v, slot.Raw, huge); !errors.Is(err, pivattest.ErrTooLarge) {
 			t.Fatal(err)
 		}
 	})
 	t.Run("a certificate followed by 32 MiB", func(t *testing.T) {
-		if _, err := safeVerifyDER(t, v, append(bytes.Clone(slot.Raw), huge[:32*mib]...), p.F9.Raw); !errors.Is(err, pivattest.ErrParse) {
+		if _, err := safeVerifyDER(t, v, append(bytes.Clone(slot.Raw), huge[:32*mib]...), p.F9.Raw); !errors.Is(err, pivattest.ErrTooLarge) {
 			t.Fatal(err)
 		}
 	})
-	t.Run("a long header of a DER certificate", func(t *testing.T) {
+	t.Run("a long header of a DER certificate and 16 MiB", func(t *testing.T) {
 		b := append([]byte{0x30, 0x84, 0x7f, 0xff, 0xff, 0xff}, huge[:16*mib]...)
+		if _, err := safeVerifyDER(t, v, b, p.F9.Raw); !errors.Is(err, pivattest.ErrTooLarge) {
+			t.Fatal(err)
+		}
+	})
+	// Under the limit: the parser refuses them, and does not read on.
+	t.Run("a long header of a DER certificate with a short body", func(t *testing.T) {
+		b := append([]byte{0x30, 0x84, 0x7f, 0xff, 0xff, 0xff}, huge[:8*1024]...)
+		if _, err := safeVerifyDER(t, v, b, p.F9.Raw); !errors.Is(err, pivattest.ErrParse) {
+			t.Fatal(err)
+		}
+		if _, err := safeVerifyDER(t, v, slot.Raw, b); !errors.Is(err, pivattest.ErrParse) {
+			t.Fatal(err)
+		}
+	})
+	t.Run("a certificate followed by zeros up to the limit", func(t *testing.T) {
+		b := append(bytes.Clone(slot.Raw), huge[:pivattest.MaxCertificateSize-len(slot.Raw)]...)
 		if _, err := safeVerifyDER(t, v, b, p.F9.Raw); !errors.Is(err, pivattest.ErrParse) {
 			t.Fatal(err)
 		}
 	})
+	// The files a verifier is built from have no such limit: the vendor's bundle is a file of 15 certificates.
 	t.Run("a PEM file of 64 MiB of text", func(t *testing.T) {
 		text := bytes.Repeat([]byte("A"), 64*mib)
 		if _, err := safeBuild(t, text, p.BundlePEM(), p.RootSHA256()); !errors.Is(err, pivattest.ErrRootCount) {

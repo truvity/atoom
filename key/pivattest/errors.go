@@ -12,6 +12,9 @@ var (
 	ErrZeroTime = errors.New("pivattest: the time of the check is the zero time")
 	// ErrParse: a certificate (a DER string, or a PEM block of a bundle) does not parse.
 	ErrParse = errors.New("pivattest: a certificate does not parse")
+	// ErrTooLarge: a certificate given to a check (the slot certificate or the signer) is longer than MaxCertificateSize bytes. It is refused
+	// before it is parsed. The limit does not apply to the files a verifier is built from.
+	ErrTooLarge = errors.New("pivattest: a certificate is longer than the limit")
 
 	// ErrChain: the slot certificate does not chain through the signer to a trust anchor of the verifier (an unknown authority, a
 	// time outside a validity period, a signature that does not match, an unhandled critical extension, a refused algorithm, an
