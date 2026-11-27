@@ -128,29 +128,28 @@ func TestCorpusKeysAreNamedByKind(t *testing.T) {
 	}
 }
 
+// Generated is true only for a chain of exactly three certificates (the slot certificate, the signer given, an admitted PIV intermediate) with
+// a slot read from the name; the anchor is that of the chain.
 func TestCorpusAnchorAndGenerated(t *testing.T) {
 	c := loadCorpus(t)
 	vs := verifiers(t, c)
 	for _, cs := range c.Cases {
-		wantAnchor, wantGen := "Yubico PIV Attestation TEST ONLY 1", true
+		if !cs.Want.OK {
+			continue
+		}
+		ev, err := vs[cs.PKI].VerifyDER(cs.Slot, cs.Signer)
+		if err != nil {
+			t.Fatalf("%s: %v", cs.Name, err)
+		}
+		wantAnchor, wantGen := "Yubico PIV Attestation TEST ONLY 1", ev.HasSlot
 		switch cs.Name {
 		case "f9-signed-by-root":
 			wantAnchor, wantGen = "TEST ONLY Yubico Attestation Root 1", false
-		case "signer-and-slot-swapped":
-			// the card's certificate is read as the slot certificate; it is signed by the PIV intermediate all the same
-		default:
-			if !cs.Want.OK {
-				continue
-			}
+		case "signer-is-the-piv-intermediate", "signer-and-slot-swapped":
+			wantGen = false // a chain of two: the signer is not in it, or the card's certificate is read as the slot certificate
 		}
-		if cs.Name == "f9-signed-by-root" || cs.Want.OK {
-			ev, err := vs[cs.PKI].VerifyDER(cs.Slot, cs.Signer)
-			if err != nil {
-				t.Fatalf("%s: %v", cs.Name, err)
-			}
-			if ev.Anchor != wantAnchor || ev.Generated != wantGen {
-				t.Errorf("%s: anchor %q generated %v, want %q %v", cs.Name, ev.Anchor, ev.Generated, wantAnchor, wantGen)
-			}
+		if ev.Anchor != wantAnchor || ev.Generated != wantGen {
+			t.Errorf("%s: anchor %q generated %v, want %q %v", cs.Name, ev.Anchor, ev.Generated, wantAnchor, wantGen)
 		}
 	}
 }

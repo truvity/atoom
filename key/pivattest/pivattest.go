@@ -1,6 +1,7 @@
 package pivattest
 
 import (
+	"bytes"
 	"crypto"
 	"crypto/ecdh"
 	"crypto/ecdsa"
@@ -79,16 +80,18 @@ func (a Algorithm) String() string {
 	return names[a]
 }
 
-// Evidence is what a verified slot certificate states. The vendor's extensions are optional for this package: an extension that is absent
-// leaves its fields at the zero value and its Has flag false, and the caller decides whether that is acceptable. The package compares
-// nothing between this evidence and a card or a plan; that is the caller's.
+// Evidence is what a verified slot certificate states. Read it with the rules of the package comment: a fact is read only after its Has flag
+// is true, a fact that is missing or unknown is a refusal, and the first thing a caller checks is the key it uses (AttestsKey). The package
+// compares nothing between this evidence and a card or a plan; that is the caller's.
 type Evidence struct {
-	// Slot is the key reference read from the common name of the slot certificate (9a, 9c, 9d, 9e or 82 to 95), or 0 when the name does not
-	// give one of those (the attestation slot f9 and the slots 80 and 96 included).
+	// Slot is the key reference read from the common name of the slot certificate, and HasSlot says that it was read. The names that give a
+	// slot are exactly "YubiKey PIV Attestation " followed by a hexadecimal number of up to 32 bits (upper or lower case, leading zeros
+	// allowed, no sign and no prefix) whose value is 9a, 9c, 9d, 9e or one of 82 to 95. Any other name, the attestation slot f9 and the
+	// slots 80 and 96 included, leaves Slot 0 and HasSlot false.
 	Slot    byte
 	HasSlot bool
 
-	Firmware    Version // from the extension 41482.3.3
+	Firmware    Version // from the extension 41482.3.3; zero when HasFirmware is false
 	HasFirmware bool
 
 	// Serial is the serial number of the card, read as an ASN.1 integer (bytes after it are ignored) and cut to its low 32 bits.
@@ -98,53 +101,123 @@ type Evidence struct {
 	FormFactor    byte // from the extension 41482.3.9: one byte, 0 when absent
 	HasFormFactor bool
 
-	PIN       PINPolicy   // from the extension 41482.3.8
+	PIN       PINPolicy   // from the extension 41482.3.8; 0 when HasPolicy is false, so a test "PIN is not never" would pass a missing policy
 	Touch     TouchPolicy // from the same extension
 	HasPolicy bool
 
-	// Algorithm and PublicKey describe the key of the slot certificate (PublicKey is nil for a key of a kind that the standard library does
-	// not read). The package does not check that the key is one the card can hold.
+	// Algorithm describes PublicKey. PublicKey is the key the slot certificate attests; it is nil for a key of a kind that the standard
+	// library does not read, and that is a refusal. The package does not check that the key is one the card can hold. THE KEY A CALLER
+	// USES MUST BE THE KEY OF THIS EVIDENCE: a true attestation of one key does not speak for another key later put in the same slot.
+	// AttestsKey makes that comparison.
 	Algorithm Algorithm
 	PublicKey crypto.PublicKey
 
-	// Anchor is the common name of the trust anchor the chain ended in.
-	Anchor string
-	// Generated is true when that anchor is a PIV attestation intermediate of the vendor: the card's attestation key, which only attests
-	// keys the card made, was certified by it. It is false for a chain that ends in the root itself (no card does that).
+	// Generated is true only when the chain that was verified is exactly three certificates: the slot certificate, the signer that was
+	// given (byte for byte) and one of the PIV attestation intermediates that this verifier admitted at construction (the root and the
+	// other intermediates are not among them), and a slot was read from the name of the slot certificate (HasSlot). It says that a card
+	// whose attestation key was certified by the vendor's PIV intermediate attested this key. It is false for a slot certificate that is
+	// itself an anchor, for a chain that ends in the root or in another certificate, and for a signer that is not in the chain.
 	Generated bool
+	// Anchor is the common name of the anchor of the chain that makes Generated true; when Generated is false it is the common name of the
+	// anchor whose certificate has the smallest SHA-256 among the anchors of all the chains found (so it does not depend on the order in
+	// which the standard library lists them).
+	Anchor string
+}
+
+// AttestsKey reports whether this evidence attests pub: true only when Generated is true, PublicKey is not nil, and pub equals PublicKey by
+// the Equal method of the key type. It is false for a nil pub, for a pub of a type other than the forms that the standard library's
+// certificate parser gives (*ecdsa.PublicKey, *rsa.PublicKey, ed25519.PublicKey and, for an X25519 key, *ecdh.PublicKey) and for two keys of
+// different types. A caller that signs or decrypts with a key calls this with the public key it uses (for example the key it read back from
+// the slot) before it believes that the key was made on a card.
+func (e Evidence) AttestsKey(pub crypto.PublicKey) bool {
+	if !e.Generated || !knownKey(e.PublicKey) || !knownKey(pub) {
+		return false
+	}
+	eq, ok := e.PublicKey.(interface{ Equal(crypto.PublicKey) bool })
+	return ok && eq.Equal(pub)
+}
+
+// knownKey is true for a non-nil key of one of the four forms that the parser of the standard library gives.
+func knownKey(pub crypto.PublicKey) bool {
+	switch k := pub.(type) {
+	case *ecdsa.PublicKey:
+		return k != nil
+	case *rsa.PublicKey:
+		return k != nil
+	case ed25519.PublicKey:
+		return k != nil
+	case *ecdh.PublicKey:
+		return k != nil
+	}
+	return false
 }
 
 // Verifier checks slot certificates against trust anchors fixed at construction. It holds no state that a call changes, so it is safe for
 // concurrent use. The zero Verifier has no anchors and refuses everything.
 type Verifier struct {
 	anchors *x509.CertPool
+	// admitted holds the SHA-256 (DER, hexadecimal) of the PIV attestation intermediates that the construction admitted.
+	admitted map[string]bool
 }
 
-// Verify proves, against the anchors of v, that slot was certified by signer, the card's attestation certificate (f9), and reads what slot
-// states. It does not change slot or signer. The chain is checked at the current time. The order of the checks is: the arguments, the chain,
-// then the extensions in the order the certificate lists them (the first malformed one is the error), then the slot.
+// Verify checks, against the anchors of v and at the current time, that slot chains to an anchor with signer as the only intermediate that
+// the chain may use, and reads what slot states. A nil error proves that, and no more: it does not prove that signer was used, and it does
+// not prove that a card made the key. Evidence.Generated says that, and Evidence.AttestsKey ties it to the key a caller uses.
+//
+// Everything is taken from the signed bytes: both certificates are read again from their Raw field, and the chain, the extensions, the name
+// and the key come from the values read again, so a change to a field of the caller's certificate has no effect and a certificate with no
+// Raw is refused (ErrNoRaw). The caller's certificates are not changed. The order of the checks is: the arguments, the certificates, the
+// chain, then the extensions in the order the certificate lists them (the first malformed one is the error), then the slot.
 func (v *Verifier) Verify(slot, signer *x509.Certificate) (Evidence, error) {
-	return v.VerifyAt(time.Time{}, slot, signer)
+	return v.verify(time.Now(), slot, signer)
 }
 
-// VerifyAt is Verify with the chain checked at now (a zero now is the current time). It serves evidence that is checked with no card at
-// hand, and tests.
+// VerifyAt is Verify with the chain checked at now: the slot certificate, the signer and the anchor are all judged at that time. It serves
+// evidence that is checked with no card at hand, and tests. A zero now is refused (ErrZeroTime): no entry point reads it as "the current
+// time".
 func (v *Verifier) VerifyAt(now time.Time, slot, signer *x509.Certificate) (Evidence, error) {
-	if v == nil || v.anchors == nil {
-		return Evidence{}, ErrNoAnchor
+	if now.IsZero() {
+		return Evidence{}, ErrZeroTime
 	}
+	return v.verify(now, slot, signer)
+}
+
+func (v *Verifier) verify(now time.Time, slot, signer *x509.Certificate) (Evidence, error) {
 	if slot == nil || signer == nil {
 		return Evidence{}, ErrNil
 	}
-	// A card of an older generation signs with an attestation certificate that states no Basic Constraints, which the standard
-	// library refuses for a signer. The workaround is made on a copy, so the caller's certificate stays as it was.
-	sc := *signer
-	if !sc.BasicConstraintsValid {
-		sc.BasicConstraintsValid = true
-		sc.IsCA = true
+	if len(slot.Raw) == 0 || len(signer.Raw) == 0 {
+		return Evidence{}, ErrNoRaw
+	}
+	return v.verifyDER(now, slot.Raw, signer.Raw)
+}
+
+// VerifyDER parses the two certificates and verifies them as Verify does, at the current time.
+func (v *Verifier) VerifyDER(slotDER, signerDER []byte) (Evidence, error) {
+	return v.verifyDER(time.Now(), slotDER, signerDER)
+}
+
+// verifyDER is the one path that every entry takes.
+func (v *Verifier) verifyDER(now time.Time, slotDER, signerDER []byte) (Evidence, error) {
+	if v == nil || v.anchors == nil {
+		return Evidence{}, ErrNoAnchor
+	}
+	slot, err := x509.ParseCertificate(slotDER)
+	if err != nil {
+		return Evidence{}, &classed{class: ErrParse, cause: err, text: "pivattest: the slot certificate does not parse: " + err.Error()}
+	}
+	signer, err := x509.ParseCertificate(signerDER)
+	if err != nil {
+		return Evidence{}, &classed{class: ErrParse, cause: err, text: "pivattest: the signer certificate does not parse: " + err.Error()}
+	}
+	// A card of an older generation signs with an attestation certificate that states no Basic Constraints, which the standard library
+	// refuses for a signer. The workaround is made on the value read again, which no caller holds.
+	if !signer.BasicConstraintsValid {
+		signer.BasicConstraintsValid = true
+		signer.IsCA = true
 	}
 	inter := x509.NewCertPool()
-	inter.AddCert(&sc)
+	inter.AddCert(signer)
 	chains, err := slot.Verify(x509.VerifyOptions{
 		Roots: v.anchors, Intermediates: inter, CurrentTime: now,
 		KeyUsages: []x509.ExtKeyUsage{x509.ExtKeyUsageAny},
@@ -161,30 +234,40 @@ func (v *Verifier) VerifyAt(now time.Time, slot, signer *x509.Certificate) (Evid
 	e.Slot, e.HasSlot = slotFromName(slot.Subject.CommonName)
 	e.PublicKey = slot.PublicKey
 	if e.PublicKey == nil {
-		// The standard library leaves the key of a certificate empty for an X25519 key, which a card holds; the key itself it reads.
+		// The standard library (Go 1.27) leaves the key of a certificate empty for an X25519 key, which a card holds, because it does not
+		// know the algorithm of the certificate; the key itself it reads.
 		if k, err := x509.ParsePKIXPublicKey(slot.RawSubjectPublicKeyInfo); err == nil {
 			e.PublicKey = k
 		}
 	}
 	e.Algorithm = algorithmOf(e.PublicKey)
-	if len(chains) > 0 && len(chains[0]) > 0 {
-		e.Anchor = chains[0][len(chains[0])-1].Subject.CommonName
-		e.Generated = strings.HasPrefix(e.Anchor, pivIntermediatePrefix)
-	}
+	e.Anchor, e.Generated = v.anchorOf(chains, slot, signer, e.HasSlot)
 	return e, nil
 }
 
-// VerifyDER parses the two certificates and verifies them as Verify does.
-func (v *Verifier) VerifyDER(slotDER, signerDER []byte) (Evidence, error) {
-	slot, err := x509.ParseCertificate(slotDER)
-	if err != nil {
-		return Evidence{}, &classed{class: ErrParse, cause: err, text: "pivattest: the slot certificate does not parse: " + err.Error()}
+// anchorOf chooses the anchor to report, and says whether a chain of exactly three certificates (the slot certificate, the signer and an
+// admitted PIV attestation intermediate) was among the chains. Among equals the anchor with the smallest SHA-256 wins, so the answer does not
+// depend on the order of the chains.
+func (v *Verifier) anchorOf(chains [][]*x509.Certificate, slot, signer *x509.Certificate, hasSlot bool) (string, bool) {
+	var best, bestSound struct{ digest, name string }
+	for _, c := range chains {
+		if len(c) == 0 {
+			continue
+		}
+		top := c[len(c)-1]
+		d := digest(top)
+		if hasSlot && len(c) == 3 && bytes.Equal(c[0].Raw, slot.Raw) && bytes.Equal(c[1].Raw, signer.Raw) && v.admitted[d] &&
+			(bestSound.digest == "" || d < bestSound.digest) {
+			bestSound.digest, bestSound.name = d, top.Subject.CommonName
+		}
+		if best.digest == "" || d < best.digest {
+			best.digest, best.name = d, top.Subject.CommonName
+		}
 	}
-	signer, err := x509.ParseCertificate(signerDER)
-	if err != nil {
-		return Evidence{}, &classed{class: ErrParse, cause: err, text: "pivattest: the signer certificate does not parse: " + err.Error()}
+	if bestSound.digest != "" {
+		return bestSound.name, true
 	}
-	return v.Verify(slot, signer)
+	return best.name, false
 }
 
 // addExtension reads one extension of the slot certificate. An extension with another identifier is not read.

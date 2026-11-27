@@ -6,7 +6,9 @@ import (
 	"os"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/truvity/atoom/key/pivattest/attesttest"
 )
@@ -154,7 +156,7 @@ func TestDefaultFailsClosed(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			v, err := buildFrom(tt.root, tt.bundle, tt.table)
+			v, err := buildFrom(tt.root, tt.bundle, tt.table, time.Now())
 			if tt.want == nil {
 				if err != nil || v == nil {
 					t.Fatalf("refused: %v", err)
@@ -182,4 +184,33 @@ func without(t *testing.T, name string) []byte {
 		}
 	}
 	return out
+}
+
+// R8: a build that fails because the clock is outside the validity of the pinned certificates is not kept; the next call builds again,
+// and a success is kept.
+func TestDefaultKeepsOnlyASuccess(t *testing.T) {
+	var c defaultCache
+	early := time.Date(2000, 1, 1, 0, 0, 0, 0, time.UTC)
+	if v, err := c.get(func() time.Time { return early }); err == nil || v != nil {
+		t.Fatalf("a build at %v: %v", early, err)
+	}
+	if c.v != nil {
+		t.Fatal("a failed build was kept")
+	}
+	v, err := c.get(time.Now)
+	if err != nil || v == nil {
+		t.Fatalf("a build after the clock was set: %v", err)
+	}
+	// The kept verifier is returned whatever the clock says, to every caller at once.
+	var wg sync.WaitGroup
+	for i := 0; i < 8; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if got, err := c.get(func() time.Time { return early }); err != nil || got != v {
+				t.Errorf("the kept verifier: %v, %v", got, err)
+			}
+		}()
+	}
+	wg.Wait()
 }
