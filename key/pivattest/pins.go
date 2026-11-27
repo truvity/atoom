@@ -135,9 +135,9 @@ func buildFrom(rootPEM, bundlePEM []byte, pins []Pin, now time.Time) (*Verifier,
 // card, a peer, a file it sent) make the check worthless: whoever made them is trusted by construction.
 //
 // A PEM block that is not a CERTIFICATE is skipped; a CERTIFICATE block whose bytes do not parse is an error (ErrRootCount for the root
-// file, ErrParse for the bundle). Reading stops at the first piece that is not a whole PEM block (a block cut short, with damaged armor or
-// a damaged base64 body), and that piece and every byte after it are ignored without an error: a verifier built from a damaged or cut
-// bundle has fewer anchors, and so refuses more. Only Default checks the bundle against the pins and fails closed.
+// file, ErrParse for the bundle). A block that is cut short or whose armor or base64 body is damaged is skipped without an error, as are
+// bytes that are no block, before, between or after the whole blocks (the whole blocks are still read): a verifier built from a damaged or
+// cut bundle has fewer anchors, and so refuses more. Only Default checks the bundle against the pins and fails closed.
 func NewVerifierFromPEM(rootPEM, bundlePEM []byte, wantRootSHA256 string) (*Verifier, error) {
 	v, _, err := newVerifier(rootPEM, bundlePEM, wantRootSHA256, time.Now())
 	return v, err
