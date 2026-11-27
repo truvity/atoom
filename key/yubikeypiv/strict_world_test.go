@@ -382,7 +382,7 @@ func qpWantPeerRefusal(t *testing.T, name string, o qpOut) {
 }
 
 // qpLeaks lists what a refusal's words hold of the certificate or of the card: the key, the serial, the certificate's bytes or names.
-func qpLeaks(text string, c *x509.Certificate, serial uint32) []string {
+func qpLeaks(text string, c *x509.Certificate, serial uint32, name bool) []string {
 	var found []string
 	chk := func(what, s string) {
 		if s != "" && strings.Contains(text, s) {
@@ -393,7 +393,9 @@ func qpLeaks(text string, c *x509.Certificate, serial uint32) []string {
 	chk("the key (base64)", base64.StdEncoding.EncodeToString(c.RawSubjectPublicKeyInfo)[10:50])
 	chk("the certificate (base64)", base64.StdEncoding.EncodeToString(c.Raw)[40:80])
 	chk("the serial", fmt.Sprint(serial))
-	chk("the name", c.Subject.CommonName)
+	if name {
+		chk("the name", c.Subject.CommonName)
+	}
 	chk("the signature (hex)", hex.EncodeToString(c.Signature[:16]))
 	return found
 }

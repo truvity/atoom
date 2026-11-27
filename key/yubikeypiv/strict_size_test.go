@@ -102,7 +102,7 @@ func TestQPThePeersCertificateOfExactlyTheLimitIsCheckedAndOneByteMoreIsRefusedB
 }
 
 // On adoption the certificate comes from the card, not from a peer: the driver does not size it, the library does. A certificate of the limit is
-// adopted and one byte more is refused as the chain error of every attestation that is not read, with the journal saying why.
+// adopted and one byte more is refused as a certificate that cannot be read (not as a chain), with the journal saying why.
 func TestQPAnAdoptedCertificateOfTheLimitIsTakenAndOneByteMoreIsRefused(t *testing.T) {
 	const limit = pivattest.MaxCertificateSize
 	w := newQPWorld(t, 12345678, false, false)
@@ -110,7 +110,7 @@ func TestQPAnAdoptedCertificateOfTheLimitIsTakenAndOneByteMoreIsRefused(t *testi
 		t.Fatalf("a slot certificate of the limit: %v", o.err)
 	}
 	o := qpAdopt(t, w, w.f9, w.sizedSlot(t, limit+1, qpSlot{}))
-	if o.accepted() || !strings.HasPrefix(o.word, "chain: ") {
+	if o.accepted() || !strings.HasPrefix(o.word, "certificate: ") {
 		t.Fatalf("one byte over: %v", o.err)
 	}
 	line := o.rec.line(t, "attestation refused")
