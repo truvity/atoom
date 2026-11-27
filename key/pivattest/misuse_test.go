@@ -16,8 +16,8 @@ import (
 // so that a caller knows which checks are its own.
 
 // The arguments swapped: the attestation certificate is read as the slot certificate. It chains to the PIV intermediate on its own, so the
-// call is accepted, and the evidence describes the attestation certificate: no slot, no extension, the key of the card's attestation key,
-// and Generated true. A caller that takes the evidence for the attestation of the key it generated must compare the key.
+// call is accepted (what is accepted is as before), and the evidence describes the attestation certificate: no slot, no extension, the key
+// of the card's attestation key. Generated is false (a chain of two, with no slot in the name), so AttestsKey is false for every key.
 func TestSwappedArgumentsAreAcceptedAndDescribeTheAttestationCertificate(t *testing.T) {
 	p := fixedPKI(t, attesttest.PKIOptions{})
 	v := verifierOf(t, p)
@@ -26,7 +26,7 @@ func TestSwappedArgumentsAreAcceptedAndDescribeTheAttestationCertificate(t *test
 	if err != nil {
 		t.Fatalf("the swapped call is refused: %v", err)
 	}
-	if ev.HasSlot || ev.HasFirmware || ev.HasSerial || ev.HasPolicy || ev.HasFormFactor || !ev.Generated || ev.Anchor != testAnchor {
+	if ev.HasSlot || ev.HasFirmware || ev.HasSerial || ev.HasPolicy || ev.HasFormFactor || ev.Generated || ev.Anchor != testAnchor {
 		t.Errorf("evidence of the swapped call: %+v", ev)
 	}
 	if !sameKey(ev.PublicKey, p.F9.PublicKey) || sameKey(ev.PublicKey, slot.PublicKey) {
@@ -35,12 +35,16 @@ func TestSwappedArgumentsAreAcceptedAndDescribeTheAttestationCertificate(t *test
 	if ev.Algorithm != pivattest.AlgEC384 {
 		t.Errorf("algorithm %v", ev.Algorithm)
 	}
+	if ev.AttestsKey(p.F9.PublicKey) || ev.AttestsKey(slot.PublicKey) {
+		t.Error("the swapped call attests a key")
+	}
 }
 
 // The same certificate twice. A slot certificate given as its own signer does not chain (its issuer is not there); the attestation
 // certificate given twice does, and so does any certificate that is an anchor (the standard library takes a certificate that is itself in
 // the roots as a chain of one): the evidence is that of that certificate. With Default, the vendor's own public certificates are accepted
-// this way, whatever the second argument is: Generated is true for a PIV intermediate and false for the root, and the key is the vendor's.
+// this way, whatever the second argument is; since the fix, Generated is false for every one of them (no chain of three, no slot in the name)
+// and AttestsKey is false for the vendor's key.
 func TestTheSameCertificateTwiceAndAnAnchorAsTheSlotCertificate(t *testing.T) {
 	p := fixedPKI(t, attesttest.PKIOptions{})
 	v := verifierOf(t, p)
@@ -49,7 +53,7 @@ func TestTheSameCertificateTwiceAndAnAnchorAsTheSlotCertificate(t *testing.T) {
 		t.Errorf("a slot certificate twice: %v", err)
 	}
 	ev, err := v.VerifyAt(t2030, p.F9, p.F9)
-	if err != nil || ev.HasSlot || !ev.Generated || !sameKey(ev.PublicKey, p.F9.PublicKey) {
+	if err != nil || ev.HasSlot || ev.Generated || ev.AttestsKey(p.F9.PublicKey) || !sameKey(ev.PublicKey, p.F9.PublicKey) {
 		t.Errorf("the attestation certificate twice: %+v, %v", ev, err)
 	}
 	// an anchor given as the slot certificate, with any signer (here the slot certificate, which has nothing to do with it)
@@ -60,8 +64,7 @@ func TestTheSameCertificateTwiceAndAnAnchorAsTheSlotCertificate(t *testing.T) {
 				t.Errorf("%s with %s as the signer: %v (the standard library takes a root as a chain of one)", name, sname, err)
 				continue
 			}
-			wantGenerated := c == p.PIV
-			if ev.Generated != wantGenerated || ev.Anchor != c.Subject.CommonName || !sameKey(ev.PublicKey, c.PublicKey) || ev.HasSlot {
+			if ev.Generated || ev.AttestsKey(c.PublicKey) || ev.Anchor != c.Subject.CommonName || !sameKey(ev.PublicKey, c.PublicKey) || ev.HasSlot {
 				t.Errorf("%s with %s as the signer: %+v", name, sname, ev)
 			}
 		}
@@ -94,7 +97,7 @@ func TestTheSameCertificateTwiceAndAnAnchorAsTheSlotCertificate(t *testing.T) {
 		if !isAnchor[cn] {
 			anchor = issuer
 		}
-		if err != nil || ev.Anchor != anchor || ev.Generated != (anchor != "Yubico Attestation Root 1") || !sameKey(ev.PublicKey, cert.PublicKey) || ev.HasSlot {
+		if err != nil || ev.Anchor != anchor || ev.Generated || ev.AttestsKey(cert.PublicKey) || !sameKey(ev.PublicKey, cert.PublicKey) || ev.HasSlot {
 			t.Errorf("%s: %+v, %v", cn, ev, err)
 		}
 	}
