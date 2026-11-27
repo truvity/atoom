@@ -10,7 +10,7 @@ Why the `key/yubikeypiv` driver is Go on piv-go, and not Rust or Go over PKCS#11
 - `ykcs11` does not hold the card for itself. When a second client touched the card, the holder failed in 3 of 5 runs, once without recovering, because libykpiv reconnects with `SCARD_RESET_CARD`.
 - libykpiv also caches the PIN in its own heap, out of reach of `zeroize`.
 - `piv-go` connects exclusively, queues callers fairly and reaches its first signature in 0.17 s.
-- Its own `piv.Verify` rejects attestations from firmware 5.7 and newer, so the driver supplies Yubico Attestation Root 1 and its intermediate (`internal/card/certs`).
+- Its own `piv.Verify` rejects attestations from firmware 5.7 and newer, so the driver supplied Yubico Attestation Root 1 and its intermediate (`internal/card/certs`); since 2026-11-27 they are pinned in [key/pivattest](../../../pivattest/README.md), which the driver uses.
 
 ## The decision
 
