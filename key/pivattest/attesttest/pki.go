@@ -254,6 +254,7 @@ type SlotOptions struct {
 	SignatureAlgorithm  x509.SignatureAlgorithm
 	SignedWith          crypto.Signer     // default: the key of this PKI's f9
 	Issuer              *x509.Certificate // the certificate of that key; default this PKI's f9
+	SignedByPIV         bool              // signed by the PIV intermediate itself, the card's attestation certificate left out of the chain
 }
 
 // Slot makes a slot certificate signed by the card's attestation key of this PKI.
@@ -308,6 +309,9 @@ func (p *PKI) SlotDER(o SlotOptions) ([]byte, error) {
 		ExtraExtensions: ext, ExtKeyUsage: o.ExtKeyUsage, UnknownExtKeyUsage: o.UnknownExtKeyUsage, SignatureAlgorithm: o.SignatureAlgorithm,
 	}
 	issuer := o.Issuer
+	if o.SignedByPIV {
+		issuer, key = p.PIV, p.pivKey
+	}
 	if issuer == nil {
 		issuer = p.F9
 	}

@@ -9,6 +9,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"time"
 
 	_ "embed" // the vendor's certificates below
 )
@@ -54,34 +55,50 @@ var pins = []Pin{
 // Pins returns a copy of the pin table.
 func Pins() []Pin { return slices.Clone(pins) }
 
-var (
-	defaultOnce sync.Once
-	defaultV    *Verifier
-	defaultErr  error
-)
-
-// Default is the verifier over the vendor's pinned certificates, built once. It fails, and keeps failing, when an embedded certificate is
-// not the one the pin table names by its SHA-256, when the root file holds more or fewer than one certificate, or when the PIV attestation
-// intermediates that the bundle admits (below) are not exactly those of the table. So a changed file is refused at the first call, and
-// nothing is admitted silently.
-//
-// The older vendor root is not pinned: see the package comment.
-func Default() (*Verifier, error) {
-	defaultOnce.Do(func() { defaultV, defaultErr = buildDefault() })
-	return defaultV, defaultErr
+// defaultCache keeps the first verifier that was built successfully. A failed build is not kept: a board with no battery for its clock
+// starts in the past, where the pinned certificates are not valid yet, and has the right time later.
+type defaultCache struct {
+	mu sync.Mutex
+	v  *Verifier
 }
 
-func buildDefault() (*Verifier, error) { return buildFrom(rootPEM, bundlePEM, pins) }
+var theDefault defaultCache
+
+// get returns the kept verifier, or builds one at the time that now gives, and keeps it only when the build succeeded.
+func (c *defaultCache) get(now func() time.Time) (*Verifier, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.v != nil {
+		return c.v, nil
+	}
+	v, err := buildFrom(rootPEM, bundlePEM, pins, now())
+	if err != nil {
+		return nil, err
+	}
+	c.v = v
+	return v, nil
+}
+
+// Default is the verifier over the vendor's pinned certificates. It is built on the first call that succeeds and kept; a call that fails
+// is not kept, and the next call builds again. It fails when an embedded certificate is not the one the pin table names by its SHA-256,
+// when the root file holds more or fewer than one certificate, when the PIV attestation intermediates that the bundle admits (below) are not
+// exactly those of the table, and when the machine's clock is outside the validity of the pinned certificates: the pinned intermediates are
+// checked against the root at the clock of the machine when the verifier is built. A changed file is refused at the first call, and nothing
+// is admitted silently. The verifier then checks a slot certificate, a signer and an anchor at the time of each call (VerifyAt: the time
+// given).
+//
+// The older vendor root is not pinned: see the package comment.
+func Default() (*Verifier, error) { return theDefault.get(time.Now) }
 
 // buildFrom is Default over the given files and table (the tests give others).
-func buildFrom(rootPEM, bundlePEM []byte, pins []Pin) (*Verifier, error) {
+func buildFrom(rootPEM, bundlePEM []byte, pins []Pin, now time.Time) (*Verifier, error) {
 	rootSHA := ""
 	for _, p := range pins {
 		if p.Role == RoleRoot {
 			rootSHA = p.SHA256
 		}
 	}
-	v, admitted, err := newVerifier(rootPEM, bundlePEM, rootSHA)
+	v, admitted, err := newVerifier(rootPEM, bundlePEM, rootSHA, now)
 	if err != nil {
 		return nil, err
 	}
@@ -111,18 +128,21 @@ func buildFrom(rootPEM, bundlePEM []byte, pins []Pin) (*Verifier, error) {
 
 // NewVerifierFromPEM builds a verifier whose trust anchors are the one certificate of rootPEM, which must have the SHA-256 wantRootSHA256
 // (lower-case hexadecimal), and every certificate of bundlePEM whose common name begins "Yubico PIV Attestation " and that chains to the
-// root through the bundle at the current time (the admission rule). A bundle with no such certificate is refused. It is for a test PKI;
-// Default is for programs.
+// root through the bundle at the current time (the admission rule). A bundle with no such certificate is refused.
+//
+// It is for a test PKI; Default is for programs. The digest is the only pin: it must be a constant that comes from outside the PEM, from the
+// source of the program or from a record a person checked. A root file and a digest that were both taken from the party being verified (a
+// card, a peer, a file it sent) make the check worthless: whoever made them is trusted by construction.
 //
 // A PEM block that is not a CERTIFICATE is skipped, and bytes after the last block are ignored; a certificate that does not parse is an
 // error (ErrRootCount for the root file, ErrParse for the bundle).
 func NewVerifierFromPEM(rootPEM, bundlePEM []byte, wantRootSHA256 string) (*Verifier, error) {
-	v, _, err := newVerifier(rootPEM, bundlePEM, wantRootSHA256)
+	v, _, err := newVerifier(rootPEM, bundlePEM, wantRootSHA256, time.Now())
 	return v, err
 }
 
-// newVerifier also returns the SHA-256 of every admitted intermediate.
-func newVerifier(rootPEM, bundlePEM []byte, wantRootSHA256 string) (*Verifier, []string, error) {
+// newVerifier admits at the time now, and also returns the SHA-256 of every admitted intermediate.
+func newVerifier(rootPEM, bundlePEM []byte, wantRootSHA256 string, now time.Time) (*Verifier, []string, error) {
 	roots, err := parseCerts(rootPEM)
 	if err != nil || len(roots) != 1 {
 		return nil, nil, ErrRootCount
@@ -146,7 +166,7 @@ func newVerifier(rootPEM, bundlePEM []byte, wantRootSHA256 string) (*Verifier, [
 		if !strings.HasPrefix(c.Subject.CommonName, pivIntermediatePrefix) {
 			continue
 		}
-		if _, err := c.Verify(x509.VerifyOptions{Roots: rootPool, Intermediates: interPool, KeyUsages: []x509.ExtKeyUsage{x509.ExtKeyUsageAny}}); err != nil {
+		if _, err := c.Verify(x509.VerifyOptions{Roots: rootPool, Intermediates: interPool, CurrentTime: now, KeyUsages: []x509.ExtKeyUsage{x509.ExtKeyUsageAny}}); err != nil {
 			continue // not signed through the pinned root: not trusted
 		}
 		anchors.AddCert(c)
@@ -155,7 +175,11 @@ func newVerifier(rootPEM, bundlePEM []byte, wantRootSHA256 string) (*Verifier, [
 	if len(admitted) == 0 {
 		return nil, nil, ErrNoAnchor
 	}
-	return &Verifier{anchors: anchors}, admitted, nil
+	set := make(map[string]bool, len(admitted))
+	for _, d := range admitted {
+		set[d] = true
+	}
+	return &Verifier{anchors: anchors, admitted: set}, admitted, nil
 }
 
 func parseCerts(b []byte) ([]*x509.Certificate, error) {

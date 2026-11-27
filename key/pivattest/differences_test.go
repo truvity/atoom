@@ -108,7 +108,6 @@ func TestVerifyAtJudgesTheChainAtThatTime(t *testing.T) {
 		ok   bool
 	}{
 		{"now", time.Now(), true},
-		{"the zero time is now", time.Time{}, true},
 		{"before the slot certificate", nb.Add(-10 * time.Minute), false},
 		{"in a year", time.Now().AddDate(1, 0, 0), false},
 		{"in 50 years", time.Now().AddDate(50, 0, 0), false},
@@ -120,5 +119,9 @@ func TestVerifyAtJudgesTheChainAtThatTime(t *testing.T) {
 	}
 	if _, err := v.Verify(slot, p.F9); err != nil {
 		t.Errorf("Verify at the current time: %v", err)
+	}
+	// No entry point reads the zero time as "now".
+	if _, err := v.VerifyAt(time.Time{}, slot, p.F9); !errors.Is(err, pivattest.ErrZeroTime) {
+		t.Errorf("the zero time: %v", err)
 	}
 }

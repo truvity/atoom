@@ -6,6 +6,10 @@ import "errors"
 var (
 	// ErrNil: a certificate argument is nil.
 	ErrNil = errors.New("pivattest: a certificate is nil")
+	// ErrNoRaw: a certificate has no Raw bytes (it was built by hand, not parsed). Everything is read from the signed bytes.
+	ErrNoRaw = errors.New("pivattest: a certificate has no raw bytes")
+	// ErrZeroTime: VerifyAt was given the zero time. No entry point reads it as the current time.
+	ErrZeroTime = errors.New("pivattest: the time of the check is the zero time")
 	// ErrParse: a certificate (a DER string, or a PEM block of a bundle) does not parse.
 	ErrParse = errors.New("pivattest: a certificate does not parse")
 
