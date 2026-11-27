@@ -2,6 +2,7 @@ package card
 
 import (
 	"crypto/x509"
+	"errors"
 
 	"github.com/truvity/atoom/key/pivattest"
 )
@@ -17,10 +18,24 @@ import (
 func verifyPinned(attCert, slotCert *x509.Certificate) (Attestation, error) {
 	v, err := pivattest.Default()
 	if err != nil {
-		return Attestation{}, err
+		return Attestation{}, BuildError(err)
 	}
 	return verifyWith(v, attCert, slotCert)
 }
+
+// ErrVerifierBuild marks an error of building the verifier over the vendor's pinned certificates (the program's own files and the machine's clock),
+// as against an error of checking the two certificates of an attestation: errors.Is(err, ErrVerifierBuild) tells them apart, whatever class the
+// library gave the error (a bundle that does not parse is ErrParse in both).
+var ErrVerifierBuild = errors.New("card: the verifier over the pinned certificates was not built")
+
+type buildError struct{ err error }
+
+func (e *buildError) Error() string        { return e.err.Error() }
+func (e *buildError) Unwrap() error        { return e.err }
+func (e *buildError) Is(target error) bool { return target == ErrVerifierBuild }
+
+// BuildError marks err as an error of building the verifier; its text and its class are unchanged.
+func BuildError(err error) error { return &buildError{err} }
 
 // NewAttestationVerifier is the code of pivCard.VerifyAttestation over a root and a bundle of the caller's, for the tests of other packages: they
 // bring a test PKI, and so run the real reading of an attestation (the library's verifier and fromEvidence) without a card.

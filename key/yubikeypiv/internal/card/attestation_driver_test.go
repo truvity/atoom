@@ -348,6 +348,10 @@ func TestQPTheErrorOfTheBuildOfThePinnedVerifierIsTheAnswer(t *testing.T) {
 		if _, err := verifyPinned(nil, nil); !qpOnly(err, pivattest.ErrClock) {
 			t.Fatalf("in the year 2000: %v, want the error of the build (the clock is before the pinned certificates)", err)
 		}
+		// the error is marked as one of building the verifier, which the driver words by where it comes from
+		if _, err := verifyPinned(nil, nil); !errors.Is(err, ErrVerifierBuild) {
+			t.Fatalf("the error of the build is not marked: %v", err)
+		}
 		// another call builds again
 		if _, err := verifyPinned(nil, nil); !qpOnly(err, pivattest.ErrClock) {
 			t.Fatalf("in the year 2000, a second call: %v", err)
@@ -355,6 +359,10 @@ func TestQPTheErrorOfTheBuildOfThePinnedVerifierIsTheAnswer(t *testing.T) {
 		time.Sleep(30 * 365 * 24 * time.Hour) // the fake clock: the year 2029
 		if _, err := verifyPinned(nil, nil); !qpOnly(err, pivattest.ErrNil) {
 			t.Fatalf("after the failed build, in the year %d: %v, want the build to succeed and ErrNil", time.Now().UTC().Year(), err)
+		}
+		// an error of checking is not marked: the build succeeded
+		if _, err := verifyPinned(nil, nil); errors.Is(err, ErrVerifierBuild) {
+			t.Fatalf("an error of checking is marked as one of building: %v", err)
 		}
 	})
 }
