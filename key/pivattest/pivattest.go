@@ -137,17 +137,19 @@ func (e Evidence) AttestsKey(pub crypto.PublicKey) bool {
 	return ok && eq.Equal(pub)
 }
 
-// knownKey is true for a non-nil key of one of the four forms that the parser of the standard library gives.
+// knownKey is true for a complete key of one of the four forms that the parser of the standard library gives: an ECDSA key with its curve
+// and both coordinates, an RSA key with its modulus, an Ed25519 key of the full length, an X25519 key with its curve and its bytes. An
+// incomplete key (a zero struct, a typed nil, a half-filled one) is not known, so the Equal of the key type is never reached with one.
 func knownKey(pub crypto.PublicKey) bool {
 	switch k := pub.(type) {
 	case *ecdsa.PublicKey:
-		return k != nil
+		return k != nil && k.Curve != nil && k.X != nil && k.Y != nil //nolint:staticcheck // only to see that the coordinates are there: Bytes would panic on a half-filled key
 	case *rsa.PublicKey:
-		return k != nil
+		return k != nil && k.N != nil && k.N.Sign() > 0
 	case ed25519.PublicKey:
-		return k != nil
+		return len(k) == ed25519.PublicKeySize
 	case *ecdh.PublicKey:
-		return k != nil
+		return k != nil && k.Curve() != nil && len(k.Bytes()) > 0
 	}
 	return false
 }
@@ -202,6 +204,9 @@ func (v *Verifier) verifyDER(now time.Time, slotDER, signerDER []byte) (Evidence
 	if v == nil || v.anchors == nil {
 		return Evidence{}, ErrNoAnchor
 	}
+	// The parsed values point into the bytes they were read from: own copies, so that another goroutine changing the caller's bytes during
+	// the call cannot split the check of the chain from the facts.
+	slotDER, signerDER = bytes.Clone(slotDER), bytes.Clone(signerDER)
 	slot, err := x509.ParseCertificate(slotDER)
 	if err != nil {
 		return Evidence{}, &classed{class: ErrParse, cause: err, text: "pivattest: the slot certificate does not parse: " + err.Error()}
