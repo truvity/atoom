@@ -1,8 +1,14 @@
 package pivattest_test
 
 import (
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
 	"crypto/x509"
+	"crypto/x509/pkix"
+	"encoding/pem"
 	"errors"
+	"math/big"
 	"slices"
 	"strings"
 	"testing"
@@ -96,5 +102,66 @@ func TestDefaultRefusedForTheClockIsNotKept(t *testing.T) {
 	}
 	if v, err := c.Get(func() time.Time { return newest.Add(time.Hour) }); err != nil || v == nil || c.Kept() != v {
 		t.Fatalf("at a good clock: %v, %v", v, err)
+	}
+}
+
+// expiredCertNamed is a self-signed certificate with the given name whose validity ended in 2020: the stand-in for a changed file.
+func expiredCertNamed(t *testing.T, name string) []byte {
+	t.Helper()
+	k, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tmpl := &x509.Certificate{
+		SerialNumber: big.NewInt(1), Subject: pkix.Name{CommonName: name}, NotBefore: t2010, NotAfter: t2020,
+		IsCA: true, BasicConstraintsValid: true, KeyUsage: x509.KeyUsageCertSign,
+	}
+	der, err := x509.CreateCertificate(rand.Reader, tmpl, tmpl, &k.PublicKey, k)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der})
+}
+
+// The clock is named only when the embedded files are the pinned ones. A changed file with an expired PIV-named certificate is a table error,
+// never a stale clock ("the embedded files are not at fault" would be false).
+func TestAChangedFileWithAnExpiredPIVNamedCertificateIsATableErrorNotTheClock(t *testing.T) {
+	f := embedded(t)
+	blocks := strings.SplitAfter(string(f.bundlePEM), "-----END CERTIFICATE-----\n")
+	blocks = blocks[:len(blocks)-1]
+	index := func(name string) int {
+		for k, d := range f.bundleDER {
+			if cnOf(t, d) == name {
+				return k
+			}
+		}
+		t.Fatalf("%s is not in the bundle", name)
+		return -1
+	}
+	const target = "Yubico PIV Attestation B2 1"
+	k := index(target)
+	replaced := slices.Clone(blocks)
+	replaced[k] = string(expiredCertNamed(t, target))
+	removed := slices.Delete(slices.Clone(blocks), k, k+1)
+	extra := string(expiredCertNamed(t, "Yubico PIV Attestation TEST EXTRA"))
+	for name, bundle := range map[string]string{
+		"a pinned PIV intermediate replaced by one of the same name whose validity has ended": strings.Join(replaced, ""),
+		"a pinned one removed and an expired PIV-named extra added":                           strings.Join(removed, "") + extra,
+	} {
+		v, err := pivattest.BuildFromAt(f.rootPEM, []byte(bundle), pivattest.Pins(), t2030)
+		if v != nil || !errors.Is(err, pivattest.ErrPinTable) || errors.Is(err, pivattest.ErrClock) {
+			t.Errorf("%s: %v, %v, want ErrPinTable and never ErrClock", name, v, err)
+		}
+	}
+	// the files are the pinned ones and a PIV-named extra has expired: the extra is no row of the table, so at a good clock nothing is wrong,
+	// and at a stale clock the pinned certificate that the clock refuses is named, not the extra
+	withExtra := []byte(string(f.bundlePEM) + extra)
+	if v, err := pivattest.BuildFromAt(f.rootPEM, withExtra, pivattest.Pins(), t2030); err != nil || v == nil {
+		t.Errorf("an expired PIV-named extra at a good clock: %v", err)
+	}
+	newest, _ := validityOf(t, target)
+	_, err := pivattest.BuildFromAt(f.rootPEM, withExtra, pivattest.Pins(), newest.Add(-time.Hour))
+	if !errors.Is(err, pivattest.ErrClock) || !strings.Contains(err.Error(), target) || strings.Contains(err.Error(), "TEST EXTRA") {
+		t.Errorf("a stale clock with an extra: %v", err)
 	}
 }
