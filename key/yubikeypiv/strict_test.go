@@ -13,6 +13,7 @@ import (
 	"encoding/hex"
 	"encoding/pem"
 	"errors"
+	"fmt"
 	"log/slog"
 	"math/big"
 	"slices"
@@ -437,4 +438,100 @@ func attRaw(t *testing.T, c *cardtest.Card) []byte {
 		t.Fatal(err)
 	}
 	return cert.Raw
+}
+
+// The refusal of an attestation check that failed is worded by the class of its error, so that an operator reads the cause. Each class through the
+// fake card: the library's errors for a certificate that is missing, has no raw bytes or is too large (real inputs), and the errors of the
+// verifier itself and of the clock, which the card cannot be made to give from outside, are given by the card's answer.
+func TestTheRefusalOfAFailedCheckNamesTheClassOfTheError(t *testing.T) {
+	spec := card.KeySpec{Algorithm: card.EC384, PIN: card.PINOnce, Touch: card.TouchNever}
+	const chain = "slots.9a.attestation: chain: the attestation does not chain to the Yubico root"
+	answering := func(err error) func(*cardtest.Card) *quirkCard {
+		return func(c *cardtest.Card) *quirkCard {
+			return &quirkCard{Card: c, verify: func(_, _ *x509.Certificate) (card.Attestation, error) { return card.Attestation{}, err }}
+		}
+	}
+	// a certificate over the limit, with the card's real reading of it
+	key, err := ecdsa.GenerateKey(elliptic.P384(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tmpl := &x509.Certificate{
+		SerialNumber: big.NewInt(1), Subject: pkix.Name{CommonName: "YubiKey PIV Attestation 9a"}, NotBefore: time.Now().Add(-time.Hour), NotAfter: time.Now().Add(time.Hour),
+		ExtraExtensions: []pkix.Extension{{Id: asn1.ObjectIdentifier{1, 3, 6, 1, 4, 1, 99999, 1}, Value: make([]byte, pivattest.MaxCertificateSize)}},
+	}
+	bigDER, err := x509.CreateCertificate(rand.Reader, tmpl, tmpl, &key.PublicKey, key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	big1, err := x509.ParseCertificate(bigDER)
+	if err != nil {
+		t.Fatal(err)
+	}
+	only9a := func(c *cardtest.Card, cert *x509.Certificate) func(card.Slot) (*x509.Certificate, error) {
+		return func(s card.Slot) (*x509.Certificate, error) {
+			if s != 0x9a {
+				return c.Attest(s)
+			}
+			return cert, nil
+		}
+	}
+	tests := []struct {
+		name  string
+		rogue bool
+		make  func(*cardtest.Card) *quirkCard
+		want  string
+	}{
+		{"the clock of the machine", false, answering(fmt.Errorf("a build: %w", pivattest.ErrClock)), "slots.9a.attestation: clock: the clock of this machine is outside the validity of the pinned certificates"},
+		{"a certificate that is too large", false, func(c *cardtest.Card) *quirkCard {
+			return &quirkCard{Card: c, verify: fakeVerifier(t, c), attest: only9a(c, big1)}
+		}, "slots.9a.attestation: certificate: the attestation certificate is missing, too large or does not parse"},
+		{"a certificate that is missing", false, func(c *cardtest.Card) *quirkCard {
+			return &quirkCard{Card: c, verify: fakeVerifier(t, c), attest: only9a(c, nil)}
+		}, "slots.9a.attestation: certificate: the attestation certificate is missing, too large or does not parse"},
+		{"a certificate with no raw bytes", false, func(c *cardtest.Card) *quirkCard {
+			return &quirkCard{Card: c, verify: fakeVerifier(t, c), attest: only9a(c, &x509.Certificate{})}
+		}, "slots.9a.attestation: certificate: the attestation certificate is missing, too large or does not parse"},
+		{"a certificate that does not parse", false, answering(pivattest.ErrParse), "slots.9a.attestation: certificate: the attestation certificate is missing, too large or does not parse"},
+		{"a pin table that is not the files'", false, answering(pivattest.ErrPinTable), "slots.9a.attestation: pins: the pinned Yubico certificates of this program are not as its table says"},
+		{"an admission that is not the table's", false, answering(fmt.Errorf("x: %w", pivattest.ErrAdmission)), "slots.9a.attestation: pins: the pinned Yubico certificates of this program are not as its table says"},
+		{"a chain to another root", true, func(c *cardtest.Card) *quirkCard { return &quirkCard{Card: c, verify: fakeVerifier(t, c)} }, chain},
+		{"an error that is of no class", false, answering(errors.New("something else")), chain},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			c := cardtest.New()
+			c.RogueRoot = tt.rogue
+			if _, err := c.PutKey(0x9a, spec); err != nil {
+				t.Fatal(err)
+			}
+			_, rec, err := startQuirk(t, tt.make(c), factoryDefaults)
+			var p *yubikeypiv.Problems
+			if !errors.As(err, &p) || len(p.List) != 1 || p.List[0] != tt.want {
+				t.Fatalf("err = %v, want %q", err, tt.want)
+			}
+			if l := rec.line(t, "attestation refused"); l.keys()[len(l.keys())-1] != "error" {
+				t.Errorf("the journal line: %v", l.keys())
+			}
+		})
+	}
+}
+
+// On the peer path the answer for the clock is the one of every attestation that does not verify: failed_precondition, reason attestation. The
+// cause is in the journal only.
+func TestAPeersAttestationRefusedForTheClockIsTheUsualRefusal(t *testing.T) {
+	c := cardtest.New()
+	q := &quirkCard{Card: c, verify: func(_, _ *x509.Certificate) (card.Attestation, error) {
+		return card.Attestation{}, fmt.Errorf("a build: %w", pivattest.ErrClock)
+	}}
+	s, rec, err := startQuirk(t, q, factoryDefaults)
+	if err != nil {
+		t.Fatal(err)
+	}
+	small := attRaw(t, c)
+	_, err = s.VerifyAttestation(context.Background(), connect.NewRequest(&keyv1alpha1.VerifyAttestationRequest{Attestation: small, AttestationSigner: small}))
+	wantRefused(t, err, connect.CodeFailedPrecondition, "attestation")
+	if l := rec.line(t, "a peer's attestation refused"); !strings.Contains(l.attrs[0].Value.String(), "build") {
+		t.Errorf("the journal: %v", l.attrs)
+	}
 }
