@@ -423,7 +423,14 @@ func TestQaTheRefusalsOfR8SpendNothingAndChangeNothing(t *testing.T) { // assume
 	for p := 0; p < 256; p++ {
 		b := byte(p)
 		if p != 0 {
-			refuse("VERIFY P1", short(0, insVerify, b, refPIN, good8, -1), swWrongP1P2)
+			if p == 0xFF { // VERIFY with P1 FF resets the security status (SP 800-73-4), and takes no data: with the PIN it is 6700 and changes nothing
+				refuse("VERIFY P1 FF with data", short(0, insVerify, b, refPIN, good8, -1), swWrongLength)
+				refuse("VERIFY P1 FF with data, extended", extended(0, insVerify, b, refPIN, good8, -1), swWrongLength)
+				refuse("VERIFY P1 FF, P2 of the PUK", []byte{0, insVerify, b, refPUK}, swRefNotFound)
+			} else {
+				refuse("VERIFY P1", short(0, insVerify, b, refPIN, good8, -1), swWrongP1P2)
+				refuse("VERIFY P1, no data", []byte{0, insVerify, b, refPIN}, swWrongP1P2)
+			}
 			refuse("CHANGE P1", short(0, insChange, b, refPIN, good16, -1), swWrongP1P2)
 			refuse("GET METADATA P1", short(0, insGetMetadata, b, refPIN, nil, 0), swWrongP1P2)
 			refuse("GET VERSION P1", []byte{0, insGetVersion, b, 0}, swWrongP1P2)
@@ -1055,4 +1062,168 @@ func TestQaATagListThatIsNotExactlyFiveCZeroThreeAndAnIdIsRefused(t *testing.T) 
 		wantSW(t, name, qaSWOf(t, c, short(0, insGetData, 0x3F, 0xFF, list, 0)), swWrongData)
 	}
 	wantSW(t, "the right list", qaSWOf(t, c, short(0, insGetData, 0x3F, 0xFF, []byte{0x5C, 0x03, 0x5F, 0xC1, 0x05}, 0)), swOK)
+}
+
+// R8, its last sentence: "A VERIFY block whose value, with the padding off, is shorter than 6 bytes (all FF, or "1234" and four FF) is a wrong
+// value and spends a try, where a card might refuse it with 6A80 and spend none." In every form of the command, for every length, for a
+// verified PIN and a blocked one.
+func TestQaAVerifyBlockOfFewerThanSixBytesIsAWrongValueInEveryForm(t *testing.T) { // assumed: R8
+	var blocks [][]byte
+	for k := 0; k <= 5; k++ {
+		blocks = append(blocks, pad(strings.Repeat("1", k)), pad(DefaultPIN[:k])) // "11" and four FF; the start of the PIN itself
+	}
+	blocks = append(blocks, pad("12\xff\xff"[:2]), []byte("\xff\xff\xff\xff\xff\xff\xff\xff"), []byte("1\xff\xff\xff\xff\xff\xff\xff"))
+	for _, block := range blocks {
+		for form, apdu := range map[string][]byte{
+			"short":    short(0, insVerify, 0, refPIN, block, -1),
+			"4S":       short(0, insVerify, 0, refPIN, block, 0),
+			"extended": extended(0, insVerify, 0, refPIN, block, -1),
+			"4E":       extended(0, insVerify, 0, refPIN, block, 0),
+		} {
+			c := newSelected(t, Options{})
+			wantSW(t, "the right PIN first", qaSWOf(t, c, verifyCmd(DefaultPIN)), swOK)
+			wantSW(t, fmt.Sprintf("%s, block %x", form, block), qaSWOf(t, c, apdu), 0x63C2)
+			wantSW(t, "the PIN is not verified after it", qaSWOf(t, c, emptyVerify()), 0x63C2)
+			wantSW(t, "a second one", qaSWOf(t, c, apdu), 0x63C1)
+			wantSW(t, "a third one", qaSWOf(t, c, apdu), 0x63C0)
+			wantSW(t, "a fourth: blocked", qaSWOf(t, c, apdu), swBlocked)
+			wantSW(t, "the right PIN, blocked", qaSWOf(t, c, verifyCmd(DefaultPIN)), swBlocked)
+		}
+		c := newSelected(t, Options{})
+		wantSW(t, "in two parts", qaSWOf(t, c, short(claChain, insVerify, 0, refPIN, block[:3], -1)), swOK)
+		wantSW(t, fmt.Sprintf("in two parts, block %x", block), qaSWOf(t, c, short(claPlain, insVerify, 0, refPIN, block[3:], -1)), 0x63C2)
+	}
+	// the neighbour: six bytes, with and without the padding, is a value like any other
+	c := newSelected(t, Options{})
+	wantSW(t, "six wrong bytes", qaSWOf(t, c, verifyCmd("000000")), 0x63C2)
+	wantSW(t, "the right PIN of six bytes, padded", qaSWOf(t, c, verifyCmd(DefaultPIN)), swOK)
+}
+
+// R23: "A change of the PIN or the PUK to the factory value leaves the default flag at 0: the card keeps a flag, and does not compare the value."
+// For a card with a given value, for every form of the command, and a change that fails or is refused leaves the flag as it was.
+func TestQaTheDefaultFlagIsKeptNotComputedAndOnlyASuccessfulChangeClearsIt(t *testing.T) { // assumed: R23
+	flag := func(c *Card, ref byte) byte {
+		t.Helper()
+		data, sw := send(t, c, metadataCmd(ref))
+		wantSW(t, "metadata", sw, swOK)
+		return data[5]
+	}
+	for _, ref := range []byte{refPIN, refPUK} {
+		factory, other := DefaultPIN, "654321"
+		if ref == refPUK {
+			factory, other = DefaultPUK, "87654321"
+		}
+		for form, mk := range map[string]func(old, next string) [][]byte{
+			"short":    func(o, n string) [][]byte { return [][]byte{changeCmd(ref, o, n)} },
+			"extended": func(o, n string) [][]byte { return [][]byte{extended(0, insChange, 0, ref, join(pad(o), pad(n)), -1)} },
+			"4S":       func(o, n string) [][]byte { return [][]byte{short(0, insChange, 0, ref, join(pad(o), pad(n)), 0)} },
+			"chained": func(o, n string) [][]byte {
+				b := join(pad(o), pad(n))
+				return [][]byte{short(claChain, insChange, 0, ref, b[:9], -1), short(claPlain, insChange, 0, ref, b[9:], -1)}
+			},
+		} {
+			c := newSelected(t, Options{})
+			if flag(c, ref) != 1 {
+				t.Fatalf("ref %02X: a factory card does not say it is the default", ref)
+			}
+			// a change that fails, or is refused, leaves the flag at 1
+			for _, apdu := range mk("000000", other) { // a wrong old value
+				send(t, c, apdu)
+			}
+			for _, apdu := range mk(factory, "123") { // a new value that is too short
+				send(t, c, apdu)
+			}
+			if got := flag(c, ref); got != 1 {
+				t.Errorf("ref %02X, %s: a change that failed cleared the flag", ref, form)
+			}
+			// a change to the factory value itself, the first one
+			var sw uint16
+			for _, apdu := range mk(factory, factory) {
+				_, sw = send(t, c, apdu)
+			}
+			wantSW(t, fmt.Sprintf("ref %02X, %s: a change to the same value", ref, form), sw, swOK)
+			if got := flag(c, ref); got != 0 {
+				t.Errorf("ref %02X, %s: a change to the factory value left the flag at %d", ref, form, got)
+			}
+			// and a change away and back, and a wrong value afterwards, leave it at 0
+			for _, step := range [][2]string{{factory, other}, {other, factory}} {
+				for _, apdu := range mk(step[0], step[1]) {
+					_, sw = send(t, c, apdu)
+				}
+				wantSW(t, fmt.Sprintf("ref %02X, %s: %s to %s", ref, form, step[0], step[1]), sw, swOK)
+				if got := flag(c, ref); got != 0 {
+					t.Errorf("ref %02X, %s: the flag is %d after a change to %s", ref, form, got, step[1])
+				}
+			}
+		}
+	}
+	// A card made with the factory value as a given value says it is not the default, and a change keeps it so.
+	c := newSelected(t, Options{PIN: DefaultPIN, PUK: DefaultPUK})
+	if flag(c, refPIN) != 0 || flag(c, refPUK) != 0 {
+		t.Error("a given value, even the factory one, says it is the default")
+	}
+	// The other reference is not touched by a change.
+	c = newSelected(t, Options{})
+	send(t, c, changeCmd(refPIN, DefaultPIN, "654321"))
+	if flag(c, refPIN) != 0 || flag(c, refPUK) != 1 {
+		t.Errorf("a change of the PIN: the flags are %d and %d", flag(c, refPIN), flag(c, refPUK))
+	}
+}
+
+// R24: "An Le shorter than the answer is cut and followed by 61xx, never 6Cxx." For every command that answers with data, every Le from 1 to
+// one less than the answer, in the short and the extended form, in both modes, and for GET RESPONSE; the parts read back make the answer.
+func TestQaAnLeShorterThanTheAnswerIsCutWith61xxEverywhereAndNeverWith6Cxx(t *testing.T) { // assumed: R24
+	obj := qaPattern(70)
+	id := []byte{0x5C, 3, 0x5F, 0xC1, 5}
+	for _, mode := range []ResponseMode{Extended, Short61xx} {
+		for name, tc := range map[string]struct {
+			apdu func(le int, ext bool) []byte
+			want []byte
+		}{
+			"GET VERSION":      {func(le int, ext bool) []byte { return qaLeForm(insGetVersion, 0, 0, nil, le, ext) }, []byte{5, 8, 0}},
+			"GET SERIAL":       {func(le int, ext bool) []byte { return qaLeForm(insGetSerial, 0, 0, nil, le, ext) }, []byte{0, 0x74, 0xCB, 0xB1}},
+			"SELECT":           {func(le int, ext bool) []byte { return qaLeForm(insSelect, 4, 0, aidShort, le, ext) }, selectResponse},
+			"GET METADATA PIN": {func(le int, ext bool) []byte { return qaLeForm(insGetMetadata, 0, refPIN, nil, le, ext) }, []byte{1, 1, 0xFF, 5, 1, 1, 6, 2, 3, 3}},
+			"GET METADATA PUK": {func(le int, ext bool) []byte { return qaLeForm(insGetMetadata, 0, refPUK, nil, le, ext) }, []byte{1, 1, 0xFF, 5, 1, 1, 6, 2, 3, 3}},
+			"GET DATA":         {func(le int, ext bool) []byte { return qaLeForm(insGetData, 0x3F, 0xFF, id, le, ext) }, obj},
+		} {
+			for _, ext := range []bool{false, true} {
+				for le := 1; le < len(tc.want); le++ {
+					c := newSelected(t, Options{ResponseMode: mode})
+					c.PutObject(ObjectSlot9A, obj)
+					data, sw := send(t, c, tc.apdu(le, ext))
+					left := len(tc.want) - le
+					if sw>>8 == 0x6C || sw != swMore|qaLow(left) || !bytes.Equal(data, tc.want[:le]) {
+						t.Fatalf("%s, Le %d, extended %v, mode %d: %x and %04X, want %d bytes and 61%02X", name, le, ext, mode, data, sw, le, left)
+					}
+					rest, sw := send(t, c, getResponseCmd(0))
+					if sw != swOK || !bytes.Equal(rest, tc.want[le:]) {
+						t.Fatalf("%s, Le %d: the rest is %x %04X", name, le, rest, sw)
+					}
+				}
+			}
+		}
+	}
+	// GET RESPONSE with a short Le: cut again, with 61xx, never 6Cxx
+	c := newSelected(t, Options{})
+	c.PutObject(ObjectSlot9A, obj)
+	send(t, c, qaLeForm(insGetData, 0x3F, 0xFF, id, 10, false))
+	for le, left := 5, 60; left > 0; left -= le {
+		data, sw := send(t, c, getResponseCmd(le))
+		want := swMore | qaLow(left-le)
+		if left <= le {
+			want, le = swOK, left
+		}
+		if sw != want || len(data) != min(le, left) {
+			t.Fatalf("GET RESPONSE Le %d with %d left: %d bytes and %04X, want %04X", le, left, len(data), sw, want)
+		}
+	}
+}
+
+// qaLeForm is a command with an Le, in the short or the extended form.
+func qaLeForm(ins, p1, p2 byte, data []byte, le int, ext bool) []byte {
+	if ext {
+		return extended(0, ins, p1, p2, data, le)
+	}
+	return short(0, ins, p1, p2, data, le)
 }
