@@ -100,6 +100,21 @@ type Options struct {
 	// TransferTimeout bounds each bulk transfer, and is cut to what is left of the budget of the exchange. Zero means
 	// DefaultTransferTimeout. It is at least 1 ms and at most MaxBudget (else Open returns ErrBadBudget).
 	TransferTimeout time.Duration
+
+	// Clock is the clock the reader measures time with: the budget of each exchange, the drain before the first exchange of a
+	// session (MaxDrainTime) and the timeout it asks of each transfer. Nil means the real clock, time.Now, with Go's monotonic
+	// reading, and the reader then behaves as it did before this option existed. The reader only reads the clock: it never sleeps
+	// and never sets it, and every wait happens inside the Port. A test gives it a virtual clock (usbccidtest.Clock) and moves time
+	// from its fake Port, so that the exact timeout of a read and the exact edge of a budget can be reached without waiting. A
+	// non-nil Clock must be safe to read from the goroutine that calls the Reader's methods, and its readings must not go backwards.
+	Clock Clock
+}
+
+// Clock is the clock of a Reader. The reader adds a duration to a reading and takes the difference of two, so the readings of a
+// Clock must be comparable with each other; they need not carry a monotonic reading.
+type Clock interface {
+	// Now returns the current time of the clock.
+	Now() time.Time
 }
 
 // Info describes the reader's interface, for a report. It is a copy.
@@ -151,6 +166,7 @@ type Reader struct {
 	port    usbccid.Port
 	lay     layout
 	xfer    time.Duration
+	clock   Clock // nil means the real clock; see now
 	maxMsg  int
 	limit   int // largest command APDU
 	wbuf    []byte
@@ -208,7 +224,7 @@ func open(p usbccid.Port, o Options) (*Reader, error) {
 	}
 	// The length is declared by the device: take the minimum in uint32, and only then convert (a 32-bit int would turn 0x80000000 negative).
 	maxMsg := int(min(l.class.maxMessageLength, uint32(MaxMessageLength)))
-	r := &Reader{port: p, lay: *l, xfer: xfer, maxMsg: maxMsg, limit: MaxShortCommandAPDU}
+	r := &Reader{port: p, lay: *l, xfer: xfer, clock: o.Clock, maxMsg: maxMsg, limit: MaxShortCommandAPDU}
 	if l.class.extended() {
 		r.limit = MaxCommandAPDU
 	}
@@ -432,7 +448,16 @@ func (r *Reader) begin(budget time.Duration) (time.Time, error) {
 		return time.Time{}, fmt.Errorf("%w: %v", ErrBadBudget, budget)
 	}
 	r.touched = false
-	return time.Now().Add(budget), nil
+	return r.now().Add(budget), nil
+}
+
+// now reads the Reader's clock. It is the only place where this layer reads time for a budget, a drain or a timeout. (The sequence
+// number's fallback seed in nextSeq reads the machine's clock on purpose: it is a seed and no measurement.)
+func (r *Reader) now() time.Time {
+	if r.clock == nil { // Options.Clock was nil (or this is the zero Reader): the real clock, with its monotonic reading
+		return time.Now()
+	}
+	return r.clock.Now()
 }
 
 // wipe clears the buffers that held a command or a response. The caller holds the lock.
@@ -698,10 +723,10 @@ func (r *Reader) drain(op string, dl time.Time) error {
 	mps := r.lay.maxPacketIn
 	size := min(len(r.rbuf), MaxMessageLength)
 	buf := r.rbuf[:size-size%mps] // a whole number of packets, as every read of the Port is (see Open)
-	start := time.Now()
+	start := r.now()
 	quiet := 0 // reads in a row that timed out
 	for reads := 0; ; reads++ {
-		left := MaxDrainTime - time.Since(start)
+		left := MaxDrainTime - r.now().Sub(start)
 		if reads >= MaxDrainReads || left <= 0 {
 			return r.lose(fmt.Errorf("%w: %s: the IN pipe is not quiet after %d reads (MaxDrainReads, MaxDrainTime): the device sends without being asked", ErrProtocol, op, reads))
 		}
@@ -715,7 +740,7 @@ func (r *Reader) drain(op string, dl time.Time) error {
 		if !r.touched {
 			need = 2 * to
 		}
-		if time.Until(dl) < need {
+		if dl.Sub(r.now()) < need {
 			err := fmt.Errorf("ccid: %s: drain: %w: not enough left for %v of reads", op, ErrBudgetExhausted, need)
 			if r.touched {
 				err = r.lose(err)
@@ -765,6 +790,7 @@ func nextSeq() uint8 {
 	seqs.once.Do(func() {
 		var b [1]byte
 		if _, err := rand.Read(b[:]); err != nil { // never fails since Go 1.24; the fallback is the clock
+			// A seed, not a measurement of time: it reads the machine's clock whatever Options.Clock says.
 			b[0] = byte(time.Now().UnixNano()) //nolint:gosec // only a seed
 		}
 		seqs.n.Store(uint32(b[0]))
@@ -775,7 +801,7 @@ func nextSeq() uint8 {
 // timeout returns the timeout of the next transfer: the transfer timeout, cut to what is left of the budget. clamped says that the
 // budget cut it.
 func (r *Reader) timeout(dl time.Time) (to time.Duration, clamped bool, err error) {
-	left := time.Until(dl)
+	left := dl.Sub(r.now())
 	if left <= 0 {
 		return 0, false, ErrBudgetExhausted
 	}

@@ -44,6 +44,13 @@
 // Each bulk transfer has a timeout of its own (Options.TransferTimeout, DefaultTransferTimeout 10 seconds), cut to what is left of the
 // budget. A card that is waiting for a touch keeps sending time-extension messages, so no transfer waits that long with no sign.
 //
+// The reader measures the budget, the drain and the timeout of each transfer with a clock that Options.Clock can replace; nil is the
+// real clock (time.Now, with its monotonic reading) and the behaviour is then the one described here. The reader only reads the clock:
+// it never sleeps and never sets it, and every wait happens inside the Port. A test gives it the virtual clock of the package
+// usbccidtest, moves it from inside its fake Port, and so reaches an exact timeout, a drain with nothing left of MaxDrainTime and the
+// exact edge of a budget with no sleep. The seed of the sequence counter, in the case that crypto/rand fails, is no measurement and
+// reads the machine's clock whatever Options.Clock says.
+//
 // # The lost session
 //
 // A transfer that timed out, a transfer that failed, a short write, a message that breaks the protocol, an exchange whose budget
