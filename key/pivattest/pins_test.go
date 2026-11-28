@@ -100,6 +100,9 @@ func TestThePinsPageNamesEveryPin(t *testing.T) {
 }
 
 func TestDefaultFailsClosed(t *testing.T) {
+	// a fixed time inside the validity of all six pinned certificates (the latest start is 2025-08-01, the end is the year 9999), so that the
+	// outcome of a row does not depend on the clock of the machine that runs the test
+	at := time.Date(2030, 1, 1, 0, 0, 0, 0, time.UTC)
 	mod := func(f func(p []Pin)) []Pin {
 		p := Pins()
 		f(p)
@@ -109,7 +112,9 @@ func TestDefaultFailsClosed(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	twin, err := attesttest.NewPKI(attesttest.PKIOptions{PIVName: "Yubico PIV Attestation B 1"})
+	// valid at the fixed time, so that it meets the build as it did at the clock of the machine: refused for the name it shares, not for the clock
+	twin, err := attesttest.NewPKI(attesttest.PKIOptions{PIVName: "Yubico PIV Attestation B 1",
+		NotBefore: time.Date(2010, 1, 1, 0, 0, 0, 0, time.UTC), NotAfter: time.Date(2099, 1, 1, 0, 0, 0, 0, time.UTC)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -134,7 +139,7 @@ func TestDefaultFailsClosed(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			v, err := buildFrom(tt.root, tt.bundle, tt.table, time.Now())
+			v, err := buildFrom(tt.root, tt.bundle, tt.table, at)
 			if tt.want == nil {
 				if err != nil || v == nil {
 					t.Fatalf("refused: %v", err)
@@ -175,7 +180,8 @@ func TestDefaultKeepsOnlyASuccess(t *testing.T) {
 	if c.v != nil {
 		t.Fatal("a failed build was kept")
 	}
-	v, err := c.get(time.Now)
+	good := time.Date(2030, 1, 1, 0, 0, 0, 0, time.UTC) // inside the validity of the pinned certificates, whatever the machine's clock says
+	v, err := c.get(func() time.Time { return good })
 	if err != nil || v == nil {
 		t.Fatalf("a build after the clock was set: %v", err)
 	}
