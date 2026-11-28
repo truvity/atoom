@@ -113,13 +113,15 @@ func TestAChainOfMoreThan65535BytesIsRefusedAtItsLastPart(t *testing.T) { // ass
 }
 
 func TestPrintingACardOrOptionsLeaksNoSecret(t *testing.T) {
-	const pin, puk, body = "73519846", "62840917", "CertBodyOfTheTest"
+	// The values that are searched for in printed text hold a character that no number can hold (a letter outside a to f, and the like), so that
+	// no address and no number that fmt prints can be taken for them. The body is 36 bytes, 72 hexadecimal digits: more than any number.
+	const pin, puk, body, newPIN = "Qz7Jk9Wm", "Yt4Hp2Nx", "OBJ-qzjxkw-BODY-OBJ-qzjxkw-BODY-QZJX", "Xv3Ln8Ry"
 	o := Options{PIN: pin, PUK: puk}
 	c := New(o)
 	c.PutObject(ObjectSlot9A, []byte(body))
 	c.PowerOn()
 	selectPIV(t, c)
-	send(t, c, changeCmd(refPIN, pin, "24680135"))
+	send(t, c, changeCmd(refPIN, pin, newPIN))
 	for _, verb := range []string{"%v", "%+v", "%#v", "%s", "%d", "%x", "%X", "%q", "%T", "%p", "%10.3v", "%-20s"} {
 		values := map[string]any{"card": c, "options": o, "options pointer": &o, "reference": c.st().pin}
 		if verb == "%p" { // fmt does not hand %p to a Formatter: a pointer prints an address, and only a pointer is asked
@@ -127,7 +129,7 @@ func TestPrintingACardOrOptionsLeaksNoSecret(t *testing.T) {
 		}
 		for name, v := range values {
 			got := fmt.Sprintf(verb, v)
-			for _, secret := range []string{pin, puk, body, "24680135", hex.EncodeToString([]byte(body)), strings.ToUpper(hex.EncodeToString([]byte(body))), listed(body), listed(pin)} {
+			for _, secret := range []string{pin, puk, body, newPIN, hex.EncodeToString([]byte(body)), strings.ToUpper(hex.EncodeToString([]byte(body))), listed(body), listed(pin)} {
 				if strings.Contains(got, secret) {
 					t.Errorf("%s of the %s prints %q: %s", verb, name, secret, got)
 				}
@@ -305,7 +307,9 @@ func TestACardIsOneUnexportedFunc(t *testing.T) {
 }
 
 func TestACardPrintedInAnyFormShowsNoSecret(t *testing.T) {
-	const pin, puk, body = "73519846", "62840917", "CertBodyOfTheTest"
+	// The values that are searched for in printed text hold a character that no number can hold (a letter outside a to f, and the like), so that
+	// no address and no number that fmt prints can be taken for them. The body is 36 bytes, 72 hexadecimal digits: more than any number.
+	const pin, puk, body, newPIN = "Qz7Jk9Wm", "Yt4Hp2Nx", "OBJ-qzjxkw-BODY-OBJ-qzjxkw-BODY-QZJX", "Xv3Ln8Ry"
 	c := New(Options{PIN: pin, PUK: puk})
 	c.PutObject(ObjectSlot9A, []byte(body))
 	copyOfCard := *c // a second handle to the same card
@@ -334,7 +338,7 @@ func TestACardPrintedInAnyFormShowsNoSecret(t *testing.T) {
 		"map of cards":          fmt.Sprintf("%+v", map[string]*Card{"a": c}),
 	}
 	for name, got := range forms {
-		for _, secret := range []string{pin, puk, body, "24680135", hex.EncodeToString([]byte(body)), listed(body), listed(pin), listed(puk)} {
+		for _, secret := range []string{pin, puk, body, newPIN, hex.EncodeToString([]byte(body)), listed(body), listed(pin), listed(puk)} {
 			if strings.Contains(got, secret) {
 				t.Errorf("%s prints %q: %.150s", name, secret, got)
 			}
@@ -359,7 +363,9 @@ func TestACardPrintedInAnyFormShowsNoSecret(t *testing.T) {
 // A Card held by value in an unexported field is never asked for its methods, and a verb that is bad for a pointer makes fmt print a value
 // again from the top. Nothing in a Card may be a kind that fmt follows: every verb prints at most an address.
 func TestACardInAnUnexportedFieldPrintsNoStateWithAnyVerb(t *testing.T) {
-	const pin, puk, body = "73519846", "62840917", "CertBodyOfTheTest"
+	// The values that are searched for in printed text hold a character that no number can hold (a letter outside a to f, and the like), so that
+	// no address and no number that fmt prints can be taken for them. The body is 36 bytes, 72 hexadecimal digits: more than any number.
+	const pin, puk, body = "Qz7Jk9Wm", "Yt4Hp2Nx", "OBJ-qzjxkw-BODY-OBJ-qzjxkw-BODY-QZJX"
 	c := New(Options{PIN: pin, PUK: puk})
 	c.PutObject(ObjectSlot9A, []byte(body))
 	type env struct{ card Card }
@@ -385,7 +391,7 @@ func TestACardInAnUnexportedFieldPrintsNoStateWithAnyVerb(t *testing.T) {
 		"a pointer to a *Card":  &envPtr{c},
 		"a channel-free struct": struct{ a, b Card }{*c, *c},
 	}
-	secrets := []string{pin, puk, body, hex.EncodeToString([]byte(body)), strings.ToUpper(hex.EncodeToString([]byte(body))), listed(body), listed(pin), listed(puk), "CertBody"}
+	secrets := []string{pin, puk, body, hex.EncodeToString([]byte(body)), strings.ToUpper(hex.EncodeToString([]byte(body))), listed(body), listed(pin), listed(puk), "OBJ-qzjxkw"}
 	verbs := "vTtbcdoOqxXUeEfFgGsp"
 	for name, v := range values {
 		for _, r := range verbs {

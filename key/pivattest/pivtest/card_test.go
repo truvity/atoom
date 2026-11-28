@@ -630,8 +630,8 @@ func TestLogNeverHoldsAPINOrAnObjectBody(t *testing.T) {
 	c := newSelected(t, Options{})
 	body := []byte{0x53, 0x08, 0xDE, 0xAD, 0xBE, 0xEF, 0xCA, 0xFE, 0xF0, 0x0D}
 	c.PutObject(ObjectSlot9A, body)
-	send(t, c, verifyCmd("424242"))
-	send(t, c, changeCmd(refPIN, DefaultPIN, "135790"))
+	send(t, c, verifyCmd("Wq9Xz4"))
+	send(t, c, changeCmd(refPIN, DefaultPIN, "Hy6Tk2Pm"))
 	send(t, c, getDataCmd(ObjectSlot9A, 0))
 	log := c.Log()
 	if len(log) != 4 {
@@ -655,7 +655,7 @@ func TestLogNeverHoldsAPINOrAnObjectBody(t *testing.T) {
 		}
 	}
 	text := fmt.Sprintf("%+v %v %#v", log, log, log)
-	for _, secret := range []string{"424242", "135790", "123456", "deadbeef", "DEADBEEF", "222, 173"} {
+	for _, secret := range []string{"Wq9Xz4", "Hy6Tk2Pm", "123456", "deadbeef", "DEADBEEF", "222, 173"} {
 		if strings.Contains(text, secret) {
 			t.Errorf("the log mentions %q: %s", secret, text)
 		}
