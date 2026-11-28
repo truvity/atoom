@@ -107,6 +107,7 @@ type Options struct {
 	// and never sets it, and every wait happens inside the Port. A test gives it a virtual clock (usbccidtest.Clock) and moves time
 	// from its fake Port, so that the exact timeout of a read and the exact edge of a budget can be reached without waiting. A
 	// non-nil Clock must be safe to read from the goroutine that calls the Reader's methods, and its readings must not go backwards.
+	// A nil pointer inside a non-nil interface value is not the real clock: the reader calls its Now.
 	Clock Clock
 }
 
