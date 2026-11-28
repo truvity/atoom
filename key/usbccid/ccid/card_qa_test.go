@@ -383,7 +383,7 @@ func TestQACloseWaitsForTheCallInProgress(t *testing.T) {
 			break
 		}
 		if round == 10000 {
-			t.Fatal("Close and the second call neither returned nor waited for the lock of the Reader")
+			t.Fatal("Close and the second call neither returned nor waited for the lock of the Reader: no goroutine whose stack header names a Mutex wait inside (*Reader).Close and (*Reader).Transmit; if the Go release changed the stack format, update parkedOnTheReaderLock")
 		}
 		for range 100 {
 			runtime.Gosched()
