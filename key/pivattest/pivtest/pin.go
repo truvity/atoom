@@ -71,12 +71,23 @@ func (c *state) ref(p2 byte) *reference {
 // verify is VERIFY of the PIN: P2 80 and eight bytes. With no data it reads the counter and spends no try: 63Cx when the PIN is not
 // verified, 9000 when it is (measured on two cards, research page "PIN, touch, delete, move and reset"). A wrong value spends a try and
 // leaves the PIN not verified (assumed: R20).
+//
+// With P1 FF and no data it resets the security status of the reference, as SP 800-73-4 defines it: "PIN verified" becomes false, no try is
+// spent and the answer is 9000. For a blocked PIN it is also 9000: the standard does not say, and the command spends and reveals nothing
+// (assumed: R8). With data present it is 6700 (assumed: R8).
 func (c *state) verify(cmd *command) reply {
-	if cmd.p1 != 0 {
+	if cmd.p1 != 0 && cmd.p1 != 0xFF {
 		return status(swWrongP1P2) // assumed: R8
 	}
 	if cmd.p2 != refPIN {
 		return status(swRefNotFound) // assumed: R8
+	}
+	if cmd.p1 == 0xFF {
+		if len(cmd.data) != 0 {
+			return status(swWrongLength) // assumed: R8
+		}
+		c.verified = false
+		return status(swOK)
 	}
 	switch len(cmd.data) {
 	case 0:
@@ -92,6 +103,8 @@ func (c *state) verify(cmd *command) reply {
 		c.verified = false
 		return status(swBlocked)
 	}
+	// A block whose value, with the padding taken off, is shorter than 6 bytes (all FF, or "1234" and four FF) can match no PIN: it is a wrong
+	// value like any other and spends a try, where a card might refuse it with 6A80 and spend none (assumed: R8).
 	if !c.pin.matches(cmd.data) {
 		c.verified = false // assumed: R20
 		return status(c.pin.wrong())
@@ -129,7 +142,7 @@ func (c *state) changeReference(cmd *command) reply {
 		return status(r.wrong())
 	}
 	r.value = append([]byte(nil), next...)
-	r.isDefault = false
+	r.isDefault = false // a change to the factory value too: the flag is kept, not computed (assumed: R23)
 	r.left = r.max
 	return status(swOK)
 }

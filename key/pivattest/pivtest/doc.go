@@ -29,24 +29,27 @@
 //	SELECT                  00 A4 04 00     the PIV application, by its 5-byte or its 11-byte AID
 //	GET VERSION             00 FD 00 00     three bytes: major, minor, patch
 //	GET SERIAL              00 F8 00 00     four bytes, big-endian
-//	VERIFY                  00 20 00 80     the PIN; with no data it reads the counter and spends no try
+//	VERIFY                  00 20 00 80     the PIN; with no data it reads the counter and spends no try (00 20 FF 80: resets "PIN verified")
 //	CHANGE REFERENCE DATA   00 24 00 80/81  the PIN or the PUK: the old value, then the new one
 //	GET METADATA            00 F7 00 80/81  of the PIN or the PUK: default flag and tries
 //	GET DATA                00 CB 3F FF     an object: 5C 03 <id>
 //	GET RESPONSE            00 C0 00 00     the rest of an answer that was cut
 //
 // A PIN or a PUK is 6 to 8 bytes and travels padded with FF to 8, so a value never ends in FF (New refuses one that does). VERIFY and
-// CHANGE REFERENCE DATA answer 63Cx for a wrong value, with x the tries left; 6983 for a PIN or a PUK that is blocked (no tries left) when a value is sent, also
-// for the right value (an empty VERIFY of a blocked PIN reads the counter: 63C0); and 9000 for a right value, which brings the counter back to its maximum. Answers that do not fit the Le of the command are cut and followed by
-// 61xx (Options.ResponseMode says when). Extended APDUs are accepted unless Options.NoExtendedAPDU is set. CLA 10 chains a command: the
-// parts are collected, each answers 9000 with no data, and the last part (CLA 00) runs the whole. Another INS answers 6D00 and another CLA
-// 6E00. A command that is shorter than four bytes, or whose lengths do not match its size, answers 6700 and never panics.
+// CHANGE REFERENCE DATA answer 63Cx for a wrong value, with x the tries left; 6983 for a PIN or a PUK that is blocked (no tries left) when
+// a value is sent, also for the right value (an empty VERIFY of a blocked PIN reads the counter: 63C0); and 9000 for a right value, which
+// brings the counter back to its maximum. VERIFY with P1 FF and no data, as SP 800-73-4 defines it, resets the security status: "PIN
+// verified" becomes false, no try is spent, the answer is 9000 (also for a blocked PIN: R8). Answers that do not fit the Le of the command
+// are cut and followed by 61xx, never 6Cxx (R24; Options.ResponseMode says when). Extended APDUs are accepted unless
+// Options.NoExtendedAPDU is set. CLA 10 chains a command: the parts are collected, each answers 9000 with no data, and the last part (CLA
+// 00) runs the whole. Another INS answers 6D00 and another CLA 6E00. A command that is shorter than four bytes, or whose lengths do not
+// match its size, answers 6700 and never panics.
 //
-// Printing a Card, by value or by pointer, with any verb, shows at most its firmware, serial number and counters and nothing of the PIN, the
-// PUK or the objects: a Card is one func value that returns its state, a kind that fmt never follows, so no print can reach more than an address, in a field or not, and a copy of a Card is a second
-// handle to the same card. Options is different: it is the caller's own input and carries the PIN and the PUK in the clear, so a test that
-// prints its Options, or a struct that holds them, prints them; its Format method keeps them out of the verbs that reach it, and no method can
-// do more.
+// Printing a Card, by value or by pointer, with any verb, shows at most its firmware, serial number and counters and nothing of the PIN,
+// the PUK or the objects: a Card is one func value that returns its state, a kind that fmt never follows, so no print can reach more than
+// an address, in a field or not, and a copy of a Card is a second handle to the same card. Options is different: it is the caller's own
+// input and carries the PIN and the PUK in the clear, so a test that prints its Options, or a struct that holds them, prints them; its
+// Format method keeps them out of the verbs that reach it, and no method can do more.
 //
 // The management key, PUT DATA, touch, key generation, signing, key agreement, attestation, delete, move and RSA are not part of this card
 // yet.
@@ -56,8 +59,7 @@
 // GET DATA returns the bytes that PutObject seeded, as they were seeded: a real object is 53 L ... and a certificate object is
 // 53 L { 70 L <DER>, 71 01 00, FE 00 }, which CertificateObject builds from a DER certificate of up to 65526 bytes (MaxCertificateDER; it
 // panics for a longer one, which no length can describe). An object that was not seeded is 6A82. GET DATA takes the one form of the tag list
-// 5C 03 <id>. The
-// ids are:
+// 5C 03 <id>. The ids are:
 //
 //	5FC105           certificate of slot 9a (ObjectSlot9A)
 //	5FC10A           certificate of slot 9c (ObjectSlot9C)
@@ -84,7 +86,10 @@
 //	R7   Before SELECT, every instruction other than SELECT answers 6985.
 //	R8   The refusals for a command that is not well formed: 6700 for a data length that the command does not take, 6A88 for a P2 of VERIFY,
 //	     CHANGE REFERENCE DATA or GET METADATA that is not a reference, 6A86 for a P1 or P2 that the command does not take, 6A80 for a new
-//	     PIN or PUK of fewer than 6 or more than 8 bytes (checked before a try is spent) and for a tag list of GET DATA that is not 5C 03 <id> (the one short form: 5C 81 03 and 5C 82 00 03 are refused).
+//	     PIN or PUK of fewer than 6 or more than 8 bytes (checked before a try is spent) and for a tag list of GET DATA that is not 5C 03 <id>
+//	     (the one short form: 5C 81 03 and 5C 82 00 03 are refused). VERIFY with P1 FF and data is 6700, and VERIFY with P1 FF and no data
+//	     is 9000 for a blocked PIN too (the standard does not say). A VERIFY block whose value, with the padding off, is shorter than 6
+//	     bytes (all FF, or "1234" and four FF) is a wrong value and spends a try, where a card might refuse it with 6A80 and spend none.
 //	     P1 and P2 are held strictly here (SELECT takes only 04 00, for one): a real card may accept more. A driver that fails on a P1 or P2
 //	     in this card is told to look at this row, and to measure the card, before it is changed to fit the model.
 //	R10  GET RESPONSE with nothing waiting answers 6A86, and any command other than GET RESPONSE drops what waits. A GET RESPONSE that is
@@ -96,6 +101,9 @@
 //	R21  Chaining: a part with an INS, P1 or P2 other than the first drops the chain and answers 6700, so does a chain of more than 65535
 //	     bytes, counting the last part, and a last part with another header than the chain runs alone.
 //	R22  A command with no Le is read as a command with the largest Le: 256 bytes, or 65536 when it came extended in the mode Extended.
+//	R23  A change of the PIN or the PUK to the factory value leaves the default flag at 0: the card keeps a flag, and does not compare the
+//	     value. A card might compare it.
+//	R24  An Le shorter than the answer is cut and followed by 61xx, never 6Cxx, which ISO 7816-4 also allows.
 //
 // What the research pages measured, and is built as measured: an empty VERIFY reads the counter and spends no try (63Cx when the PIN is
 // not verified, 9000 when it is), a wrong PIN answers 63Cx with x the tries left, and a right PIN brings the counter back to its maximum.

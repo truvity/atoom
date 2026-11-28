@@ -119,7 +119,8 @@ func (c *state) limit(cmd *command) int {
 }
 
 // shape cuts a successful answer to the length the command allows. What does not fit is kept for GET RESPONSE and the status word tells
-// how much is left: 61 followed by the number of bytes, 00 for 256 or more.
+// how much is left: 61 followed by the number of bytes, 00 for 256 or more. An Le shorter than the answer is always cut and followed by
+// 61xx, never answered 6Cxx, which ISO 7816-4 also allows (assumed: R24).
 func (c *state) shape(cmd *command, r reply) reply {
 	if r.sw != swOK {
 		return r
@@ -128,7 +129,7 @@ func (c *state) shape(cmd *command, r reply) reply {
 	if len(r.data) <= n {
 		return r
 	}
-	rest := r.data[n:]
+	rest := r.data[n:] // the answer is cut, and followed by 61xx, never 6Cxx (assumed: R24)
 	c.pending = append([]byte(nil), rest...)
 	left := len(rest)
 	if left >= maxShortLe {

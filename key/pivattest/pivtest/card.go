@@ -99,11 +99,12 @@ type Options struct {
 //
 // A Card is safe for use by several goroutines, one command at a time.
 //
-// A Card is a handle: it holds one unexported func value that returns the state, and everything (the mutex, the PIN, the PUK, the counters,
-// the objects, the session and the log) lives behind it. A copy of a Card is a second handle to the SAME card, not a second card; make
-// another card with New. A func is a kind that fmt never follows, so no print of a Card, by value or by pointer, in a field that fmt reads
-// by reflection or not, with any verb and with the methods of fmt on or off, can reach more than an address; and Format prints a fixed text with the firmware, the serial number and the counters, and nothing of
-// the PIN, the PUK or the objects. The zero Card is no card: its methods panic.
+// A Card is a handle: it holds one unexported func value that returns the state, and everything (the mutex, the PIN, the PUK, the
+// counters, the objects, the session and the log) lives behind it. A copy of a Card is a second handle to the SAME card, not a second
+// card; make another card with New. A func is a kind that fmt never follows, so no print of a Card, by value or by pointer, in a field
+// that fmt reads by reflection or not, with any verb and with the methods of fmt on or off, can reach more than an address; and Format
+// prints a fixed text with the firmware, the serial number and the counters, and nothing of the PIN, the PUK or the objects. The zero Card
+// is no card: its methods panic.
 type Card struct {
 	get func() *state
 }
@@ -168,8 +169,10 @@ func New(o Options) *Card {
 
 // Format prints the options with the PIN and the PUK left out, for every verb: a test that prints its options leaks neither.
 func (o Options) Format(f fmt.State, _ rune) {
-	_, _ = f.Write(fmt.Appendf(nil, "pivtest.Options{firmware %d.%d.%d, serial %d, PIN %s, PUK %s, max tries %d and %d, mode %d, no extended APDU %t}",
-		o.Firmware[0], o.Firmware[1], o.Firmware[2], o.Serial, given(o.PIN), given(o.PUK), o.MaxPINTries, o.MaxPUKTries, o.ResponseMode, o.NoExtendedAPDU))
+	_, _ = f.Write(fmt.Appendf(nil,
+		"pivtest.Options{firmware %d.%d.%d, serial %d, PIN %s, PUK %s, max tries %d and %d, mode %d, no extended APDU %t}",
+		o.Firmware[0], o.Firmware[1], o.Firmware[2], o.Serial, given(o.PIN), given(o.PUK),
+		o.MaxPINTries, o.MaxPUKTries, o.ResponseMode, o.NoExtendedAPDU))
 }
 
 func given(s string) string {
@@ -189,7 +192,8 @@ func (card Card) Format(f fmt.State, _ rune) {
 	c := card.st()
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	_, _ = f.Write(fmt.Appendf(nil, "pivtest.Card{firmware %d.%d.%d, serial %d, PIN tries %d of %d, PUK tries %d of %d, %d objects, PIN, PUK and objects not shown}",
+	_, _ = f.Write(fmt.Appendf(nil,
+		"pivtest.Card{firmware %d.%d.%d, serial %d, PIN tries %d of %d, PUK tries %d of %d, %d objects, PIN, PUK and objects not shown}",
 		c.fw[0], c.fw[1], c.fw[2], c.serial, c.pin.left, c.pin.max, c.puk.left, c.puk.max, len(c.objects)))
 }
 
