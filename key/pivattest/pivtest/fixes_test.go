@@ -433,3 +433,149 @@ func TestACardInAnUnexportedFieldPrintsNoStateWithAnyVerb(t *testing.T) {
 
 // verbText is "%" and a letter, built so that no analyser reads it as a constant format.
 func verbText(letter string) string { return strings.Join([]string{"%", letter}, "") }
+
+func TestVerifyWithP1FFResetsTheSecurityStatus(t *testing.T) { // assumed: R8 (the blocked PIN, and the data)
+	reset := []byte{0, insVerify, 0xFF, refPIN}
+	c := newSelected(t, Options{})
+	send(t, c, verifyCmd(DefaultPIN))
+	_, sw := send(t, c, emptyVerify())
+	wantSW(t, "verified", sw, swOK)
+	data, sw := send(t, c, reset)
+	wantSW(t, "00 20 FF 80", sw, swOK)
+	if len(data) != 0 {
+		t.Errorf("data %x", data)
+	}
+	_, sw = send(t, c, emptyVerify())
+	wantSW(t, "after the reset", sw, 0x63C3)
+	// No try is spent, and none is given back.
+	send(t, c, verifyCmd("000000")) // 2 left
+	_, sw = send(t, c, reset)
+	wantSW(t, "reset after a wrong PIN", sw, swOK)
+	_, sw = send(t, c, emptyVerify())
+	wantSW(t, "the counter did not move", sw, 0x63C2)
+	// A PIN that was not verified: the same.
+	_, sw = send(t, c, reset)
+	wantSW(t, "reset of a PIN that is not verified", sw, swOK)
+	// A blocked PIN: 9000, and it stays blocked.
+	for i := 0; i < 2; i++ {
+		send(t, c, verifyCmd("000000"))
+	}
+	_, sw = send(t, c, reset)
+	wantSW(t, "reset of a blocked PIN", sw, swOK)
+	_, sw = send(t, c, emptyVerify())
+	wantSW(t, "the blocked PIN", sw, 0x63C0)
+	_, sw = send(t, c, verifyCmd(DefaultPIN))
+	wantSW(t, "the right PIN, blocked", sw, swBlocked)
+	// With data it is 6700, and nothing changes.
+	c = newSelected(t, Options{})
+	send(t, c, verifyCmd(DefaultPIN))
+	_, sw = send(t, c, short(0, insVerify, 0xFF, refPIN, pad(DefaultPIN), -1))
+	wantSW(t, "00 20 FF 80 with data", sw, swWrongLength)
+	_, sw = send(t, c, emptyVerify())
+	wantSW(t, "still verified", sw, swOK)
+	// The reference is the PIN, and P1 is 00 or FF.
+	_, sw = send(t, c, []byte{0, insVerify, 0xFF, refPUK})
+	wantSW(t, "P2 81", sw, swRefNotFound)
+	for _, p1 := range []byte{0x01, 0x80, 0xFE} {
+		_, sw = send(t, c, []byte{0, insVerify, p1, refPIN})
+		wantSW(t, fmt.Sprintf("P1 %02X", p1), sw, swWrongP1P2)
+	}
+	// An extended form, with an Le and no data, is the same command.
+	_, sw = send(t, c, extended(0, insVerify, 0xFF, refPIN, nil, 0))
+	wantSW(t, "extended", sw, swOK)
+	_, sw = send(t, c, emptyVerify())
+	wantSW(t, "after the extended reset", sw, 0x63C3)
+	// And it is no way round the counter: a reset between wrong values does not give a try back.
+	c = newSelected(t, Options{})
+	for i := 0; i < 3; i++ {
+		send(t, c, verifyCmd("000000"))
+		send(t, c, reset)
+	}
+	_, sw = send(t, c, verifyCmd(DefaultPIN))
+	wantSW(t, "after three wrong values and three resets", sw, swBlocked)
+}
+
+func TestAChangeBackToTheFactoryValueKeepsTheDefaultFlagAtZero(t *testing.T) { // assumed: R23
+	for _, tc := range []struct {
+		name         string
+		ref          byte
+		factory, new string
+	}{{"PIN", refPIN, DefaultPIN, "654321"}, {"PUK", refPUK, DefaultPUK, "87654321"}} {
+		c := newSelected(t, Options{})
+		flag := func() byte {
+			data, sw := send(t, c, metadataCmd(tc.ref))
+			wantSW(t, tc.name+" metadata", sw, swOK)
+			return data[5] // 01 01 FF 05 01 <flag> ...
+		}
+		if flag() != 1 {
+			t.Fatalf("%s: the factory card does not say it is the default", tc.name)
+		}
+		send(t, c, changeCmd(tc.ref, tc.factory, tc.new))
+		if flag() != 0 {
+			t.Errorf("%s: the flag is not 0 after a change", tc.name)
+		}
+		_, sw := send(t, c, changeCmd(tc.ref, tc.new, tc.factory))
+		wantSW(t, tc.name+" change back", sw, swOK)
+		if flag() != 0 {
+			t.Errorf("%s: a change back to the factory value made the flag 1: the card compares the value", tc.name)
+		}
+		_, sw = send(t, c, changeCmd(tc.ref, tc.factory, tc.factory)) // and to the same value
+		wantSW(t, tc.name+" change to the same value", sw, swOK)
+		if flag() != 0 {
+			t.Errorf("%s: the flag is not 0", tc.name)
+		}
+	}
+}
+
+func TestAnLeShorterThanTheAnswerIsCutWith61xxNeverRight6Cxx(t *testing.T) { // assumed: R24
+	c := newSelected(t, Options{})
+	c.PutObject(ObjectSlot9A, bigObject(300))
+	for _, tc := range []struct {
+		name string
+		apdu []byte
+	}{
+		{"object, Le 1", getDataCmd(ObjectSlot9A, 1)},
+		{"object, Le 40", getDataCmd(ObjectSlot9A, 40)},
+		{"object, Le 255", getDataCmd(ObjectSlot9A, 255)},
+		{"object, extended Le 10", extended(0, insGetData, 0x3F, 0xFF, []byte{0x5C, 3, 0x5F, 0xC1, 5}, 10)},
+		{"SELECT, Le 4", short(0, insSelect, 4, 0, aidShort, 4)},
+		{"metadata, Le 3", short(0, insGetMetadata, 0, refPIN, nil, 3)},
+		{"version, Le 1", short(0, insGetVersion, 0, 0, nil, 1)},
+	} {
+		data, sw := send(t, c, tc.apdu)
+		if sw>>8 != 0x61 || len(data) == 0 {
+			t.Errorf("%s: %d bytes and SW %04X, want a cut and 61xx", tc.name, len(data), sw)
+		}
+		if sw>>8 == 0x6C {
+			t.Errorf("%s answers 6Cxx", tc.name)
+		}
+	}
+	// What is cut is what GET RESPONSE gives next.
+	data, sw := send(t, c, getDataCmd(ObjectSlot9A, 40))
+	wantSW(t, "Le 40", sw, swMore) // 260 left: 256 or more is 00
+	rest, sw := send(t, c, getResponseCmd(0))
+	if len(data) != 40 || len(rest) != 256 || sw != swMore|4 {
+		t.Errorf("parts %d and %d, SW %04X", len(data), len(rest), sw)
+	}
+}
+
+func TestAVerifyBlockShorterThanSixBytesIsAWrongValueThatSpendsATry(t *testing.T) { // assumed: R8
+	for name, block := range map[string][]byte{
+		"all FF":           bytes.Repeat([]byte{0xFF}, 8),
+		"1234 and four FF": pad("1234"),
+		"one byte":         pad("1"),
+		"five bytes":       pad("12345"),
+	} {
+		c := newSelected(t, Options{})
+		_, sw := send(t, c, short(0, insVerify, 0, refPIN, block, -1))
+		wantSW(t, name, sw, 0x63C2)
+		_, sw = send(t, c, emptyVerify())
+		wantSW(t, name+": the counter", sw, 0x63C2)
+	}
+	// A block of six bytes that is merely wrong is the same, and the right one is not refused.
+	c := newSelected(t, Options{})
+	_, sw := send(t, c, verifyCmd("000000"))
+	wantSW(t, "six wrong bytes", sw, 0x63C2)
+	_, sw = send(t, c, verifyCmd(DefaultPIN))
+	wantSW(t, "the right PIN", sw, swOK)
+}
