@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/truvity/atoom/key/usbccid"
+	"github.com/truvity/atoom/key/usbccid/usbccidtest"
 )
 
 // The four rules of the last round, at their edges: the order of a response chain, no chain at short APDU level, a budget that is spent
@@ -317,6 +318,9 @@ func refusedOnBudget(t *testing.T, r *Reader, f *fakeDevice, err error, mark int
 	assertWiped(t, r, "after the refusal")
 }
 
+// The budget is spent in the time between the first reading of the call and the Port call: the clock (a scriptClock) moves by the whole
+// budget at its second reading, which is the one before the first Port call of a later call and the one that starts the drain of a first
+// call. No machine has to be slow for it, and none can be fast enough to miss it.
 func TestQABudgetSpentBeforeTheFirstPortCall(t *testing.T) {
 	budgets := []time.Duration{time.Nanosecond, 5 * time.Millisecond} // the last is under one drain read for a first call
 	for _, op := range []opCase{qaOps[0], qaOps[1], qaOps[3], qaOps[4]} {
@@ -331,6 +335,7 @@ func TestQABudgetSpentBeforeTheFirstPortCall(t *testing.T) {
 				name := fmt.Sprintf("%s/first=%v/%v", op.name, first, b)
 				t.Run(name, func(t *testing.T) {
 					setSeq(100)
+					clk := &scriptClock{Clock: usbccidtest.NewDefaultClock()}
 					stale := msg(rspDataBlock, 101, stOK, 0, 0, qaResp) // a late answer with the number of the next message
 					var f *fakeDevice
 					var r *Reader
@@ -338,15 +343,17 @@ func TestQABudgetSpentBeforeTheFirstPortCall(t *testing.T) {
 						var err error
 						f = newFake(descSpec{}, cardHandler(echoSW))
 						f.send(stale)
-						if r, err = Open(f, Options{}); err != nil {
+						if r, err = Open(f, Options{Clock: clk}); err != nil {
 							t.Fatal(err)
 						}
 					} else {
-						r, f = openPowered(t, Options{}, cardHandler(echoSW))
+						r, f = openPowered(t, Options{Clock: clk}, cardHandler(echoSW))
 						setSeq(100) // no drain in a later call: a stale answer with the very number would be taken (the rest risk)
 					}
 					mark := f.mark()
+					clk.arm(2, b, false)
 					err := op.call(r, b)
+					clk.disarm()
 					refusedOnBudget(t, r, f, err, mark)
 					// The same Reader works with a normal budget. The late answer is dropped by the drain, once, before the first
 					// send; no sequence number was spent by the refusal.
@@ -392,22 +399,31 @@ func countOuts(op opCase) int {
 
 // The state of the card after a refusal on the budget is what it was.
 func TestQABudgetRefusalKeepsThePowerState(t *testing.T) {
+	// Each refusal is a call whose whole budget is spent at the second reading of the clock, before the first Port call (see
+	// TestQABudgetSpentBeforeTheFirstPortCall).
+	spent := func() *scriptClock { return &scriptClock{Clock: usbccidtest.NewDefaultClock()} }
 	t.Run("PowerOn refused on a powered card", func(t *testing.T) {
-		r, f := openPowered(t, Options{}, cardHandler(echoSW))
+		clk := spent()
+		r, f := openPowered(t, Options{Clock: clk}, cardHandler(echoSW))
 		mark := f.mark()
+		clk.arm(2, time.Nanosecond, false)
 		_, err := r.PowerOn(time.Nanosecond)
+		clk.disarm()
 		refusedOnBudget(t, r, f, err, mark)
 		if _, err := r.Transmit(apduSelect, testBudget); err != nil {
 			t.Errorf("Transmit after a refused PowerOn on a powered card: %v", err)
 		}
 	})
 	t.Run("PowerOn refused on a card that is off", func(t *testing.T) {
-		r, f, err := openFake(Options{}, cardHandler(echoSW))
+		clk := spent()
+		r, f, err := openFake(Options{Clock: clk}, cardHandler(echoSW))
 		if err != nil {
 			t.Fatal(err)
 		}
 		mark := f.mark()
+		clk.arm(2, time.Nanosecond, false)
 		_, err = r.PowerOn(time.Nanosecond)
+		clk.disarm()
 		refusedOnBudget(t, r, f, err, mark)
 		if _, err := r.Transmit(apduSelect, testBudget); !errors.Is(err, ErrNotPowered) {
 			t.Errorf("Transmit after a refused PowerOn: %v", err)
@@ -417,33 +433,43 @@ func TestQABudgetRefusalKeepsThePowerState(t *testing.T) {
 		}
 	})
 	t.Run("PowerOff refused on a powered card", func(t *testing.T) {
-		r, f := openPowered(t, Options{}, cardHandler(echoSW))
+		clk := spent()
+		r, f := openPowered(t, Options{Clock: clk}, cardHandler(echoSW))
 		mark := f.mark()
+		clk.arm(2, time.Nanosecond, false)
 		err := r.PowerOff(time.Nanosecond)
+		clk.disarm()
 		refusedOnBudget(t, r, f, err, mark)
 		if _, err := r.Transmit(apduSelect, testBudget); err != nil {
 			t.Errorf("Transmit after a refused PowerOff on a powered card: %v", err)
 		}
 	})
 	t.Run("PowerOff refused on a card that is off", func(t *testing.T) {
-		r, f, err := openFake(Options{}, cardHandler(echoSW))
+		clk := spent()
+		r, f, err := openFake(Options{Clock: clk}, cardHandler(echoSW))
 		if err != nil {
 			t.Fatal(err)
 		}
 		mark := f.mark()
+		clk.arm(2, time.Nanosecond, false)
 		err = r.PowerOff(time.Nanosecond)
+		clk.disarm()
 		refusedOnBudget(t, r, f, err, mark)
 		if _, err := r.Transmit(apduSelect, testBudget); !errors.Is(err, ErrNotPowered) {
 			t.Errorf("Transmit: %v", err)
 		}
 	})
 	t.Run("SlotStatus and Transmit refused on a powered card", func(t *testing.T) {
-		r, f := openPowered(t, Options{}, cardHandler(echoSW))
+		clk := spent()
+		r, f := openPowered(t, Options{Clock: clk}, cardHandler(echoSW))
 		mark := f.mark()
+		clk.arm(2, time.Nanosecond, false)
 		_, err := r.SlotStatus(time.Nanosecond)
 		refusedOnBudget(t, r, f, err, mark)
+		clk.arm(2, time.Nanosecond, false)
 		_, err = r.Transmit(qaCmd, time.Nanosecond)
 		refusedOnBudget(t, r, f, err, mark)
+		clk.disarm()
 		if _, err := r.Transmit(apduSelect, testBudget); err != nil {
 			t.Errorf("Transmit after the refusals: %v", err)
 		}
@@ -461,11 +487,13 @@ func TestQABudgetFailureAfterAPortCallLosesTheSession(t *testing.T) {
 	}
 	for _, op := range []opCase{qaOps[0], qaOps[1], qaOps[3]} {
 		t.Run("one drain read, then the budget is gone: "+op.name, func(t *testing.T) {
+			clk := usbccidtest.NewDefaultClock()
 			f := newFake(descSpec{}, cardHandler(echoSW))
+			f.clk = clk
 			f.send(msg(rspDataBlock, 77, stOK, 0, 0, qaResp)) // the first read returns bytes, and takes longer than the budget
-			f.onIn = func(*fakeDevice) { time.Sleep(pastBudget) }
-			r, _ := Open(f, Options{})
-			err := op.call(r, smallBudget) // room for the two windows with 60 ms to spare, and less than the sleep
+			f.onIn = func(f *fakeDevice) { f.pass(pastBudget) }
+			r, _ := Open(f, Options{Clock: clk})
+			err := op.call(r, smallBudget) // room for the two windows with 60 ms to spare, and less than the time the read takes
 			lost(t, r, f, err)
 			if f.nOut != 0 || f.nIn != 1 {
 				t.Errorf("%d writes, %d reads", f.nOut, f.nIn)
@@ -473,14 +501,14 @@ func TestQABudgetFailureAfterAPortCallLosesTheSession(t *testing.T) {
 		})
 	}
 	t.Run("PowerOn: the first message answered, the budget gone before the second", func(t *testing.T) {
-		r, f, err := openFake(Options{}, cardHandler(echoSW))
+		r, f, err := openFake(Options{Clock: usbccidtest.NewDefaultClock()}, cardHandler(echoSW))
 		if err != nil {
 			t.Fatal(err)
 		}
 		if _, err := r.SlotStatus(testBudget); err != nil { // the drain is done
 			t.Fatal(err)
 		}
-		f.onIn = func(*fakeDevice) { time.Sleep(pastBudget) }
+		f.onIn = func(f *fakeDevice) { f.pass(pastBudget) }
 		outs := f.nOut
 		_, err = r.PowerOn(smallBudget)
 		lost(t, r, f, err)
@@ -490,8 +518,8 @@ func TestQABudgetFailureAfterAPortCallLosesTheSession(t *testing.T) {
 	})
 	t.Run("a chain: the first block answered, the budget gone before the second", func(t *testing.T) {
 		cc := &chainCard{respParts: [][]byte{{0x90, 0}}}
-		r, f := openPowered(t, Options{}, cc.handler())
-		f.onIn = func(*fakeDevice) { time.Sleep(pastBudget) }
+		r, f := openPowered(t, Options{Clock: usbccidtest.NewDefaultClock()}, cc.handler())
+		f.onIn = func(f *fakeDevice) { f.pass(pastBudget) }
 		outs := f.nOut
 		_, err := r.Transmit(qaLong, smallBudget)
 		lost(t, r, f, err)
@@ -500,8 +528,8 @@ func TestQABudgetFailureAfterAPortCallLosesTheSession(t *testing.T) {
 		}
 	})
 	t.Run("a write that succeeded and a budget gone before the read", func(t *testing.T) {
-		r, f := openPowered(t, Options{}, func(f *fakeDevice, m []byte) {
-			time.Sleep(pastBudget)
+		r, f := openPowered(t, Options{Clock: usbccidtest.NewDefaultClock()}, func(f *fakeDevice, m []byte) {
+			f.pass(pastBudget)
 			cardHandler(echoSW)(f, m)
 		})
 		reads := f.nIn
@@ -512,11 +540,11 @@ func TestQABudgetFailureAfterAPortCallLosesTheSession(t *testing.T) {
 		}
 	})
 	t.Run("a write that failed", func(t *testing.T) {
-		r, f := openPowered(t, Options{}, cardHandler(echoSW))
+		r, f := openPowered(t, Options{Clock: usbccidtest.NewDefaultClock()}, cardHandler(echoSW))
 		out := f.nOut
 		f.outFail = func(n int) error {
 			if n > out {
-				time.Sleep(pastBudget)
+				f.pass(pastBudget)
 				return usbccid.ErrTimeout
 			}
 			return nil
@@ -527,8 +555,9 @@ func TestQABudgetFailureAfterAPortCallLosesTheSession(t *testing.T) {
 }
 
 // The invariant, searched at random: whenever a call returns ErrBudgetExhausted and the session is not lost, the call made not one call
-// on the Port; and when it made a call on the Port, the session is lost or the call succeeded or failed for another reason. The sleeps
-// and the budgets are random, so the call is cut at every place.
+// on the Port; and when it made a call on the Port, the session is lost or the call succeeded or failed for another reason. The time
+// that every Port call takes (virtual, moved by the fake) and the budgets are random, so the call is cut at every place. A small
+// budget in nanoseconds is also spent between two readings of the clock, as a real clock does when a call is slow to start.
 func TestQABudgetRefusalMeansNoPortCall(t *testing.T) {
 	rng := rand.New(rand.NewPCG(11, 12)) //nolint:gosec // a fixed seed
 	refused, lostN := 0, 0
@@ -537,32 +566,31 @@ func TestQABudgetRefusalMeansNoPortCall(t *testing.T) {
 		first := rng.IntN(2) == 0
 		var r *Reader
 		var f *fakeDevice
+		clk := &scriptClock{Clock: usbccidtest.NewDefaultClock()}
 		h := func(f *fakeDevice, m []byte) {
-			if d := time.Duration(rng.IntN(4)) * time.Millisecond; d > 0 {
-				time.Sleep(d)
-			}
+			f.pass(time.Duration(rng.IntN(4)) * time.Millisecond)
 			cardHandler(echoSW)(f, m)
 		}
 		if first && op.typ != msgXfrBlock {
 			f = newFake(descSpec{}, h)
+			f.clk = clk
 			var err error
-			if r, err = Open(f, Options{TransferTimeout: time.Duration(1+rng.IntN(25)) * time.Millisecond}); err != nil {
+			if r, err = Open(f, Options{Clock: clk, TransferTimeout: time.Duration(1+rng.IntN(25)) * time.Millisecond}); err != nil {
 				t.Fatal(err)
 			}
 		} else {
-			r, f = openPowered(t, Options{TransferTimeout: time.Duration(1+rng.IntN(25)) * time.Millisecond}, h)
+			r, f = openPowered(t, Options{Clock: clk, TransferTimeout: time.Duration(1+rng.IntN(25)) * time.Millisecond}, h)
 		}
-		f.onIn = func(*fakeDevice) {
-			if d := time.Duration(rng.IntN(4)) * time.Millisecond; d > 0 {
-				time.Sleep(d)
-			}
-		}
+		f.onIn = func(f *fakeDevice) { f.pass(time.Duration(rng.IntN(4)) * time.Millisecond) }
 		budget := time.Duration(1+rng.IntN(14)) * time.Millisecond
-		if rng.IntN(5) == 0 {
+		tiny := rng.IntN(5) == 0
+		if tiny {
 			budget = time.Duration(1 + rng.IntN(2000))
+			clk.arm(2, budget+time.Duration(rng.IntN(2)), false) // spent at the second reading, or one nanosecond more
 		}
 		mark := f.mark()
 		err := op.call(r, budget)
+		clk.disarm()
 		calls := len(f.callsAfter(mark))
 		switch {
 		case err == nil:

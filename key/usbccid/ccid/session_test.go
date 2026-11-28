@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/truvity/atoom/key/usbccid"
+	"github.com/truvity/atoom/key/usbccid/usbccidtest"
 )
 
 // Tests of the session rules: the shared sequence counter, the drain of the IN pipe, the checks of the
@@ -171,34 +172,40 @@ func TestDrainThatNeverGetsQuietLosesTheSession(t *testing.T) {
 	untouched(t, r, f, err)
 }
 
+// A device that always has something to say and takes 67.5 ms (a quarter of MaxDrainTime and 5 ms) to say it: the reads begin at 0,
+// 67.5, 135 and 202.5 ms, each asked for a whole window, and the fifth turn finds MaxDrainTime spent (270 ms), long before MaxDrainReads.
 func TestDrainThatTakesTooLongLosesTheSession(t *testing.T) {
+	const take = MaxDrainTime/4 + 5*time.Millisecond
+	clk := usbccidtest.NewDefaultClock()
 	f := newFake(descSpec{}, cardHandler(echoSW))
+	f.clk = clk
 	f.endless = msg(rspDataBlock, 9, stOK, 0, 0, []byte{1, 2})
-	f.onIn = func(*fakeDevice) { time.Sleep(MaxDrainTime/4 + 5*time.Millisecond) }
-	r, err := Open(f, Options{})
+	f.onIn = func(f *fakeDevice) { f.pass(take) }
+	r, err := Open(f, Options{Clock: clk})
 	if err != nil {
 		t.Fatal(err)
 	}
 	_, err = r.SlotStatus(testBudget)
 	lostWith(t, err, ErrProtocol)
-	if f.nIn >= MaxDrainReads || f.nOut != 0 {
-		t.Errorf("reads %d, writes %d", f.nIn, f.nOut)
+	sameCalls(t, portCalls(f), reads(4, DrainReadTimeout))
+	if f.nOut != 0 {
+		t.Errorf("writes %d", f.nOut)
 	}
 }
 
 func TestDrainEndsWithTheBudget(t *testing.T) {
+	clk := usbccidtest.NewDefaultClock()
 	f := newFake(descSpec{}, cardHandler(echoSW))
+	f.clk = clk
 	f.endless = msg(rspDataBlock, 9, stOK, 0, 0, []byte{1, 2})
-	f.onIn = func(*fakeDevice) { time.Sleep(15 * time.Millisecond) }
-	r, _ := Open(f, Options{})
-	// The budget holds the two windows of a first call with 60 ms to spare, so a stall before the first read cannot refuse the call
-	// without a loss. Each read takes at least 15 ms: the seventh would begin after 90 ms, with less than one window left, so the
-	// session ends before MaxDrainReads at any speed (a slower machine ends it earlier).
+	f.onIn = func(f *fakeDevice) { f.pass(15 * time.Millisecond) }
+	r, _ := Open(f, Options{Clock: clk})
+	// The budget holds the two windows of a first call with 60 ms to spare. Each read takes 15 ms: the reads begin at 0, 15, ... 75 ms
+	// (the sixth with 25 ms of the 100 left, a whole window), and the seventh would begin at 90 ms, with 10 ms left, less than one
+	// window, so the session ends after six reads, long before MaxDrainReads.
 	_, err := r.SlotStatus(2*DrainReadTimeout + 60*time.Millisecond)
 	lostWith(t, err, ErrBudgetExhausted)
-	if f.nIn >= MaxDrainReads {
-		t.Errorf("%d reads: the budget did not end the drain", f.nIn)
-	}
+	sameCalls(t, portCalls(f), reads(6, DrainReadTimeout))
 	if f.nOut != 0 {
 		t.Error("something was written")
 	}
@@ -559,10 +566,13 @@ func TestDrainNeedsTwoTimedOutReadsInARow(t *testing.T) {
 
 // A read of the drain waits no longer than what is left of MaxDrainTime.
 func TestDrainReadIsCutToWhatIsLeftOfMaxDrainTime(t *testing.T) {
+	const take = MaxDrainTime/2 - 5*time.Millisecond // 120 ms
+	clk := usbccidtest.NewDefaultClock()
 	f := newFake(descSpec{}, cardHandler(echoSW))
+	f.clk = clk
 	f.endless = msg(rspDataBlock, 9, stOK, 0, 0, []byte{1, 2})
-	f.onIn = func(*fakeDevice) { time.Sleep(MaxDrainTime/2 - 5*time.Millisecond) }
-	r, err := Open(f, Options{})
+	f.onIn = func(f *fakeDevice) { f.pass(take) }
+	r, err := Open(f, Options{Clock: clk})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -571,15 +581,9 @@ func TestDrainReadIsCutToWhatIsLeftOfMaxDrainTime(t *testing.T) {
 	if f.nOut != 0 {
 		t.Error("something was written")
 	}
-	// A third read can only start after 2 x 120 ms, when less than DrainReadTimeout of MaxDrainTime is left.
-	for i, to := range f.timeouts {
-		if to <= 0 || to > DrainReadTimeout {
-			t.Errorf("read %d has a timeout of %v", i, to)
-		}
-	}
-	if n := len(f.timeouts); n >= 3 && f.timeouts[n-1] >= DrainReadTimeout {
-		t.Errorf("the last read, which started after %v, has a timeout of %v", 2*(MaxDrainTime/2-5*time.Millisecond), f.timeouts[n-1])
-	}
+	// The reads begin at 0, 120 and 240 ms: the third has 10 ms of MaxDrainTime left and is asked for that and no more, and it ends
+	// at 360 ms, so there is no fourth.
+	sameCalls(t, portCalls(f), []portCall{{"in", DrainReadTimeout}, {"in", DrainReadTimeout}, {"in", MaxDrainTime - 2*take}})
 }
 
 // A second Open on a Port that a Reader holds is refused with ErrAlreadyClaimed, and leaves the Port and its Reader as they were.

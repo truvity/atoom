@@ -4,6 +4,8 @@ import (
 	"errors"
 	"testing"
 	"time"
+
+	"github.com/truvity/atoom/key/usbccid/usbccidtest"
 )
 
 // FuzzAnswers feeds the reader whatever bytes a hostile or broken reader could send in answer to one command, cut into packets as the
@@ -39,10 +41,10 @@ func FuzzAnswers(f *testing.F) {
 				f.sendRaw(rest)
 			}
 		}
-		r, fk := openPowered(t, Options{}, h)
+		r, fk := openPowered(t, Options{Clock: usbccidtest.NewDefaultClock()}, h)
 		seqs.n.Store(2) // the Transmit is number 3, as the seeds say
 		outs := fk.nOut
-		resp, err := r.Transmit(apduSelect, 2*time.Second) // the fake never waits: only a stall of seconds can spend this
+		resp, err := r.Transmit(apduSelect, 2*time.Second) // the fake never waits, and the clock stands still: no budget is ever spent
 		if len(resp) > MaxResponseAPDU {
 			t.Fatalf("a response of %d bytes", len(resp))
 		}
