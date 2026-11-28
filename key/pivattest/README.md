@@ -5,7 +5,7 @@ The check of a YubiKey PIV attestation: that the slot certificate a card issued 
 | | |
 | --- | --- |
 | Go module | `github.com/truvity/atoom/key/pivattest` (the standard library only; no atoom module) |
-| Packages | `pivattest` (this page) and `pivattest/attesttest` (test support, below) |
+| Packages | `pivattest` (this page), `pivattest/attesttest` and `pivattest/pivtest` (test support, below) |
 | API | `Default`, `NewVerifierFromPEM` give a `Verifier`; `Verify(slot, signer)`, `VerifyAt(now, slot, signer)`, `VerifyDER(slotDER, signerDER)` give an `Evidence` (`Slot`, `Firmware`, `Serial`, `FormFactor`, `PIN`, `Touch`, the flags `HasSlot`, `HasFirmware`, `HasSerial`, `HasFormFactor`, `HasPolicy`, `Algorithm`, `PublicKey`, `Generated`, `Anchor`, and the method `AttestsKey`); `Pins` is the pin table; `MaxCertificateSize` is the longest certificate a check reads. The errors `ErrNil`, `ErrNoRaw`, `ErrZeroTime`, `ErrParse`, `ErrTooLarge`, `ErrChain`, `ErrFirmwareExt`, `ErrSerialExt`, `ErrPolicyExt`, `ErrFormFactorExt`, `ErrRootCount`, `ErrRootPin`, `ErrNoAnchor`, `ErrPinTable`, `ErrAdmission`, `ErrClock` |
 | Documentation | the package comment (`go doc`), [docs/pins.md](docs/pins.md) (the six pinned certificates and how to check them) |
 | Where it came from | [provenance](../../docs/provenance.md#key-pivattest) |
@@ -41,6 +41,10 @@ The library gives the answer of the check that the card driver made with piv-go 
 ## attesttest
 
 Test support, never imported by a program. `NewPKI` makes a TEST ONLY root, a PIV-named intermediate, a card attestation certificate and slot certificates with the vendor's extensions, with options for each way a chain or an extension can be made wrong (`PKI.Slot`, `PKI.WithF9`, the extension builders `Firmware`, `Serial`, `Policy`, `FormFactor`, `Ext`). `Load` reads the corpus; `Build` makes a new one (its keys are new, so its results must be recorded again from piv-go's check). No certificate in it is a vendor's.
+
+## pivtest
+
+Test support, never imported by a program. `pivtest` is a model of the PIV application of a card at the level of command and response APDUs (`New`, then `PowerOn`, `Exchange` and `PowerOff`), so that the layer that speaks PIV through a card reader can be tested with no card, no reader and no smart-card service. It is a deterministic state machine: no goroutine, no timer, no clock, no I/O; a command that makes a card wait returns the wait as a duration (always zero in this part). It answers SELECT, GET VERSION, GET SERIAL, VERIFY and CHANGE REFERENCE DATA of the PIN and the PUK with their counters, GET METADATA of the two, GET DATA of objects that a test seeded (`PutObject`, `CertificateObject`) and GET RESPONSE with the status word `61xx`, over short and extended APDUs and command chaining. The card state (versions, serial, PIN, PUK, counters, objects) survives a power cycle; the session state does not. `Log` lists the commands received, with no PIN and no object body, and `RequireNoForbidden` fails a test of a driver that sent the reset, the retry-counter setting or the key import, which the card records in `Forbidden` and answers as an unknown instruction. The management key, PUT DATA, touch, key generation, signing, attestation and RSA are not in this part. A model is not a card: every rule that was guessed and not measured is marked `assumed: R<n>` in the source and listed in the package comment, and a green run over the model proves the driver against the model, not against a card. The package imports the standard library only and has no build constraint.
 
 ## Tests
 
