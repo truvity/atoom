@@ -64,7 +64,7 @@ func lostFaults() []qaFault {
 			reply: func(*fakeDevice, byte, byte) {}},
 		{name: "budget runs out between the transfers", cause: []error{ErrBudgetExhausted}, not: []error{usbccid.ErrTimeout}, budget: smallBudget,
 			reply: func(f *fakeDevice, rsp, seq byte) {
-				time.Sleep(pastBudget)
+				f.pass(pastBudget)
 				f.send(msg(rsp, seq, stOK, 0, 0, qaResp))
 			}},
 		{name: "a wait with no end", cause: []error{ErrBudgetExhausted}, budget: smallBudget,
@@ -296,7 +296,7 @@ func TestQALostInsideChains(t *testing.T) {
 			f.endless = msg(rspDataBlock, m[6], stTimeExt, 1, 0, nil)
 		}), budget: smallBudget, cause: []error{ErrBudgetExhausted}},
 		{name: "the budget runs out between the blocks", onBlock: at(1, func(f *fakeDevice, m []byte) {
-			time.Sleep(pastBudget)
+			f.pass(pastBudget)
 			f.send(msg(rspDataBlock, m[6], stOK, 0, chainEmptyAck, nil))
 		}), budget: smallBudget, cause: []error{ErrBudgetExhausted}, not: []error{usbccid.ErrTimeout}},
 		{name: "short write on the second block", tune: func(f *fakeDevice, _, out int) {
@@ -353,7 +353,7 @@ func TestQALostInsideChains(t *testing.T) {
 			f.endless = msg(rspDataBlock, m[6], stTimeExt, 1, 0, nil)
 		}), budget: smallBudget, cause: []error{ErrBudgetExhausted}},
 		{name: "the budget runs out between the response blocks", onBlock: at(4, func(f *fakeDevice, m []byte) {
-			time.Sleep(pastBudget)
+			f.pass(pastBudget)
 			f.send(msg(rspDataBlock, m[6], stOK, 0, chainEnd, qaResp))
 		}), budget: smallBudget, cause: []error{ErrBudgetExhausted}, not: []error{usbccid.ErrTimeout}},
 	}

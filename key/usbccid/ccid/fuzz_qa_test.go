@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/truvity/atoom/key/usbccid"
+	"github.com/truvity/atoom/key/usbccid/usbccidtest"
 )
 
 // K. Fuzzing. The raw target of fuzz_test.go (FuzzAnswers) feeds arbitrary bytes. These two add what it cannot say:
@@ -154,14 +155,14 @@ func FuzzQAAnswersModel(f *testing.F) {
 			}
 		}
 		fk := newFake(descSpec{mpsIn: uint16(mps), mpsOut: uint16(mps), maxMsg: 300}, h) //nolint:gosec // small
-		r, err := Open(fk, Options{TransferTimeout: 20 * time.Millisecond})
+		r, err := Open(fk, Options{TransferTimeout: 20 * time.Millisecond, Clock: usbccidtest.NewDefaultClock()})
 		if err != nil {
 			t.Fatal(err)
 		}
 		if _, err := r.PowerOn(testBudget); err != nil {
 			t.Fatal(err)
 		}
-		resp, err := r.Transmit(apduSelect, 2*time.Second) // the fake never waits: only a stall of seconds can spend this
+		resp, err := r.Transmit(apduSelect, 2*time.Second) // the fake never waits, and the clock stands still: no budget is ever spent
 		assertWiped(t, r, "after the call")
 		if err == nil {
 			if len(resp) < 2 || len(resp) > MaxResponseAPDU {

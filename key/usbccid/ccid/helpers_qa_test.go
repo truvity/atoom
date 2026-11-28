@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/truvity/atoom/key/usbccid"
+	"github.com/truvity/atoom/key/usbccid/usbccidtest"
 )
 
 // This file holds what the QA tests share: made-up secrets, the check that no run of them is in an error text, the check that the
@@ -123,10 +124,9 @@ type lostCase struct {
 	not   []error
 }
 
-// A test that spends a budget on purpose uses smallBudget, and a fake that keeps a call for pastBudget to run it out. smallBudget is
-// large enough that a stall of the test process before the first call on the Port (a slow or busy machine) cannot use it up and turn
-// the expected loss of the session into a refusal that touched nothing; pastBudget is longer, and a sleep only ever lasts longer than
-// asked, so the budget is gone however slow the machine is.
+// A test that spends a budget on purpose uses smallBudget, and a fake that lets pastBudget of virtual time go by (f.pass) to run it out.
+// The clock moves only where the fake moves it, so no stall of the machine can use a budget up early or leave one unspent; pastBudget is
+// longer than smallBudget, so a call that has the one and finds the other gone has lost it with time to spare.
 const (
 	smallBudget = 100 * time.Millisecond
 	pastBudget  = 150 * time.Millisecond
@@ -137,6 +137,12 @@ const (
 func runLost(t *testing.T, c lostCase) {
 	t.Helper()
 	var armed atomic.Bool
+	// The Reader reads a virtual clock that the fake moves (a reply or a hook calls f.pass), so that a case that runs a budget out does
+	// it by moving time, and no case waits.
+	clk := usbccidtest.NewDefaultClock()
+	if c.opts.Clock == nil {
+		c.opts.Clock = clk
+	}
 	h := func(f *fakeDevice, m []byte) {
 		if armed.Load() && c.reply != nil {
 			c.reply(f, m)
@@ -145,6 +151,8 @@ func runLost(t *testing.T, c lostCase) {
 		cardHandler(echoSW)(f, m)
 	}
 	f := newFake(c.spec, h)
+	f.clk = clk
+	f.endlessTake = endlessReadTime // a device that never stops sending lets the budget run out
 	r, err := Open(f, c.opts)
 	if err != nil {
 		t.Fatal(err)

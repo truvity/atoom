@@ -4,11 +4,11 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"runtime"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
-	"time"
 
 	"github.com/truvity/atoom/key/usbccid"
 )
@@ -330,6 +330,28 @@ func TestQAConcurrentCallsTakeTurns(t *testing.T) {
 	_ = f
 }
 
+// parkedOnTheReaderLock counts the goroutines that are parked on a mutex inside the method of a Reader called method (and not inside
+// the Port): the stack of such a goroutine names the mutex wait in its first line and the method in its frames.
+func parkedOnTheReaderLock(method string) int {
+	buf := make([]byte, 1<<16)
+	for {
+		n := runtime.Stack(buf, true)
+		if n < len(buf) {
+			buf = buf[:n]
+			break
+		}
+		buf = make([]byte, 2*len(buf))
+	}
+	count := 0
+	for _, g := range strings.Split(string(buf), "\n\n") {
+		head, _, _ := strings.Cut(g, "\n")
+		if strings.Contains(head, "Mutex") && strings.Contains(g, "(*Reader)."+method+"(") && !strings.Contains(g, "fakeDevice") {
+			count++
+		}
+	}
+	return count
+}
+
 // Close waits for the call in progress, and the call that follows it is refused as closed; no call reaches the port after Close.
 func TestQACloseWaitsForTheCallInProgress(t *testing.T) {
 	r, f := openPowered(t, Options{}, cardHandler(echoSW))
@@ -345,12 +367,27 @@ func TestQACloseWaitsForTheCallInProgress(t *testing.T) {
 	closed, second := make(chan error, 1), make(chan error, 1)
 	go func() { closed <- r.Close() }()
 	go func() { _, err := r.Transmit(apduSelect, testBudget); second <- err }()
-	select {
-	case e := <-closed:
-		t.Fatalf("Close returned while a call was in progress: %v", e)
-	case e := <-second:
-		t.Fatalf("a second call ran while a call was in progress: %v", e)
-	case <-time.After(150 * time.Millisecond):
+	// Neither Close nor the second call may return while the call in progress holds the Reader: both wait for its lock. The test does not
+	// wait for a length of time: it yields until a goroutine is parked on that lock inside Close and another inside Transmit (as the
+	// stacks of the process show), and fails at once if either call has returned instead. A call that did not wait is never parked, so
+	// it has returned, or the bounded loop runs out.
+	for round := 0; ; round++ {
+		select {
+		case e := <-closed:
+			t.Fatalf("Close returned while a call was in progress: %v", e)
+		case e := <-second:
+			t.Fatalf("a second call ran while a call was in progress: %v", e)
+		default:
+		}
+		if parkedOnTheReaderLock("Close") > 0 && parkedOnTheReaderLock("Transmit") > 0 {
+			break
+		}
+		if round == 10000 {
+			t.Fatal("Close and the second call neither returned nor waited for the lock of the Reader")
+		}
+		for range 100 {
+			runtime.Gosched()
+		}
 	}
 	close(gate)
 	if err := <-transmit; err != nil {

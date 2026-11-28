@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/truvity/atoom/key/usbccid"
+	"github.com/truvity/atoom/key/usbccid/usbccidtest"
 )
 
 // The rules of one session against the late answers of an earlier one: the process-wide sequence counter and the drain of the IN pipe at
@@ -711,10 +712,13 @@ func TestQAPanicInTheDrain(t *testing.T) {
 
 func TestQADrainFaults(t *testing.T) {
 	t.Run("a budget that is gone makes no read and keeps the session", func(t *testing.T) {
+		clk := &scriptClock{Clock: usbccidtest.NewDefaultClock()}
 		f := newFake(descSpec{}, cardHandler(echoSW))
-		r, _ := Open(f, Options{})
+		r, _ := Open(f, Options{Clock: clk})
 		mark := f.mark()
+		clk.arm(2, time.Nanosecond, false) // the budget is spent at the reading that starts the drain
 		_, err := r.SlotStatus(time.Nanosecond)
+		clk.disarm()
 		if !errors.Is(err, ErrBudgetExhausted) || errors.Is(err, ErrSessionLost) {
 			t.Fatalf("err = %v, want ErrBudgetExhausted alone", err)
 		}
@@ -828,8 +832,9 @@ func TestQAEmptyReadAfterTheDrain(t *testing.T) {
 
 // The drain needs the budget of two whole windows (2 x DrainReadTimeout, or 2 x the transfer timeout when that is shorter) before its
 // first read. With less, the call is refused with ErrBudgetExhausted before any read, the session is NOT lost (nothing was read or
-// sent), the drain stays pending and happens, once, in the next call that has the budget. At the amount itself the call already has
-// microseconds spent, so it is refused as well (a slower machine only refuses more); well above it, the call goes through.
+// sent), the drain stays pending and happens, once, in the next call that has the budget. At the amount itself, with the clock standing
+// still, the call goes through; one nanosecond less is refused. (For the default transfer timeout clock_test.go holds the two edges
+// already, so they are only listed here for the short one.)
 func TestQADrainNeedsAWholeReadInTheBudget(t *testing.T) {
 	for _, c := range []struct {
 		name string
@@ -840,17 +845,20 @@ func TestQADrainNeedsAWholeReadInTheBudget(t *testing.T) {
 			name   string
 			budget time.Duration
 			ok     bool
+			edge   bool // an edge of the default transfer timeout is held by clock_test.go
 		}{
-			{"one window", c.to, false},
-			{"1 ns below two windows", 2*c.to - 1, false},
-			{"1 ms below two windows", 2*c.to - time.Millisecond, false},
-			{"at two windows", 2 * c.to, false},
-			// Well above, not at the edge: a call that is refused because the machine stalled for the margin is no proof of the rule.
-			{"100 ms above two windows", 2*c.to + 100*time.Millisecond, true},
+			{"one window", c.to, false, false},
+			{"1 ns below two windows", 2*c.to - 1, false, true},
+			{"1 ms below two windows", 2*c.to - time.Millisecond, false, false},
+			{"at two windows", 2 * c.to, true, true},
+			{"100 ms above two windows", 2*c.to + 100*time.Millisecond, true, false},
 		} {
+			if b.edge && c.xfer == 0 {
+				continue
+			}
 			t.Run(c.name+"/"+b.name, func(t *testing.T) {
 				f := newFake(descSpec{}, cardHandler(echoSW))
-				r, err := Open(f, Options{TransferTimeout: c.xfer})
+				r, err := Open(f, Options{TransferTimeout: c.xfer, Clock: usbccidtest.NewDefaultClock()})
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -887,23 +895,40 @@ func TestQADrainNeedsAWholeReadInTheBudget(t *testing.T) {
 }
 
 // A shortened drain read proves nothing: with a budget for the two windows at the start, a drain that has more to read is refused its
-// next read when the budget runs short in between (less than one window left), and the session is lost, not called quiet.
+// next read when the budget runs short in between (less than one window left), and the session is lost, not called quiet. The budget is
+// 100 ms and each of the three queued messages takes the clock a while to read: a read is made while a whole window is left (20 ms),
+// to the nanosecond, and refused with one nanosecond less.
 func TestQADrainDoesNotCallAShortenedReadQuiet(t *testing.T) {
-	f := newFake(descSpec{}, cardHandler(echoSW))
-	for i := range 3 {
-		f.send(msg(rspDataBlock, byte(i+1), stOK, 0, 0, qaResp))
+	const budget = 2*DrainReadTimeout + 60*time.Millisecond
+	for _, c := range []struct {
+		name  string
+		take  time.Duration // what one read takes
+		reads int           // reads made before the budget refuses the next
+	}{
+		// Reads begin at 0, 40 and 80 ms: the third has exactly one window (20 ms) left, which is enough, and the fourth finds the
+		// budget spent (120 ms).
+		{"a whole window left at the third read", 40 * time.Millisecond, 3},
+		// The third read would begin at 80 ms + 2 ns, with 20 ms less 2 ns left: refused, with the third item still in the pipe.
+		{"a window less two nanoseconds left at the third read", 40*time.Millisecond + 1, 2},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			clk := usbccidtest.NewDefaultClock()
+			f := newFake(descSpec{}, cardHandler(echoSW))
+			f.clk = clk
+			for i := range 3 {
+				f.send(msg(rspDataBlock, byte(i+1), stOK, 0, 0, qaResp))
+			}
+			f.onIn = func(f *fakeDevice) { f.pass(c.take) }
+			r, _ := Open(f, Options{Clock: clk})
+			_, err := r.SlotStatus(budget)
+			lostWith(t, err, ErrBudgetExhausted)
+			sameCalls(t, portCalls(f), reads(c.reads, DrainReadTimeout))
+			if r.drained || f.nOut != 0 {
+				t.Errorf("drained %v, writes %d", r.drained, f.nOut)
+			}
+			assertWiped(t, r, "after the drain that ran out of budget")
+		})
 	}
-	// Each drain read costs at least 40 ms of the budget, which holds the two windows with 60 ms to spare: the third read would begin
-	// after at least 80 ms, with less than a window left, so it is refused at any speed (a slower machine refuses an earlier one), and
-	// the pipe is never quiet: the third item (or the second) is still in it.
-	f.onIn = func(*fakeDevice) { time.Sleep(40 * time.Millisecond) }
-	r, _ := Open(f, Options{})
-	_, err := r.SlotStatus(2*DrainReadTimeout + 60*time.Millisecond)
-	lostWith(t, err, ErrBudgetExhausted)
-	if r.drained || f.nOut != 0 {
-		t.Errorf("drained %v, writes %d", r.drained, f.nOut)
-	}
-	assertWiped(t, r, "after the drain that ran out of budget")
 }
 
 // A typed nil *usbccid.Device is a nil Port, not a Port that panics at its first call.

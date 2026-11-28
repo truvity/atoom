@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/truvity/atoom/key/usbccid"
+	"github.com/truvity/atoom/key/usbccid/usbccidtest"
 )
 
 var apduSelect = []byte{0x00, 0xA4, 0x04, 0x00, 0x05, 0xA0, 0x00, 0x00, 0x03, 0x08}
@@ -366,7 +367,9 @@ func TestTimeExtensionWithDataAndIccBits(t *testing.T) {
 	}
 }
 
-// A wait with no end ends with the budget, and the session is lost.
+// A wait with no end ends with the budget, and the session is lost. Each read of the endless queue takes endlessReadTime of the virtual
+// clock, so the call ends exactly when the clock stands at the start plus the budget: not before (the deadline is the start plus
+// the budget), and with no read begun after it. Every read is asked for what is left, to the nanosecond.
 func TestBudgetEndsAnEndlessWait(t *testing.T) {
 	h := func(f *fakeDevice, m []byte) {
 		if m[0] != msgXfrBlock {
@@ -375,47 +378,73 @@ func TestBudgetEndsAnEndlessWait(t *testing.T) {
 		}
 		f.endless = msg(rspDataBlock, m[6], stTimeExt, 1, 0, nil)
 	}
-	r, f := openPowered(t, Options{}, h)
-	start := time.Now()
+	clk := usbccidtest.NewDefaultClock()
+	r, f := openPowered(t, Options{Clock: clk}, h)
+	f.endlessTake = endlessReadTime
+	start, n := clk.Now(), len(portCalls(f))
 	_, err := r.Transmit(apduSelect, smallBudget)
 	lostWith(t, err, ErrBudgetExhausted)
-	if d := time.Since(start); d > 2*time.Second {
-		t.Errorf("took %v", d)
+	if d := clk.Now().Sub(start); d != smallBudget {
+		t.Errorf("the clock moved by %v, want exactly the budget %v", d, smallBudget)
 	}
-	if time.Since(start) < smallBudget { // the deadline is not before the start plus the budget, so the call cannot end earlier
-		t.Errorf("returned after %v, before the budget", time.Since(start))
+	calls := callsSince(f, n)
+	if want := int(smallBudget / endlessReadTime); len(calls) != 1+want { // the write, then a read for every tick of the budget
+		t.Fatalf("%d Port calls, want %d", len(calls), 1+want)
+	}
+	for i, c := range calls[1:] {
+		if left := smallBudget - time.Duration(i)*endlessReadTime; c.to != left {
+			t.Errorf("read %d was given %v, want what was left of the budget: %v", i, c.to, left)
+		}
 	}
 	untouched(t, r, f, err)
 }
 
-// The time spent waiting for a person is part of the budget: the same wait that fits a large budget ends a small one.
+// The time spent waiting for a person is part of the budget: the same wait that fits a large budget ends a small one. The wait is ten
+// time extensions and then the answer, each read taking 15 ms of the virtual clock; the budget is checked before each read, so the call
+// fits when the tenth read ends with something left (a nanosecond is enough), and not when the tenth read ends on the budget.
 func TestTimeSpentWaitingCountsAgainstTheBudget(t *testing.T) {
+	const read = 15 * time.Millisecond
 	waits := func(f *fakeDevice, m []byte) {
 		if m[0] != msgXfrBlock {
 			cardHandler(echoSW)(f, m)
 			return
 		}
-		f.onIn = func(*fakeDevice) { time.Sleep(15 * time.Millisecond) }
+		f.onIn = func(f *fakeDevice) { f.pass(read) }
 		for range 10 {
 			f.send(msg(rspDataBlock, m[6], stTimeExt, 1, 0, nil))
 		}
 		f.send(msg(rspDataBlock, m[6], stOK, 0, 0, []byte{0x90, 0}))
 	}
-	r, _ := openPowered(t, Options{}, waits)
-	if got, err := r.Transmit(apduSelect, testBudget); err != nil || !bytes.Equal(got, []byte{0x90, 0}) {
-		t.Fatalf("large budget: %x %v", got, err)
+	for _, c := range []struct {
+		name   string
+		budget time.Duration
+		fits   bool
+	}{
+		{"a large budget", testBudget, true},
+		{"one nanosecond more than ten reads", 10*read + 1, true}, // the eleventh read begins with 1 ns left
+		{"exactly ten reads", 10 * read, false},                   // the eleventh read finds nothing left
+		{"a small budget", smallBudget, false},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			r, f := openPowered(t, Options{Clock: usbccidtest.NewDefaultClock()}, waits)
+			got, err := r.Transmit(apduSelect, c.budget)
+			if c.fits {
+				if err != nil || !bytes.Equal(got, []byte{0x90, 0}) {
+					t.Fatalf("%x %v", got, err)
+				}
+				return
+			}
+			lostWith(t, err, ErrBudgetExhausted)
+			untouched(t, r, f, err)
+		})
 	}
-	r, f := openPowered(t, Options{}, waits)
-	_, err := r.Transmit(apduSelect, smallBudget) // eleven reads of 15 ms or more: past the budget
-	lostWith(t, err, ErrBudgetExhausted)
-	untouched(t, r, f, err)
 }
 
 // The budget that runs out between two messages of a command ends the session before the next message goes out.
 func TestBudgetEndsBeforeTheNextTransfer(t *testing.T) {
-	r, f := openPowered(t, Options{}, func(f *fakeDevice, m []byte) {
+	r, f := openPowered(t, Options{Clock: usbccidtest.NewDefaultClock()}, func(f *fakeDevice, m []byte) {
 		if m[0] == msgXfrBlock {
-			time.Sleep(pastBudget)
+			f.pass(pastBudget)
 		}
 		cardHandler(echoSW)(f, m)
 	})
@@ -452,16 +481,19 @@ func TestTransferTimeoutsFollowTheOptions(t *testing.T) {
 	}
 
 	// The budget cuts a transfer timeout that is longer.
-	r, f = openPowered(t, Options{TransferTimeout: time.Minute}, cardHandler(echoSW))
+	r, f = openPowered(t, Options{TransferTimeout: time.Minute, Clock: usbccidtest.NewDefaultClock()}, cardHandler(echoSW))
 	f.mu.Lock()
 	f.timeouts = nil
 	f.mu.Unlock()
-	if _, err := r.Transmit(apduSelect, 2*time.Second); err != nil { // the fake answers at once: only a stall of seconds can spend this
+	if _, err := r.Transmit(apduSelect, 2*time.Second); err != nil { // the fake answers at once, and the clock stands still
 		t.Fatal(err)
 	}
+	if len(f.timeouts) != 2 {
+		t.Fatalf("%d transfers, want the write and the read", len(f.timeouts))
+	}
 	for _, d := range f.timeouts {
-		if d > 2*time.Second {
-			t.Fatalf("transfer timeout %v with budget 2s", d)
+		if d != 2*time.Second {
+			t.Fatalf("transfer timeout %v with budget 2s: the minute is cut to exactly the budget", d)
 		}
 	}
 }
@@ -473,13 +505,13 @@ func TestTimeoutKindsAreTold(t *testing.T) {
 			cardHandler(echoSW)(f, m)
 		}
 	}
-	r, _ := openPowered(t, Options{}, silent)
+	r, _ := openPowered(t, Options{Clock: usbccidtest.NewDefaultClock()}, silent)
 	_, err := r.Transmit(apduSelect, time.Second) // the transfer timeout (10 s) is cut to the budget; the silent fake times out at once
 	lostWith(t, err, usbccid.ErrTimeout)
 	if !errors.Is(err, ErrBudgetExhausted) {
 		t.Errorf("a timeout cut by the budget: %v", err)
 	}
-	r, _ = openPowered(t, Options{TransferTimeout: time.Millisecond}, silent)
+	r, _ = openPowered(t, Options{TransferTimeout: time.Millisecond, Clock: usbccidtest.NewDefaultClock()}, silent)
 	_, err = r.Transmit(apduSelect, testBudget)
 	lostWith(t, err, usbccid.ErrTimeout)
 	if errors.Is(err, ErrBudgetExhausted) {
@@ -659,12 +691,14 @@ func TestTruncatedMessageIsAProtocolError(t *testing.T) {
 		full := msg(rspDataBlock, m[6], stOK, 0, 0, bytes.Repeat([]byte{1}, 100))
 		f.sendRaw(full[:40])
 	}
-	r, f := openPowered(t, Options{}, h)
-	start := time.Now()
+	clk := usbccidtest.NewDefaultClock()
+	r, f := openPowered(t, Options{Clock: clk}, h)
+	start, before := clk.Now(), f.nIn
 	_, err := r.Transmit(apduSelect, testBudget)
 	lostWith(t, err, ErrProtocol)
-	if errors.Is(err, usbccid.ErrTimeout) || time.Since(start) > time.Second {
-		t.Errorf("a cut message should end at once: %v after %v", err, time.Since(start))
+	// At once: the read that met the short packet is the only read, nothing waits for the rest, and no time passed.
+	if errors.Is(err, usbccid.ErrTimeout) || f.nIn-before != 1 || !clk.Now().Equal(start) {
+		t.Errorf("a cut message should end at once: %v after %d reads and %v", err, f.nIn-before, clk.Now().Sub(start))
 	}
 	untouched(t, r, f, err)
 }
@@ -1010,7 +1044,7 @@ func TestNoErrorTextHoldsAnAPDU(t *testing.T) {
 			f.outFail = func(int) error { return fmt.Errorf("fake: %w", usbccid.ErrStalled) }
 		}},
 	} {
-		r, f := openPowered(t, Options{}, s.h)
+		r, f := openPowered(t, Options{Clock: usbccidtest.NewDefaultClock()}, s.h)
 		if s.tune != nil {
 			s.tune(f)
 		}
@@ -1980,7 +2014,9 @@ func TestSpentBudgetBeforeTheFirstPortCallKeepsTheSession(t *testing.T) {
 				continue // a Transmit needs a powered card, so it is never the first exchange
 			}
 			t.Run(fmt.Sprintf("%s first=%v", name, first), func(t *testing.T) {
-				r, f, err := openFake(Options{}, cardHandler(echoSW))
+				// The budget of 1 ns is spent at the second reading of the clock (see TestQABudgetSpentBeforeTheFirstPortCall).
+				clk := &scriptClock{Clock: usbccidtest.NewDefaultClock()}
+				r, f, err := openFake(Options{Clock: clk}, cardHandler(echoSW))
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -1991,7 +2027,9 @@ func TestSpentBudgetBeforeTheFirstPortCallKeepsTheSession(t *testing.T) {
 				}
 				powered, drained, mark := r.powered, r.drained, f.mark()
 				setSeq(41)
+				clk.arm(2, time.Nanosecond, false)
 				err = call(r)
+				clk.disarm()
 				if !errors.Is(err, ErrBudgetExhausted) || errors.Is(err, ErrSessionLost) {
 					t.Fatalf("err = %v, want ErrBudgetExhausted and not ErrSessionLost", err)
 				}

@@ -239,6 +239,12 @@ type fakeDevice struct {
 	shortOut bool
 	// onIn is called before each bulk-in call (with the lock held), for a test that moves time.
 	onIn func(f *fakeDevice)
+	// clk is the virtual clock of the Reader this fake serves (openFake sets it from Options.Clock, a test that calls Open itself sets
+	// it), and f.pass moves it. The fake never waits: a call that takes time moves this clock and nothing else. Nil: no time passes.
+	clk interface{ Advance(time.Duration) }
+	// endlessTake is the time that each read answered from the endless queue takes on that clock: a device that keeps sending while the
+	// budget runs out. Zero: such a read takes none, and a test that wants time to pass moves it in onIn.
+	endlessTake time.Duration
 
 	in       [][]byte // queued packets
 	endless  []byte   // when the queue is empty, queue this message again
@@ -356,7 +362,7 @@ func (f *fakeDevice) BulkIn(ep uint8, buf []byte, to time.Duration) (int, error)
 	}
 	if len(f.in) == 0 && f.endless != nil {
 		f.queueLocked(f.endless)
-		time.Sleep(time.Millisecond)
+		f.pass(f.endlessTake)
 	}
 	if len(f.in) == 0 {
 		return 0, fmt.Errorf("fake: bulk transfer on endpoint 0x%02X: %w", ep, usbccid.ErrTimeout)
@@ -375,6 +381,17 @@ func (f *fakeDevice) BulkIn(ep uint8, buf []byte, to time.Duration) (int, error)
 		}
 	}
 	return n, nil
+}
+
+// endlessReadTime is what the tests that run a budget out on an endless queue give endlessTake.
+const endlessReadTime = time.Millisecond
+
+// pass lets d of time go by on the virtual clock of the fake. It is safe with the lock of the fake held (the clock has its own lock).
+// A fake with no clock lets none go by.
+func (f *fakeDevice) pass(d time.Duration) {
+	if f.clk != nil {
+		f.clk.Advance(d)
+	}
 }
 
 // send queues one message, cut into packets. A message that is a multiple of the packet size is followed by a zero-length packet
@@ -470,6 +487,9 @@ const testBudget = 10 * time.Second
 // openFake opens a Reader on a fake with the default descriptors and the handler.
 func openFake(opt Options, h func(f *fakeDevice, m []byte)) (*Reader, *fakeDevice, error) {
 	f := newFake(descSpec{}, h)
+	if c, ok := opt.Clock.(interface{ Advance(time.Duration) }); ok {
+		f.clk = c
+	}
 	r, err := Open(f, opt)
 	return r, f, err
 }
