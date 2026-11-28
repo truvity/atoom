@@ -115,6 +115,7 @@ type qaStep struct {
 	qaReply
 	ran bool // a command ran (it was not refused before it was read, and it was not a part of a chain)
 	ins byte // of the command that ran, after a chain joined it
+	p1  byte
 	p2  byte
 	n   int // the length of its data, after a chain joined it
 }
@@ -239,7 +240,7 @@ func (m *qaModel) step(c qaCmd, ok bool) (s qaStep) {
 			c.data = append(append([]byte(nil), ch.data...), c.data...)
 		}
 	}
-	s.ran, s.ins, s.p2, s.n = true, c.ins, c.p2, len(c.data)
+	s.ran, s.ins, s.p1, s.p2, s.n = true, c.ins, c.p1, c.p2, len(c.data)
 	s.qaReply = m.exec(c)
 	return s
 }
@@ -261,8 +262,15 @@ func (m *qaModel) exec(c qaCmd) qaReply {
 			return m.shape(c, binary.BigEndian.AppendUint32(nil, m.serial))
 		}
 	case 0x20:
-		if c.p1 != 0 || c.p2 != 0x80 {
+		if (c.p1 != 0 && c.p1 != 0xFF) || c.p2 != 0x80 {
 			break
+		}
+		if c.p1 == 0xFF { // SP 800-73-4: the reset of the security status: no data, no try spent, 9000 whatever the counter; with data 6700 (R8)
+			if len(d) != 0 {
+				return qaReply{0x6700, nil}
+			}
+			m.verified = false
+			return qaReply{0x9000, nil}
 		}
 		if len(d) == 0 {
 			if m.verified {
@@ -387,10 +395,14 @@ func (g *qaGen) pinValue() string {
 		cur = g.m.pin.val
 	}
 	switch x := g.r.IntN(100); {
-	case x < 60:
+	case x < 55:
 		return cur
-	case x < 75:
+	case x < 70:
 		return g.prev
+	case x < 75: // a block whose value, with the padding off, is shorter than 6 bytes: a wrong value that spends a try (R8)
+		return g.value(1 + g.r.IntN(5))
+	case x < 77:
+		return "\xff\xff\xff\xff\xff\xff\xff\xff"
 	default:
 		return g.value(6 + g.r.IntN(3))
 	}
@@ -476,6 +488,14 @@ func (g *qaGen) simple() []qaOp {
 		p := g.pinValue()
 		return g.one(g.encode(0, 0x20, 0, 0x80, pad(p)))
 	case x < 34:
+		switch g.r.IntN(4) {
+		case 0: // the reset of the security status, with no data, with a PIN, with another reference, with another P1
+			return g.one(g.encode(0, 0x20, 0xFF, 0x80, nil))
+		case 1:
+			return g.one(g.encode(0, 0x20, 0xFF, 0x80, pad(g.pinValue())))
+		case 2:
+			return g.one(g.encode(0, 0x20, []byte{0xFF, 0xFE, 0x01}[g.r.IntN(3)], []byte{0x80, 0x81}[g.r.IntN(2)], nil))
+		}
 		return g.one(g.encode(0, 0x20, 0, 0x80, nil))
 	case x < 48:
 		ref, data := g.changeData()
@@ -650,6 +670,7 @@ func qaIsTripwire(ins byte) bool { return ins == 0xFA || ins == 0xFB || ins == 0
 func qaSW(resp []byte) int { return int(resp[len(resp)-2])<<8 | int(resp[len(resp)-1]) }
 
 type qaRun struct {
+	stats   map[string]int // what the sequence reached that the coverage test asks for
 	ops     []qaOp
 	answers [][]byte // nil for a card that is off, and for the ops that are not an exchange
 }
@@ -660,7 +681,7 @@ func qaDrive(t *testing.T, seed uint64, o Options, steps int) qaRun {
 	c := New(o)
 	m := newQaModel(o)
 	g := newQaGen(seed, m)
-	var run qaRun
+	run := qaRun{stats: map[string]int{}}
 	var prevLog []Entry
 	entries, forbidden := 0, 0
 	okVerify := false // a right VERIFY answered 9000 in this session since the last SELECT answered 9000
@@ -714,7 +735,28 @@ func qaDrive(t *testing.T, seed uint64, o Options, steps int) qaRun {
 					forbidden++
 				}
 				cmd, ok := qaParse(op.apdu)
+				wasVerified, wasBlocked := m.verified, m.pin.left == 0
 				step = m.step(cmd, ok)
+				if qaSW(resp)>>8 == 0x6C { // R24: an Le shorter than the answer is cut and followed by 61xx, never 6Cxx
+					fail(i, "answer %04X to %x", qaSW(resp), op.apdu)
+				}
+				if step.ran && step.ins == 0x20 && step.p1 == 0 && step.n == 8 && len(cmd.data) == 8 && len(qaUnpad(cmd.data)) < 6 && !wasBlocked && qaSW(resp)>>4 == 0x63C {
+					run.stats["a VERIFY block shorter than 6 bytes, a wrong value"]++ // R8
+				}
+				if step.ran && step.ins == 0x20 && step.p1 == 0xFF && step.p2 == 0x80 {
+					kind := map[bool]string{false: "an unverified PIN", true: "a verified PIN"}[wasVerified]
+					if wasBlocked {
+						kind = "a blocked PIN"
+					}
+					if step.n == 0 {
+						run.stats["reset of "+kind]++
+						if qaSW(resp) != 0x9000 || c.st().pin.left != pin0.left {
+							fail(i, "the reset of %s answered %04X, counter %d to %d", kind, qaSW(resp), pin0.left, c.st().pin.left)
+						}
+					} else {
+						run.stats["reset with data, "+kind]++
+					}
+				}
 				if step.sw >= 0 {
 					if got := qaSW(resp); got != step.sw {
 						fail(i, "SW %04X, the model says %04X, for %x", got, step.sw, op.apdu)
@@ -723,7 +765,7 @@ func qaDrive(t *testing.T, seed uint64, o Options, steps int) qaRun {
 						fail(i, "data %x, the model says %x, for %x", resp[:len(resp)-2], step.data, op.apdu)
 					}
 				}
-				if step.ran && step.ins == 0xA4 && qaSW(resp) == 0x9000 {
+				if step.ran && ((step.ins == 0xA4 && qaSW(resp) == 0x9000) || (step.ins == 0x20 && step.p1 == 0xFF && step.p2 == 0x80 && step.n == 0)) {
 					okVerify = false
 				}
 				if step.ran && step.ins == 0x20 && step.n == 8 && qaSW(resp) == 0x9000 {
@@ -734,7 +776,7 @@ func qaDrive(t *testing.T, seed uint64, o Options, steps int) qaRun {
 					before, after qaRefState
 					touched       bool
 				}{
-					{qaRefState{left: int(pin0.left), max: int(pin0.max)}, qaRefState{left: int(c.st().pin.left), max: int(c.st().pin.max)}, step.ran && (step.ins == 0x20 || (step.ins == 0x24 && step.p2 == 0x80))},
+					{qaRefState{left: int(pin0.left), max: int(pin0.max)}, qaRefState{left: int(c.st().pin.left), max: int(c.st().pin.max)}, step.ran && ((step.ins == 0x20 && step.p1 != 0xFF) || (step.ins == 0x24 && step.p2 == 0x80))},
 					{qaRefState{left: int(puk0.left), max: int(puk0.max)}, qaRefState{left: int(c.st().puk.left), max: int(c.st().puk.max)}, step.ran && step.ins == 0x24 && step.p2 == 0x81},
 				} {
 					name := []string{"PIN", "PUK"}[k]
@@ -926,10 +968,14 @@ func TestQaTheSequencesReachWhatTheyAreMeantToReach(t *testing.T) {
 				seen["63Cx"]++
 			}
 		}
+		for k, n := range run.stats {
+			seen[k] += n
+		}
 		seen["forbidden"] += len(c.Forbidden())
 		seen["entries"] += len(c.Log())
 	}
-	for _, k := range []string{"blocked PIN", "changed PIN", "right VERIFY", "chained part", "61xx", "6A82", "6700", "6E00", "6985", "63Cx", "forbidden"} {
+	for _, k := range []string{"blocked PIN", "changed PIN", "right VERIFY", "chained part", "61xx", "6A82", "6700", "6E00", "6985", "63Cx", "forbidden",
+		"reset of a verified PIN", "reset of an unverified PIN", "reset of a blocked PIN", "reset with data, a verified PIN", "a VERIFY block shorter than 6 bytes, a wrong value"} {
 		if seen[k] == 0 {
 			t.Errorf("no sequence reached %q; seen: %v", k, seen)
 		}
