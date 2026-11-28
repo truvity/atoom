@@ -22,7 +22,7 @@ import (
 // edges of the clock and the faults of the table (clock_edges_test.go) do not reach: what is collected as "the clock refuses it", and what is
 // then done with it. The time is always given through the seam (BuildFromAt); the clock of the machine is never read.
 
-// cotClassify reports which of the four classes of refusal that this decision chooses between the error belongs to.
+// cotClassify reports the classes, of the four this decision chooses between, that the error belongs to.
 func cotClassify(err error) []string {
 	var got []string
 	for name, class := range map[string]error{"ErrClock": pivattest.ErrClock, "ErrPinTable": pivattest.ErrPinTable, "ErrAdmission": pivattest.ErrAdmission, "ErrNoAnchor": pivattest.ErrNoAnchor} {
@@ -77,7 +77,7 @@ func cotRefusedForTheClock(t *testing.T, c *x509.Certificate, at time.Time) {
 	}
 }
 
-// cotPKI is a test PKI made for a window, with its files and a table of its own (root, the intermediate between, the PIV intermediate).
+// cotPKIFiles is a test PKI made for a window, with its files and a table of its own (root, the intermediate between, the PIV intermediate).
 type cotPKIFiles struct {
 	p            *attesttest.PKI
 	root, bundle []byte
